@@ -1,0 +1,757 @@
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'package:correctv1/analytics/analytics_screen.dart';
+import 'package:correctv1/services/session_database.dart';
+import 'package:correctv1/services/therapy_pattern_names.dart';
+
+/// Thin read layer over the local `sessions` SQLite table.
+///
+/// All queries are scoped to the current `auth.uid()`. The local database is
+/// the source of truth for reads; background sync pushes data to Supabase.
+class SessionRepository {
+  SessionRepository({SupabaseClient? client})
+    : _client = client ?? Supabase.instance.client;
+
+  final SupabaseClient _client;
+
+  /// Convenience: this week only (Monday 00:00 local -> now).
+  Future<List<SessionData>> fetchThisWeek({String? liveSessionId}) =>
+      fetchByPeriod('week', liveSessionId: liveSessionId);
+
+  /// Load a single session by local db id (what LiveSessionRecorder exposes
+  /// via `DeviceManager.activeSessionId`). Returns null when the row isn't
+  /// present locally (e.g. the recorder dropped it for being too short).
+  Future<SessionData?> fetchById(String id) async {
+    final row = await SessionDatabase.instance.getById(id);
+    if (row == null) return null;
+    return _rowToSession(row, 0);
+  }
+
+  /// period ∈ {'week', 'month', 'all'}.
+  /// Unknown periods fall back to 'all' so the UI never breaks on a typo.
+  Future<List<SessionData>> fetchByPeriod(
+    String period, {
+    String? liveSessionId,
+  }) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return [];
+
+    await _ensureCacheWarmed(userId);
+
+    final since = _periodStart(period);
+    final rows = await SessionDatabase.instance.fetchByUser(
+      userId,
+      since: since,
+    );
+    return _mapRows(rows, liveSessionId: liveSessionId);
+  }
+
+  /// Summary stats for the current week.
+  Future<Map<String, dynamic>> fetchWeeklyStats() async {
+    final now = DateTime.now();
+    final thisWeekStart = _startOfWeek(now);
+    final lastWeekStart = thisWeekStart.subtract(const Duration(days: 7));
+
+    final thisWeekRows = await _fetchRowsBetween(thisWeekStart, now);
+    final lastWeekRows = await _fetchRowsBetween(lastWeekStart, thisWeekStart);
+
+    final thisWeek = _aggregate(thisWeekRows);
+    final lastWeek = _aggregate(lastWeekRows);
+
+    final trackedDelta =
+        thisWeek.trackedHoursNumeric - lastWeek.trackedHoursNumeric;
+
+    return {
+      'goodPosturePct': thisWeek.goodPosturePct,
+      'trackedHours': thisWeek.trackedHours,
+      'sessionCount': thisWeek.sessionCount,
+      'therapyMinutes': thisWeek.therapyMinutes,
+      'deltaVsLastWeek': {
+        'goodPosturePct': thisWeek.goodPosturePct - lastWeek.goodPosturePct,
+        'trackedHours': double.parse(trackedDelta.toStringAsFixed(1)),
+        'sessionCount': thisWeek.sessionCount - lastWeek.sessionCount,
+        'therapyMinutes': thisWeek.therapyMinutes - lastWeek.therapyMinutes,
+      },
+    };
+  }
+
+  /// Today-vs-yesterday summary driven by local `sessions` rows (Supabase
+  /// mirrors them). No separate daily-score table needed.
+  Future<TodayStats> fetchTodayStats() async {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final tomorrowStart = todayStart.add(const Duration(days: 1));
+    final yesterdayStart = todayStart.subtract(const Duration(days: 1));
+
+    final todayRows = await _fetchRowsBetween(todayStart, tomorrowStart);
+    final yesterdayRows = await _fetchRowsBetween(yesterdayStart, todayStart);
+
+    final today = _summarizeDay(todayRows);
+    final yesterday = _summarizeDay(yesterdayRows);
+
+    return TodayStats(
+      todayPct: today.postureDurationSec > 0 ? today.posturePct : 0,
+      todayPostureDurationSec: today.postureDurationSec,
+      todayTherapyDurationSec: today.therapyDurationSec,
+      todaySessionCount: today.sessionCount,
+      todayTrackedSec: today.trackedSec,
+      yesterdayPct: yesterday.postureDurationSec > 0
+          ? yesterday.posturePct
+          : 0,
+      yesterdayHasPostureData: yesterday.postureDurationSec > 0,
+      yesterdayPostureDurationSec: yesterday.postureDurationSec,
+      yesterdayTherapyDurationSec: yesterday.therapyDurationSec,
+      yesterdaySessionCount: yesterday.sessionCount,
+      yesterdayTrackedSec: yesterday.trackedSec,
+      yesterdayHasTrackedData: yesterday.trackedSec > 0,
+    );
+  }
+
+  _DaySummary _summarizeDay(List<Map<String, dynamic>> rows) {
+    int postureDur = 0;
+    int postureWrong = 0;
+    int therapyDur = 0;
+    int trackedSec = 0;
+    int sessionCount = 0;
+    for (final row in rows) {
+      final dur = _asInt(row['duration_sec']);
+      if (dur <= 0) continue;
+      sessionCount++;
+      trackedSec += dur;
+      final type = row['type']?.toString();
+      if (type == 'posture') {
+        postureDur += dur;
+        postureWrong += _asInt(row['wrong_dur_sec']);
+      } else if (type == 'therapy') {
+        therapyDur += dur;
+      }
+    }
+    final pct = postureDur > 0
+        ? (100 - (postureWrong / postureDur * 100)).round().clamp(0, 100)
+        : 0;
+    return _DaySummary(
+      posturePct: pct,
+      postureDurationSec: postureDur,
+      therapyDurationSec: therapyDur,
+      trackedSec: trackedSec,
+      sessionCount: sessionCount,
+    );
+  }
+
+  /// Current streak: consecutive "streak days" (6 AM boundary) with at least
+  /// one completed session. Sessions between 00:00 and 05:59:59 are credited
+  /// to the previous streak day.
+  ///
+  /// Returns (currentStreak, todayActive):
+  ///   - currentStreak: number of consecutive active streak days ending at
+  ///     today's (or yesterday's, if today has no activity yet) streak day.
+  ///   - todayActive: whether the current streak day already has a session.
+  Future<StreakStats> fetchStreakStats() async {
+    final now = DateTime.now();
+    // Pull a generous window — cheap locally, avoids edge cases for long
+    // streaks. 400 days covers >1 year of continuous use.
+    final windowStart = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(days: 400));
+    final rows = await _fetchRowsBetween(
+      windowStart,
+      now.add(const Duration(days: 1)),
+    );
+
+    final activeDays = <DateTime>{};
+    for (final row in rows) {
+      final dur = _asInt(row['duration_sec']);
+      if (dur <= 0) continue;
+      final ts = _parseTs(row['start_ts'])?.toLocal();
+      if (ts == null) continue;
+      activeDays.add(_streakDayOf(ts));
+    }
+
+    final todayStreakDay = _streakDayOf(now);
+    final todayActive = activeDays.contains(todayStreakDay);
+
+    // Count back from today (or yesterday if today not active yet).
+    DateTime cursor = todayActive
+        ? todayStreakDay
+        : todayStreakDay.subtract(const Duration(days: 1));
+    int streak = 0;
+    while (activeDays.contains(cursor)) {
+      streak++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+
+    final highest = await _syncStreakToSupabase(
+      currentStreak: streak,
+      todayStreakDay: todayStreakDay,
+    );
+
+    return StreakStats(
+      currentStreak: streak,
+      highestStreak: highest,
+      todayActive: todayActive,
+      todayStreakDay: todayStreakDay,
+    );
+  }
+
+  /// Upserts the user's current streak into `user_streaks`, bumping
+  /// `highest_streak` when the current run exceeds it. Returns the stored
+  /// highest (or local fallback on network failure).
+  Future<int> _syncStreakToSupabase({
+    required int currentStreak,
+    required DateTime todayStreakDay,
+  }) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return currentStreak;
+
+    try {
+      final existing = await _client
+          .from('user_streaks')
+          .select('highest_streak')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      final previousHighest =
+          (existing?['highest_streak'] as num?)?.toInt() ?? 0;
+      final newHighest = currentStreak > previousHighest
+          ? currentStreak
+          : previousHighest;
+
+      await _client.from('user_streaks').upsert({
+        'user_id': userId,
+        'current_streak': currentStreak,
+        'highest_streak': newHighest,
+        'last_active_day':
+            '${todayStreakDay.year.toString().padLeft(4, '0')}-${todayStreakDay.month.toString().padLeft(2, '0')}-${todayStreakDay.day.toString().padLeft(2, '0')}',
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id');
+
+      return newHighest;
+    } catch (e) {
+      debugPrint('SessionRepository: _syncStreakToSupabase failed: $e');
+      return currentStreak;
+    }
+  }
+
+  /// Normalizes a local timestamp to its "streak day" (the calendar date at
+  /// 6 AM local). Anything before 6 AM rolls back to the prior date.
+  DateTime _streakDayOf(DateTime localTs) {
+    final shifted = localTs.subtract(const Duration(hours: 6));
+    return DateTime(shifted.year, shifted.month, shifted.day);
+  }
+
+  /// Daily good-posture % for the last [days] calendar days (oldest first).
+  Future<List<double>> fetchDailyScores(int days) async {
+    final now = DateTime.now();
+    final start = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(Duration(days: days - 1));
+
+    final rows = await _fetchRowsBetween(start, now, typeFilter: 'posture');
+
+    final dailyDur = List<int>.filled(days, 0);
+    final dailyWrong = List<int>.filled(days, 0);
+
+    for (final row in rows) {
+      final ts = _parseTs(row['start_ts']);
+      if (ts == null) continue;
+      final local = ts.toLocal();
+      final day = DateTime(local.year, local.month, local.day);
+      final idx = day
+          .difference(DateTime(start.year, start.month, start.day))
+          .inDays;
+      if (idx < 0 || idx >= days) continue;
+      dailyDur[idx] += _asInt(row['duration_sec']);
+      dailyWrong[idx] += _asInt(row['wrong_dur_sec']);
+    }
+
+    return List<double>.generate(days, (i) {
+      final dur = dailyDur[i];
+      if (dur <= 0) return 0;
+      final pct = (100 - (dailyWrong[i] / dur * 100)).clamp(0, 100);
+      return pct.toDouble();
+    });
+  }
+
+  // ── internals ──────────────────────────────────────────────────────────────
+
+  bool _cacheWarmed = false;
+
+  Future<void> _ensureCacheWarmed(String userId) async {
+    if (_cacheWarmed) return;
+    _cacheWarmed = true;
+
+    final hasLocal = await SessionDatabase.instance.hasDataForUser(userId);
+    if (hasLocal) return;
+
+    // First time: pull existing sessions from Supabase into local cache.
+    try {
+      final rows = await _client
+          .from('sessions')
+          .select()
+          .order('start_ts', ascending: false);
+      for (final row in (rows as List<dynamic>)) {
+        await SessionDatabase.instance.upsertFromRemote(
+          row as Map<String, dynamic>,
+        );
+      }
+      debugPrint('SessionRepository: cache warmed with ${rows.length} rows');
+    } catch (e) {
+      debugPrint('SessionRepository: cache warm failed (offline?): $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchRowsBetween(
+    DateTime startInclusive,
+    DateTime endExclusive, {
+    String? typeFilter,
+  }) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return [];
+
+    await _ensureCacheWarmed(userId);
+
+    return SessionDatabase.instance.fetchBetween(
+      userId,
+      startInclusive,
+      endExclusive,
+      typeFilter: typeFilter,
+    );
+  }
+
+  DateTime? _periodStart(String period) {
+    final now = DateTime.now();
+    switch (period) {
+      case 'week':
+        return _startOfWeek(now);
+      case 'month':
+        return DateTime(now.year, now.month, 1);
+      case 'all':
+      default:
+        return null;
+    }
+  }
+
+  DateTime _startOfWeek(DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    return today.subtract(Duration(days: today.weekday - 1));
+  }
+
+  List<SessionData> _mapRows(List<dynamic> rows, {String? liveSessionId}) {
+    final out = <SessionData>[];
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i] as Map<String, dynamic>;
+      final mapped = _rowToSession(row, i, liveSessionId: liveSessionId);
+      if (mapped != null) out.add(mapped);
+    }
+    return out;
+  }
+
+  SessionData? _rowToSession(
+    Map<String, dynamic> row,
+    int index, {
+    String? liveSessionId,
+  }) {
+    final typeStr = row['type']?.toString() ?? '';
+    final isPosture = typeStr == 'posture';
+    final type = isPosture ? SessionType.posture : SessionType.therapy;
+
+    final durationSec = _asInt(row['duration_sec']);
+    if (durationSec < 0) return null;
+
+    final startTs = _parseTs(row['start_ts'])?.toLocal();
+    if (startTs == null && durationSec == 0) return null;
+    final wrongDurSec = isPosture ? _asInt(row['wrong_dur_sec']) : null;
+
+    final score = isPosture ? _scoreFrom(durationSec, wrongDurSec ?? 0) : null;
+
+    final pattern = isPosture ? null : _asIntOrNull(row['therapy_pattern']);
+    final alerts = isPosture ? _asIntOrNull(row['wrong_count']) : null;
+    final dbId = (row['remote_id'] ?? row['id'])?.toString();
+    final tsSynced = row['ts_synced'] == true || row['ts_synced'] == 1;
+    final syncStatus = row['sync_status'];
+    final cloudSynced = syncStatus == 1;
+
+    final postureEvents = isPosture
+        ? _parsePostureEvents(row['posture_events'])
+        : null;
+    final therapyPatterns = isPosture
+        ? null
+        : _parseTherapyPatterns(row['therapy_patterns']);
+    final therapyPatternEvents = isPosture
+        ? null
+        : _parseTherapyPatternEvents(
+            row['therapy_pattern_events'],
+            therapyPatterns,
+            pattern,
+            durationSec,
+          );
+
+    return SessionData(
+      id: index,
+      dbId: dbId,
+      type: type,
+      name: isPosture ? 'Posture training' : 'Vibration therapy',
+      time: _formatRelativeTime(startTs),
+      date: _formatShortDate(startTs),
+      duration: _formatDuration(durationSec),
+      durationSec: durationSec,
+      alerts: alerts,
+      score: score,
+      pattern: pattern,
+      wrongDurSec: wrongDurSec,
+      isLive: dbId != null && dbId == liveSessionId,
+      tsSynced: tsSynced,
+      cloudSynced: cloudSynced,
+      startTs: startTs,
+      postureEvents: postureEvents,
+      therapyPatterns: therapyPatterns,
+      therapyPatternEvents: therapyPatternEvents,
+    );
+  }
+
+  List<PostureEvent>? _parsePostureEvents(dynamic raw) {
+    if (raw is! List) return null;
+    final out = <PostureEvent>[];
+    for (final entry in raw) {
+      if (entry is Map) {
+        out.add(PostureEvent.fromJson(entry.cast<String, dynamic>()));
+      }
+    }
+    return out.isEmpty ? null : out;
+  }
+
+  List<int>? _parseTherapyPatterns(dynamic raw) {
+    if (raw is! List) return null;
+    final out = <int>[];
+    for (final entry in raw) {
+      if (entry is num) {
+        out.add(entry.toInt());
+      } else {
+        final parsed = int.tryParse(entry?.toString() ?? '');
+        if (parsed != null) out.add(parsed);
+      }
+    }
+    if (out.isEmpty) return null;
+    return _normalizeTherapyPatterns(out);
+  }
+
+  List<TherapyPatternEvent>? _parseTherapyPatternEvents(
+    dynamic raw,
+    List<int>? fallbackPatterns,
+    int? singlePattern,
+    int durationSec,
+  ) {
+    if (raw is List) {
+      final out = <TherapyPatternEvent>[];
+      for (final entry in raw) {
+        if (entry is Map) {
+          final event = TherapyPatternEvent.fromJson(
+            entry.cast<String, dynamic>(),
+          );
+          if (event.patternIndex >= 0) out.add(event);
+        }
+      }
+      if (out.isNotEmpty) {
+        out.sort((a, b) => a.startOffsetSec.compareTo(b.startOffsetSec));
+        final normalizedEvents = _playedTherapyPatternEvents(
+          _normalizeTherapyPatternEvents(out),
+          durationSec,
+        );
+        if (fallbackPatterns == null ||
+            normalizedEvents.length >= fallbackPatterns.length) {
+          return normalizedEvents;
+        }
+      }
+    }
+
+    final patterns =
+        fallbackPatterns ??
+        (singlePattern == null ? null : <int>[singlePattern]);
+    if (patterns == null || patterns.isEmpty) return null;
+
+    final safeDuration = durationSec.clamp(0, 1 << 30).toInt();
+    if (safeDuration <= 0) {
+      return [
+        for (var i = 0; i < patterns.length; i++)
+          TherapyPatternEvent(
+            patternIndex: patterns[i],
+            startOffsetSec: 0,
+            durationSec: 0,
+          ),
+      ];
+    }
+
+    var cursor = 0;
+    final events = <TherapyPatternEvent>[];
+    for (var i = 0; i < patterns.length; i++) {
+      final remaining = (safeDuration - cursor).clamp(0, 1 << 30).toInt();
+      if (remaining <= 0) break;
+
+      final dur = remaining.clamp(0, 60).toInt();
+      events.add(
+        TherapyPatternEvent(
+          patternIndex: patterns[i],
+          startOffsetSec: cursor,
+          durationSec: dur,
+        ),
+      );
+      cursor += dur;
+    }
+    return events.isEmpty ? null : events;
+  }
+
+  List<int> _normalizeTherapyPatterns(List<int> patterns) {
+    final normalized = <int>[];
+    for (final pattern in patterns) {
+      final value = therapyPatternIndexFromDeviceNumber(pattern);
+      if (value != null) normalized.add(value);
+    }
+    return normalized.isEmpty ? patterns : normalized;
+  }
+
+  List<TherapyPatternEvent> _normalizeTherapyPatternEvents(
+    List<TherapyPatternEvent> events,
+  ) {
+    final normalized = <TherapyPatternEvent>[];
+    for (final event in events) {
+      final pattern = therapyPatternIndexFromDeviceNumber(event.patternIndex);
+      if (pattern == null) continue;
+      normalized.add(
+        TherapyPatternEvent(
+          patternIndex: pattern,
+          startOffsetSec: event.startOffsetSec,
+          durationSec: event.durationSec,
+        ),
+      );
+    }
+    return normalized.isEmpty ? events : normalized;
+  }
+
+  List<TherapyPatternEvent> _playedTherapyPatternEvents(
+    List<TherapyPatternEvent> events,
+    int durationSec,
+  ) {
+    final safeDuration = durationSec.clamp(0, 1 << 30).toInt();
+    final played = <TherapyPatternEvent>[];
+    for (final event in events) {
+      if (event.durationSec <= 0 || event.startOffsetSec >= safeDuration) {
+        continue;
+      }
+      final remaining = (safeDuration - event.startOffsetSec)
+          .clamp(0, 1 << 30)
+          .toInt();
+      final duration = event.durationSec > remaining
+          ? remaining
+          : event.durationSec;
+      if (duration <= 0) continue;
+      played.add(
+        TherapyPatternEvent(
+          patternIndex: event.patternIndex,
+          startOffsetSec: event.startOffsetSec,
+          durationSec: duration,
+        ),
+      );
+    }
+    return played;
+  }
+
+  int _scoreFrom(int durationSec, int wrongDurSec) {
+    if (durationSec <= 0) return 100;
+    return (100 - (wrongDurSec / durationSec * 100)).round().clamp(0, 100);
+  }
+
+  _Aggregate _aggregate(List<Map<String, dynamic>> rows) {
+    int totalPostureDur = 0;
+    int totalWrongDur = 0;
+    int therapyMinutes = 0;
+    int trackedSec = 0;
+
+    for (final row in rows) {
+      final type = row['type']?.toString() ?? '';
+      final dur = _asInt(row['duration_sec']);
+      trackedSec += dur;
+      if (type == 'posture') {
+        totalPostureDur += dur;
+        totalWrongDur += _asInt(row['wrong_dur_sec']);
+      } else if (type == 'therapy') {
+        therapyMinutes += (dur / 60).round();
+      }
+    }
+
+    final pct = totalPostureDur > 0
+        ? (100 - (totalWrongDur / totalPostureDur * 100)).round().clamp(0, 100)
+        : 0;
+
+    final trackedHoursNum = trackedSec / 3600.0;
+    return _Aggregate(
+      goodPosturePct: pct,
+      trackedHours: trackedHoursNum.toStringAsFixed(1),
+      trackedHoursNumeric: trackedHoursNum,
+      sessionCount: rows.length,
+      therapyMinutes: therapyMinutes,
+    );
+  }
+
+  DateTime? _parseTs(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    return DateTime.tryParse(value.toString());
+  }
+
+  int _asInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  int? _asIntOrNull(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+
+  String _formatDuration(int durationSec) {
+    if (durationSec <= 0) return '0s';
+    if (durationSec < 60) return '${durationSec}s';
+    final minutes = durationSec ~/ 60;
+    final seconds = durationSec % 60;
+    if (seconds == 0) return '$minutes min';
+    return '$minutes min ${seconds}s';
+  }
+
+  String _formatShortDate(DateTime? ts) {
+    if (ts == null) return '—';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[ts.month - 1]} ${ts.day}';
+  }
+
+  String _formatRelativeTime(DateTime? ts) {
+    if (ts == null) return '—';
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tsDay = DateTime(ts.year, ts.month, ts.day);
+    final diffDays = today.difference(tsDay).inDays;
+
+    final hour = ts.hour == 0 ? 12 : (ts.hour > 12 ? ts.hour - 12 : ts.hour);
+    final minute = ts.minute.toString().padLeft(2, '0');
+    final ampm = ts.hour >= 12 ? 'PM' : 'AM';
+    final hhmm = '$hour:$minute $ampm';
+
+    if (diffDays == 0) return 'Today · $hhmm';
+    if (diffDays == 1) return 'Yesterday · $hhmm';
+    return '${_formatShortDate(ts)} · $hhmm';
+  }
+}
+
+class StreakStats {
+  const StreakStats({
+    required this.currentStreak,
+    required this.highestStreak,
+    required this.todayActive,
+    required this.todayStreakDay,
+  });
+
+  final int currentStreak;
+  final int highestStreak;
+  final bool todayActive;
+  final DateTime todayStreakDay;
+
+  bool get isNewRecord =>
+      currentStreak > 0 && currentStreak >= highestStreak;
+}
+
+class TodayStats {
+  const TodayStats({
+    required this.todayPct,
+    required this.todayPostureDurationSec,
+    required this.todayTherapyDurationSec,
+    required this.todaySessionCount,
+    required this.todayTrackedSec,
+    required this.yesterdayPct,
+    required this.yesterdayHasPostureData,
+    required this.yesterdayPostureDurationSec,
+    required this.yesterdayTherapyDurationSec,
+    required this.yesterdaySessionCount,
+    required this.yesterdayTrackedSec,
+    required this.yesterdayHasTrackedData,
+  });
+
+  final int todayPct;
+  final int todayPostureDurationSec;
+  final int todayTherapyDurationSec;
+  final int todaySessionCount;
+  final int todayTrackedSec;
+  final int yesterdayPct;
+  final bool yesterdayHasPostureData;
+  final int yesterdayPostureDurationSec;
+  final int yesterdayTherapyDurationSec;
+  final int yesterdaySessionCount;
+  final int yesterdayTrackedSec;
+  final bool yesterdayHasTrackedData;
+
+  bool get hasTodayPostureData => todayPostureDurationSec > 0;
+  bool get hasTodayTherapyData => todayTherapyDurationSec > 0;
+  bool get hasTodayTrackedData => todayTrackedSec > 0;
+  bool get hasTodaySessions => todaySessionCount > 0;
+  bool get yesterdayHasTherapyData => yesterdayTherapyDurationSec > 0;
+  bool get yesterdayHasSessions => yesterdaySessionCount > 0;
+  int get postureDeltaVsYesterday => todayPct - yesterdayPct;
+  int get trackedDeltaSecVsYesterday => todayTrackedSec - yesterdayTrackedSec;
+  int get therapyDeltaSecVsYesterday =>
+      todayTherapyDurationSec - yesterdayTherapyDurationSec;
+  int get trainingDeltaSecVsYesterday =>
+      todayPostureDurationSec - yesterdayPostureDurationSec;
+  int get sessionCountDeltaVsYesterday =>
+      todaySessionCount - yesterdaySessionCount;
+}
+
+class _DaySummary {
+  const _DaySummary({
+    required this.posturePct,
+    required this.postureDurationSec,
+    required this.therapyDurationSec,
+    required this.trackedSec,
+    required this.sessionCount,
+  });
+  final int posturePct;
+  final int postureDurationSec;
+  final int therapyDurationSec;
+  final int trackedSec;
+  final int sessionCount;
+}
+
+class _Aggregate {
+  _Aggregate({
+    required this.goodPosturePct,
+    required this.trackedHours,
+    required this.trackedHoursNumeric,
+    required this.sessionCount,
+    required this.therapyMinutes,
+  });
+
+  final int goodPosturePct;
+  final String trackedHours;
+  final double trackedHoursNumeric;
+  final int sessionCount;
+  final int therapyMinutes;
+}

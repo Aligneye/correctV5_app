@@ -1,0 +1,514 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+
+class SessionDatabase {
+  SessionDatabase._();
+  static final SessionDatabase instance = SessionDatabase._();
+
+  Database? _db;
+
+  Future<Database> get database async {
+    if (_db != null) return _db!;
+    await initialize();
+    return _db!;
+  }
+
+  Future<void> initialize() async {
+    if (_db != null) return;
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'aligneye_sessions.db');
+    _db = await openDatabase(
+      path,
+      version: 3,
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE sessions (
+            id              TEXT PRIMARY KEY,
+            user_id         TEXT NOT NULL,
+            type            TEXT NOT NULL,
+            start_ts        TEXT NOT NULL,
+            duration_sec    INTEGER NOT NULL,
+            wrong_count     INTEGER,
+            wrong_dur_sec   INTEGER,
+            therapy_pattern INTEGER,
+            ts_synced       INTEGER NOT NULL DEFAULT 0,
+            posture_events  TEXT,
+            therapy_patterns TEXT,
+            therapy_pattern_events TEXT,
+            therapy_intensity_level  INTEGER,
+            therapy_target_point     TEXT,
+            planned_duration_sec     INTEGER,
+            planned_pattern_sequence TEXT,
+            created_at      TEXT NOT NULL,
+            sync_status     INTEGER NOT NULL DEFAULT 0,
+            remote_id       TEXT
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX idx_sessions_user_start ON sessions (user_id, start_ts DESC)',
+        );
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN therapy_pattern_events TEXT',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN therapy_intensity_level INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN therapy_target_point TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN planned_duration_sec INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN planned_pattern_sequence TEXT',
+          );
+        }
+      },
+    );
+  }
+
+  // ---------- UUID generation ----------
+
+  static String generateId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
+
+  // ---------- Write operations ----------
+
+  Future<String> insertSession(Map<String, dynamic> row) async {
+    final db = await database;
+    final id = row['id'] as String? ?? generateId();
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.insert('sessions', {
+      'id': id,
+      'user_id': row['user_id'],
+      'type': row['type'],
+      'start_ts': row['start_ts'],
+      'duration_sec': row['duration_sec'],
+      'wrong_count': row['wrong_count'],
+      'wrong_dur_sec': row['wrong_dur_sec'],
+      'therapy_pattern': row['therapy_pattern'],
+      'ts_synced': (row['ts_synced'] == true || row['ts_synced'] == 1) ? 1 : 0,
+      'posture_events': _encodeJson(row['posture_events']),
+      'therapy_patterns': _encodeJson(row['therapy_patterns']),
+      'therapy_pattern_events': _encodeJson(row['therapy_pattern_events']),
+      'therapy_intensity_level': row['therapy_intensity_level'],
+      'therapy_target_point': row['therapy_target_point'],
+      'planned_duration_sec': row['planned_duration_sec'],
+      'planned_pattern_sequence': _encodeJson(row['planned_pattern_sequence']),
+      'created_at': row['created_at'] as String? ?? now,
+      'sync_status': row['sync_status'] as int? ?? 0,
+      'remote_id': row['remote_id'] as String?,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return id;
+  }
+
+  Future<void> updateSession(String id, Map<String, dynamic> fields) async {
+    final db = await database;
+    final update = <String, dynamic>{};
+    if (fields.containsKey('duration_sec')) {
+      update['duration_sec'] = fields['duration_sec'];
+    }
+    if (fields.containsKey('wrong_count')) {
+      update['wrong_count'] = fields['wrong_count'];
+    }
+    if (fields.containsKey('wrong_dur_sec')) {
+      update['wrong_dur_sec'] = fields['wrong_dur_sec'];
+    }
+    if (fields.containsKey('therapy_pattern')) {
+      update['therapy_pattern'] = fields['therapy_pattern'];
+    }
+    if (fields.containsKey('ts_synced')) {
+      update['ts_synced'] =
+          (fields['ts_synced'] == true || fields['ts_synced'] == 1) ? 1 : 0;
+    }
+    if (fields.containsKey('posture_events')) {
+      update['posture_events'] = _encodeJson(fields['posture_events']);
+    }
+    if (fields.containsKey('therapy_patterns')) {
+      update['therapy_patterns'] = _encodeJson(fields['therapy_patterns']);
+    }
+    if (fields.containsKey('therapy_pattern_events')) {
+      update['therapy_pattern_events'] = _encodeJson(
+        fields['therapy_pattern_events'],
+      );
+    }
+    if (fields.containsKey('therapy_intensity_level')) {
+      update['therapy_intensity_level'] = fields['therapy_intensity_level'];
+    }
+    if (fields.containsKey('therapy_target_point')) {
+      update['therapy_target_point'] = fields['therapy_target_point'];
+    }
+    if (fields.containsKey('planned_duration_sec')) {
+      update['planned_duration_sec'] = fields['planned_duration_sec'];
+    }
+    if (fields.containsKey('planned_pattern_sequence')) {
+      update['planned_pattern_sequence'] = _encodeJson(
+        fields['planned_pattern_sequence'],
+      );
+    }
+    await _preserveRicherTherapyTimeline(db, id, update);
+    if (update.isEmpty) return;
+    // Mark as dirty unless explicitly set.
+    if (!fields.containsKey('sync_status')) {
+      update['sync_status'] = 2;
+    } else {
+      update['sync_status'] = fields['sync_status'];
+    }
+    await db.update('sessions', update, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> deleteSession(String id) async {
+    final db = await database;
+    await db.delete('sessions', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Fetch a single decoded session row by local id. Returns null when the
+  /// row does not exist (e.g. the recorder discarded a sub-threshold short
+  /// session before the caller could look it up).
+  Future<Map<String, dynamic>?> getById(String id) async {
+    final db = await database;
+    final rows = await db.query(
+      'sessions',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return _decodeRow(rows.first);
+  }
+
+  Future<void> markSynced(String localId, String remoteId) async {
+    final db = await database;
+    await db.update(
+      'sessions',
+      {'sync_status': 1, 'remote_id': remoteId},
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  Future<void> upsertFromRemote(Map<String, dynamic> remoteRow) async {
+    final db = await database;
+    final remoteId = remoteRow['id']?.toString();
+    if (remoteId == null) return;
+
+    final userId = remoteRow['user_id']?.toString() ?? '';
+    final type = remoteRow['type']?.toString() ?? '';
+    final startTs = remoteRow['start_ts']?.toString() ?? '';
+
+    // Check if we already have this by remote_id.
+    final byRemote = await db.query(
+      'sessions',
+      where: 'remote_id = ?',
+      whereArgs: [remoteId],
+      limit: 1,
+    );
+    if (byRemote.isNotEmpty) {
+      final localId = byRemote.first['id'] as String;
+      final update = _remoteUpdate(remoteRow, syncStatus: 1);
+      await _preserveRicherTherapyTimeline(db, localId, update);
+      await db.update(
+        'sessions',
+        update,
+        where: 'id = ?',
+        whereArgs: [localId],
+      );
+      return;
+    }
+
+    // Check by dedupe window.
+    if (startTs.isNotEmpty) {
+      final existing = await findExistingByStartTs(
+        userId,
+        type,
+        DateTime.parse(startTs),
+        const Duration(seconds: 10),
+      );
+      if (existing != null) {
+        final update = _remoteUpdate(
+          remoteRow,
+          syncStatus: 1,
+          remoteId: remoteId,
+        );
+        await _preserveRicherTherapyTimeline(db, existing, update);
+        await db.update(
+          'sessions',
+          update,
+          where: 'id = ?',
+          whereArgs: [existing],
+        );
+        return;
+      }
+    }
+
+    // Insert as new synced row.
+    await insertSession({
+      'id': generateId(),
+      'user_id': userId,
+      'type': type,
+      'start_ts': startTs,
+      'duration_sec': remoteRow['duration_sec'] ?? 0,
+      'wrong_count': remoteRow['wrong_count'],
+      'wrong_dur_sec': remoteRow['wrong_dur_sec'],
+      'therapy_pattern': remoteRow['therapy_pattern'],
+      'ts_synced': remoteRow['ts_synced'],
+      'posture_events': remoteRow['posture_events'],
+      'therapy_patterns': remoteRow['therapy_patterns'],
+      'therapy_pattern_events': remoteRow['therapy_pattern_events'],
+      'therapy_intensity_level': remoteRow['therapy_intensity_level'],
+      'therapy_target_point': remoteRow['therapy_target_point'],
+      'planned_duration_sec': remoteRow['planned_duration_sec'],
+      'planned_pattern_sequence': remoteRow['planned_pattern_sequence'],
+      'created_at': remoteRow['created_at']?.toString(),
+      'sync_status': 1,
+      'remote_id': remoteId,
+    });
+  }
+
+  // ---------- Read operations ----------
+
+  Future<List<Map<String, dynamic>>> fetchByUser(
+    String userId, {
+    DateTime? since,
+  }) async {
+    final db = await database;
+    final where = StringBuffer('user_id = ?');
+    final args = <dynamic>[userId];
+    if (since != null) {
+      where.write(' AND start_ts >= ?');
+      args.add(since.toUtc().toIso8601String());
+    }
+    final rows = await db.query(
+      'sessions',
+      where: where.toString(),
+      whereArgs: args,
+      orderBy: 'start_ts DESC',
+    );
+    return rows.map(_decodeRow).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchBetween(
+    String userId,
+    DateTime start,
+    DateTime end, {
+    String? typeFilter,
+  }) async {
+    final db = await database;
+    final where = StringBuffer(
+      'user_id = ? AND start_ts >= ? AND start_ts < ?',
+    );
+    final args = <dynamic>[
+      userId,
+      start.toUtc().toIso8601String(),
+      end.toUtc().toIso8601String(),
+    ];
+    if (typeFilter != null) {
+      where.write(' AND type = ?');
+      args.add(typeFilter);
+    }
+    final rows = await db.query(
+      'sessions',
+      where: where.toString(),
+      whereArgs: args,
+      orderBy: 'start_ts DESC',
+    );
+    return rows.map(_decodeRow).toList();
+  }
+
+  // ---------- Sync operations ----------
+
+  Future<List<Map<String, dynamic>>> fetchUnsynced(String userId) async {
+    final db = await database;
+    final rows = await db.query(
+      'sessions',
+      where: 'user_id = ? AND sync_status != 1',
+      whereArgs: [userId],
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(_decodeRow).toList();
+  }
+
+  // ---------- Dedup ----------
+
+  Future<String?> findExistingByStartTs(
+    String userId,
+    String type,
+    DateTime startTs,
+    Duration window,
+  ) async {
+    final db = await database;
+    final windowStart = startTs.subtract(window).toUtc().toIso8601String();
+    final windowEnd = startTs.add(window).toUtc().toIso8601String();
+    final rows = await db.query(
+      'sessions',
+      columns: ['id'],
+      where: 'user_id = ? AND type = ? AND start_ts >= ? AND start_ts <= ?',
+      whereArgs: [userId, type, windowStart, windowEnd],
+      orderBy: 'start_ts DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['id'] as String?;
+  }
+
+  // ---------- Helpers ----------
+
+  String? _encodeJson(dynamic value) {
+    if (value == null) return null;
+    if (value is String) return value;
+    return jsonEncode(value);
+  }
+
+  Map<String, dynamic> _decodeRow(Map<String, dynamic> row) {
+    final result = Map<String, dynamic>.from(row);
+    result['ts_synced'] = (row['ts_synced'] == 1);
+    if (row['posture_events'] is String) {
+      try {
+        result['posture_events'] = jsonDecode(row['posture_events'] as String);
+      } catch (_) {
+        result['posture_events'] = null;
+      }
+    }
+    if (row['therapy_patterns'] is String) {
+      try {
+        result['therapy_patterns'] = jsonDecode(
+          row['therapy_patterns'] as String,
+        );
+      } catch (_) {
+        result['therapy_patterns'] = null;
+      }
+    }
+    if (row['therapy_pattern_events'] is String) {
+      try {
+        result['therapy_pattern_events'] = jsonDecode(
+          row['therapy_pattern_events'] as String,
+        );
+      } catch (_) {
+        result['therapy_pattern_events'] = null;
+      }
+    }
+    if (row['planned_pattern_sequence'] is String) {
+      try {
+        result['planned_pattern_sequence'] = jsonDecode(
+          row['planned_pattern_sequence'] as String,
+        );
+      } catch (_) {
+        result['planned_pattern_sequence'] = null;
+      }
+    }
+    return result;
+  }
+
+  Map<String, dynamic> _remoteUpdate(
+    Map<String, dynamic> remoteRow, {
+    required int syncStatus,
+    String? remoteId,
+  }) {
+    return {
+      'duration_sec': remoteRow['duration_sec'],
+      'wrong_count': remoteRow['wrong_count'],
+      'wrong_dur_sec': remoteRow['wrong_dur_sec'],
+      'therapy_pattern': remoteRow['therapy_pattern'],
+      'ts_synced': (remoteRow['ts_synced'] == true) ? 1 : 0,
+      'posture_events': _encodeJson(remoteRow['posture_events']),
+      'therapy_patterns': _encodeJson(remoteRow['therapy_patterns']),
+      'therapy_pattern_events': _encodeJson(
+        remoteRow['therapy_pattern_events'],
+      ),
+      'therapy_intensity_level': remoteRow['therapy_intensity_level'],
+      'therapy_target_point': remoteRow['therapy_target_point'],
+      'planned_duration_sec': remoteRow['planned_duration_sec'],
+      'planned_pattern_sequence': _encodeJson(
+        remoteRow['planned_pattern_sequence'],
+      ),
+      'sync_status': syncStatus,
+      if (remoteId != null) 'remote_id': remoteId,
+    };
+  }
+
+  Future<void> _preserveRicherTherapyTimeline(
+    Database db,
+    String id,
+    Map<String, dynamic> update,
+  ) async {
+    if (!update.containsKey('therapy_patterns') &&
+        !update.containsKey('therapy_pattern_events')) {
+      return;
+    }
+
+    final existingRows = await db.query(
+      'sessions',
+      columns: ['therapy_patterns', 'therapy_pattern_events'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (existingRows.isEmpty) return;
+
+    final existing = existingRows.first;
+    final existingPatternCount = _jsonListLength(existing['therapy_patterns']);
+    final existingEventCount = _jsonListLength(
+      existing['therapy_pattern_events'],
+    );
+    final incomingPatternCount = _jsonListLength(update['therapy_patterns']);
+    final incomingEventCount = _jsonListLength(
+      update['therapy_pattern_events'],
+    );
+    final existingTimelineCount = max(existingPatternCount, existingEventCount);
+    final incomingTimelineCount = max(incomingPatternCount, incomingEventCount);
+
+    if (existingTimelineCount <= incomingTimelineCount) return;
+
+    if (update.containsKey('therapy_patterns')) {
+      update['therapy_patterns'] = existing['therapy_patterns'];
+    }
+    if (update.containsKey('therapy_pattern_events')) {
+      update['therapy_pattern_events'] = existing['therapy_pattern_events'];
+    }
+  }
+
+  int _jsonListLength(dynamic value) {
+    if (value is List) return value.length;
+    if (value is String && value.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) return decoded.length;
+      } catch (_) {
+        return 0;
+      }
+    }
+    return 0;
+  }
+
+  Future<bool> hasDataForUser(String userId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as cnt FROM sessions WHERE user_id = ?',
+      [userId],
+    );
+    final count = Sqflite.firstIntValue(result) ?? 0;
+    return count > 0;
+  }
+
+  @visibleForTesting
+  Future<void> close() async {
+    await _db?.close();
+    _db = null;
+  }
+}

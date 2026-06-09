@@ -1,0 +1,70 @@
+-- Aligneye — sessions table + RLS policy
+-- Run in the Supabase SQL editor (or via psql) once per environment.
+--
+-- Every row is owned by the authenticated user. The BLE sync pipeline on
+-- the device never deletes local records until the ACK handshake completes,
+-- so duplicate inserts are possible in failure cases; consumers should be
+-- idempotent on (user_id, start_ts, type).
+--
+-- posture_events: jsonb array of {s,c} pairs, where `s` is the seconds-from-
+--   session-start at which a slouch began and `c` is the seconds at which it
+--   was corrected. `c == 65535` means the slouch was still active when the
+--   session ended.
+-- therapy_patterns: jsonb array of integer pattern indices played (in order).
+-- therapy_pattern_events: jsonb array of {p,s,d}, where `p` is the pattern
+--   index, `s` is seconds-from-session-start, and `d` is duration seconds.
+
+create table sessions (
+  id               uuid primary key default gen_random_uuid(),
+  user_id          uuid references auth.users not null,
+  type             text not null check (type in ('posture','therapy')),
+  start_ts         timestamptz,
+  duration_sec     integer not null,
+  wrong_count      integer,
+  wrong_dur_sec    integer,
+  therapy_pattern  integer,
+  ts_synced        boolean default false,
+  posture_events   jsonb,
+  therapy_patterns jsonb,
+  therapy_pattern_events jsonb,
+  -- Therapy session context captured from the app at start time.
+  therapy_intensity_level integer check (
+    therapy_intensity_level is null
+    or therapy_intensity_level between 1 and 3
+  ),
+  therapy_target_point     text,     -- e.g. 'GV14', 'GV13'
+  planned_duration_sec     integer,  -- user-selected duration (10/20/30 min in seconds)
+  planned_pattern_sequence jsonb,    -- full pattern plan the device scheduled
+  created_at       timestamptz default now()
+);
+
+create index on sessions (user_id, created_at desc);
+create index on sessions (user_id, start_ts desc);
+
+alter table sessions enable row level security;
+
+create policy "own sessions" on sessions
+  for all using (auth.uid() = user_id);
+
+-- Per-user streak state. One row per user.
+--
+-- current_streak and highest_streak are both derivable from the `sessions`
+-- table (consecutive active "streak days" using a 6 AM local boundary), but
+-- we persist them here so:
+--   1. the home page can render instantly without aggregating sessions
+--   2. highest_streak survives even if old sessions are purged locally
+--
+-- Writes happen from the client after computing the current streak; the
+-- client is trusted because RLS scopes everything to auth.uid().
+create table user_streaks (
+  user_id         uuid primary key references auth.users,
+  current_streak  integer not null default 0,
+  highest_streak  integer not null default 0,
+  last_active_day date,
+  updated_at      timestamptz default now()
+);
+
+alter table user_streaks enable row level security;
+
+create policy "own streak" on user_streaks
+  for all using (auth.uid() = user_id);
