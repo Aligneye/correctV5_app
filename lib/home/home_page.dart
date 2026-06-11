@@ -24,6 +24,7 @@ import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/theme/app_theme.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -46,10 +47,11 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late PageController _pageController;
   int _currentIndex = 0;
   final BluetoothServiceManager _bluetoothManager = BluetoothServiceManager();
+
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _HomePageState extends State<HomePage> {
     _bluetoothManager.initialize();
     // Hook up the BLE -> Supabase sync coordinator. Idempotent so it's safe
     // to call on every HomePage rebuild.
+    WidgetsBinding.instance.addObserver(this);
     DeviceManager().init();
   }
 
@@ -67,7 +70,18 @@ class _HomePageState extends State<HomePage> {
     _pageController.dispose();
     // Note: We don't shutdown the Bluetooth manager here to maintain connection
     // The connection will persist across page navigations
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final service = FlutterBackgroundService();
+    if (state == AppLifecycleState.paused) {
+      service.startService();
+    } else if (state == AppLifecycleState.resumed) {
+      service.invoke('stopService');
+    }
   }
 
   void _onItemTapped(int index) {
@@ -221,6 +235,11 @@ class _HomeDashboardState extends State<HomeDashboard>
   final SessionRepository _sessionRepository = SessionRepository();
   StreamSubscription<PostureReading>? _readingSubscription;
 
+  // _HomeDashboardState ke andar, existing fields ke neeche add karo:
+  final ValueNotifier<double> postureAngleNotifier = ValueNotifier<double>(0.0);
+  final ValueNotifier<bool> isBadPostureNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<String> postureStatusNotifier = ValueNotifier<String>('Good posture');
+
   double _postureAngle = 0;
   String _postureStatus = 'Waiting for data';
   bool _isBadPosture = false;
@@ -238,8 +257,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool _hasShownStartupConnectSheet = false;
   bool _isFindingDevice = false;
   bool _syncBannerDismissed = false;
-  bool _isLoadingOfflineSessions = true;
+  bool _isLoadingOfflineSessions = false;
   int _lastSyncTick = 0;
+  DateTime? _lastSessionLoadTime;
   List<SessionData> _offlineSessions = const <SessionData>[];
   TodayStats? _todayStats;
   StreakStats? _streakStats;
@@ -286,42 +306,93 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
     _controller.forward();
 
+    // _readingSubscription = _deviceService.readings.listen((reading) {
+    //   if (!mounted) return;
+    //   final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
+    //   final isLiveMode =
+    //       isTherapyMode ||
+    //       reading.mode.trim().toUpperCase() == 'TRAINING' ||
+    //       reading.mode.trim().toUpperCase() == 'POSTURE';
+    //   final reportedRemainingSec = reading.therapyRemainingSeconds;
+    //   setState(() {
+    //     _syncBannerDismissed = false;
+    //     _postureAngle = reading.angle;
+    //     _isBadPosture = reading.isBadPosture;
+    //     _postureStatus = reading.isBadPosture ? 'Bad posture' : 'Good posture';
+    //     _batteryLevel = reading.batteryPercentage.clamp(0, 100);
+    //     _selectedMode = _modeFromDevice(reading.mode);
+    //     _selectedPostureTiming = _postureTimingFromDevice(reading.subMode);
+    //     _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
+    //     if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
+    //       _selectedDifficulty = reading.difficultyDeg;
+    //     }
+    //     if (isTherapyMode && reportedRemainingSec > 0) {
+    //       // Snap countdown to firmware ground truth on every frame, then
+    //       // make sure the 1 Hz local ticker is running so the number keeps
+    //       // smoothly decreasing in the gap until the next BLE frame. Without
+    //       // this the timer froze between frames (2-5 s of BLE jitter) and
+    //       // visibly "stuck" — especially during a page transition when the
+    //       // reading stream briefly pauses on the old route.
+    //       _therapyRemainingSeconds = reportedRemainingSec;
+    //       _ensureTherapyCountdownRunning();
+    //     } else if (!isTherapyMode) {
+    //       _therapyCountdownTimer?.cancel();
+    //       _therapyRemainingSeconds = 0;
+    //     }
+    //     // Pattern names used to be mirrored into local fields here; the
+    //     // mini card and ongoing page now read straight from the device
+    //     // service's sticky cache, so there's nothing to do on this side.
+    //     if (isLiveMode) {
+    //       _snapLiveSessionDuration(reading);
+    //     } else {
+    //       _stopLiveSessionTicker(
+    //         clearFrame: _deviceManager.activeSessionId.value == null,
+    //       );
+    //     }
+    //   });
+    // });
     _readingSubscription = _deviceService.readings.listen((reading) {
       if (!mounted) return;
+
+      FlutterBackgroundService().invoke('posture_update', {
+        'is_bad_posture': reading.isBadPosture,
+        'mode': reading.mode,
+        'therapy_remaining': reading.therapyRemainingSeconds,
+      });
+      // 🔥 [FIX]: In values ko direct update karein bina pure page ko setState se heavy re-build kiye
+      postureAngleNotifier.value = reading.angle;
+      isBadPostureNotifier.value = reading.isBadPosture;
+      postureStatusNotifier.value = reading.isBadPosture ? 'Bad posture' : 'Good posture';
+
       final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
       final isLiveMode =
           isTherapyMode ||
-          reading.mode.trim().toUpperCase() == 'TRAINING' ||
-          reading.mode.trim().toUpperCase() == 'POSTURE';
+              reading.mode.trim().toUpperCase() == 'TRAINING' ||
+              reading.mode.trim().toUpperCase() == 'POSTURE';
       final reportedRemainingSec = reading.therapyRemainingSeconds;
+
       setState(() {
         _syncBannerDismissed = false;
-        _postureAngle = reading.angle;
-        _isBadPosture = reading.isBadPosture;
-        _postureStatus = reading.isBadPosture ? 'Bad posture' : 'Good posture';
+
+        // NOTE: _postureAngle, _isBadPosture, _postureStatus ko yahan se safely remove kar diya hai
+
         _batteryLevel = reading.batteryPercentage.clamp(0, 100);
         _selectedMode = _modeFromDevice(reading.mode);
         _selectedPostureTiming = _postureTimingFromDevice(reading.subMode);
         _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
+
         if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
           _selectedDifficulty = reading.difficultyDeg;
         }
+
         if (isTherapyMode && reportedRemainingSec > 0) {
-          // Snap countdown to firmware ground truth on every frame, then
-          // make sure the 1 Hz local ticker is running so the number keeps
-          // smoothly decreasing in the gap until the next BLE frame. Without
-          // this the timer froze between frames (2-5 s of BLE jitter) and
-          // visibly "stuck" — especially during a page transition when the
-          // reading stream briefly pauses on the old route.
           _therapyRemainingSeconds = reportedRemainingSec;
           _ensureTherapyCountdownRunning();
         } else if (!isTherapyMode) {
           _therapyCountdownTimer?.cancel();
           _therapyRemainingSeconds = 0;
         }
-        // Pattern names used to be mirrored into local fields here; the
-        // mini card and ongoing page now read straight from the device
-        // service's sticky cache, so there's nothing to do on this side.
+
         if (isLiveMode) {
           _snapLiveSessionDuration(reading);
         } else {
@@ -343,6 +414,22 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   @override
+  // void dispose() {
+  //   _readingSubscription?.cancel();
+  //   _deviceManager.syncCompletedTick.removeListener(_handleSessionSyncFinished);
+  //   _deviceManager.isSyncing.removeListener(_handleSyncingChanged);
+  //   _deviceManager.activeSessionId.removeListener(_handleActiveSessionChanged);
+  //   _deviceService.connectionStatus.removeListener(
+  //     _handleConnectionStatusChanged,
+  //   );
+  //   _therapyCountdownTimer?.cancel();
+  //   _liveSessionTicker?.cancel();
+  //   // Don't dispose the device service here - it's managed by BluetoothServiceManager
+  //   // unawaited(_deviceService.dispose());
+  //   _controller.dispose();
+  //   super.dispose();
+  // }
+  @override
   void dispose() {
     _readingSubscription?.cancel();
     _deviceManager.syncCompletedTick.removeListener(_handleSessionSyncFinished);
@@ -351,8 +438,18 @@ class _HomeDashboardState extends State<HomeDashboard>
     _deviceService.connectionStatus.removeListener(
       _handleConnectionStatusChanged,
     );
+
+    // 🔥 FIX: Timers ko cancel karne ke sath-sath unhe 'null' zaroor karein
     _therapyCountdownTimer?.cancel();
+    _therapyCountdownTimer = null;
+
     _liveSessionTicker?.cancel();
+    _liveSessionTicker = null;
+
+    postureAngleNotifier.dispose();
+    isBadPostureNotifier.dispose();
+    postureStatusNotifier.dispose();
+
     // Don't dispose the device service here - it's managed by BluetoothServiceManager
     // unawaited(_deviceService.dispose());
     _controller.dispose();
@@ -369,15 +466,21 @@ class _HomeDashboardState extends State<HomeDashboard>
     final id = _deviceManager.activeSessionId.value;
     if (id == null) {
       _stopLiveSessionTicker(clearFrame: true);
+      unawaited(_loadOfflineSessions());
     } else {
       _liveDisplaySessionId = id;
       _syncLiveSessionTickerWithConnection();
     }
-    unawaited(_loadOfflineSessions());
+    // unawaited(_loadOfflineSessions());
   }
 
   void _handleConnectionStatusChanged() {
     _syncLiveSessionTickerWithConnection();
+
+    // connect hone pe offline sessions reload karo
+    if (_deviceService.connectionStatus.value == DeviceConnectionStatus.connected) {
+      unawaited(_loadOfflineSessions());
+    }
   }
 
   void _syncLiveSessionTickerWithConnection() {
@@ -394,20 +497,49 @@ class _HomeDashboardState extends State<HomeDashboard>
     }
   }
 
+  // void _ensureLiveSessionTicker() {
+  //   if (_liveSessionTicker != null) return;
+  //   _liveSessionTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+  //     if (!mounted) {
+  //       _liveSessionTicker?.cancel();
+  //       _liveSessionTicker = null;
+  //       return;
+  //     }
+  //     if (_deviceService.connectionStatus.value !=
+  //             DeviceConnectionStatus.connected ||
+  //         _deviceManager.activeSessionId.value == null ||
+  //         !_liveDisplayHasFrame) {
+  //       return;
+  //     }
+  //     setState(() {
+  //       _liveDisplayDurationSec++;
+  //     });
+  //   });
+  // }
   void _ensureLiveSessionTicker() {
-    if (_liveSessionTicker != null) return;
+    // 🔥 CHANGE 1: Pehle chal rahe kisi bhi purane ticker ko safely cancel aur null karein
+    _liveSessionTicker?.cancel();
+    _liveSessionTicker = null;
+
     _liveSessionTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
         _liveSessionTicker?.cancel();
         _liveSessionTicker = null;
         return;
       }
-      if (_deviceService.connectionStatus.value !=
-              DeviceConnectionStatus.connected ||
+
+      // 🔥 CHANGE 2: Agar conditions follow nahi ho rahi hain, toh return karne ke bajay
+      // ticker ko cancel karke band kar dein taaki battery aur memory bache.
+      if (_deviceService.connectionStatus.value != DeviceConnectionStatus.connected ||
           _deviceManager.activeSessionId.value == null ||
           !_liveDisplayHasFrame) {
+
+        _liveSessionTicker?.cancel();
+        _liveSessionTicker = null;
+        setState(() {}); // UI ko state refresh karne ke liye ek baar trigger dein
         return;
       }
+
       setState(() {
         _liveDisplayDurationSec++;
       });
@@ -826,26 +958,78 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
+  // Future<void> _loadOfflineSessions() async {
+  //   if (!mounted) return;
+  //   setState(() => _isLoadingOfflineSessions = true);
+  //   try {
+  //     final sessions = await _sessionRepository.fetchByPeriod(
+  //       'all',
+  //       liveSessionId: _deviceManager.activeSessionId.value,
+  //     );
+  //     final todayStats = await _sessionRepository.fetchTodayStats();
+  //     final streakStats = await _sessionRepository.fetchStreakStats();
+  //     if (!mounted) return;
+  //     debugPrint('HomeDashboard: loaded ${sessions.length} sessions');
+  //     setState(() {
+  //       _offlineSessions = sessions.take(5).toList(growable: false);
+  //       _todayStats = todayStats;
+  //       _streakStats = streakStats;
+  //       _isLoadingOfflineSessions = false;
+  //     });
+  //     unawaited(_persistStreakCache(streakStats));
+  //     unawaited(_maybeShowStreakPopup(streakStats));
+  //   } catch (e) {
+  //     debugPrint('HomeDashboard: _loadOfflineSessions error: $e');
+  //     if (!mounted) return;
+  //     setState(() {
+  //       _isLoadingOfflineSessions = false;
+  //     });
+  //   }
+  // }
   Future<void> _loadOfflineSessions() async {
     if (!mounted) return;
-    setState(() => _isLoadingOfflineSessions = true);
+
+    final now = DateTime.now();
+    if (_lastSessionLoadTime != null &&
+        now.difference(_lastSessionLoadTime!).inSeconds < 5) {
+      return;
+    }
+    _lastSessionLoadTime = now;
+
+    if (_isLoadingOfflineSessions) return;
+
+    if (_offlineSessions.isEmpty) {
+      _isLoadingOfflineSessions = true;
+      if (mounted) setState(() {});
+    }
+
     try {
-      final sessions = await _sessionRepository.fetchByPeriod(
-        'all',
-        liveSessionId: _deviceManager.activeSessionId.value,
-      );
-      final todayStats = await _sessionRepository.fetchTodayStats();
-      final streakStats = await _sessionRepository.fetchStreakStats();
+      final results = await Future.wait([
+        _sessionRepository.fetchByPeriod(
+          'all',
+          liveSessionId: _deviceManager.activeSessionId.value,
+        ),
+        _sessionRepository.fetchTodayStats(),
+        _sessionRepository.fetchStreakStats(),
+      ]);
+
+      final List<SessionData> sessions = results[0] as List<SessionData>;
+      final TodayStats? todayStats = results[1] as TodayStats?;
+      final StreakStats? streakStats = results[2] as StreakStats?;
+
       if (!mounted) return;
-      debugPrint('HomeDashboard: loaded ${sessions.length} sessions');
+
       setState(() {
         _offlineSessions = sessions.take(5).toList(growable: false);
         _todayStats = todayStats;
         _streakStats = streakStats;
         _isLoadingOfflineSessions = false;
       });
-      unawaited(_persistStreakCache(streakStats));
-      unawaited(_maybeShowStreakPopup(streakStats));
+
+      if (streakStats != null) {
+        unawaited(_persistStreakCache(streakStats));
+        unawaited(_maybeShowStreakPopup(streakStats));
+      }
     } catch (e) {
       debugPrint('HomeDashboard: _loadOfflineSessions error: $e');
       if (!mounted) return;
