@@ -230,6 +230,7 @@ class AlignEyeDeviceService {
   );
   final isAutoConnectionAttempt = ValueNotifier<bool>(false);
   final currentReading = ValueNotifier<PostureReading?>(null);
+  DateTime? _lastUiFrame;
 
   /// Sticky cache of the latest therapy pattern plan + live index. Firmware
   /// publishes `t_seq` / `t_cur` only periodically (not every JSON frame),
@@ -1483,7 +1484,11 @@ class AlignEyeDeviceService {
             _currentPatternStartElapsedSec = 0;
           }
           // Emit to stream
-          _readingController.add(reading);
+          final _now = DateTime.now();
+          if (_lastUiFrame == null || _now.difference(_lastUiFrame!).inMilliseconds >= 500) {
+            _lastUiFrame = _now;
+            _readingController.add(reading);
+          }
         }
       } catch (_) {
         // Ignore malformed payloads; we'll wait for the next valid JSON packet.

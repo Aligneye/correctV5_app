@@ -240,10 +240,13 @@ class _HomeDashboardState extends State<HomeDashboard>
   final ValueNotifier<bool> isBadPostureNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<String> postureStatusNotifier = ValueNotifier<String>('Good posture');
 
-  double _postureAngle = 0;
-  String _postureStatus = 'Waiting for data';
-  bool _isBadPosture = false;
-  int _batteryLevel = 0;
+  // double _postureAngle = 0;
+  // String _postureStatus = 'Waiting for data';
+  // bool _isBadPosture = false;
+  // int _batteryLevel = 0;
+
+  final _batteryLevel = ValueNotifier<int>(0);
+
   _ModeControlType _selectedMode = _ModeControlType.track;
   _PostureTimingType _selectedPostureTiming = _PostureTimingType.instant;
   int _selectedDifficulty = 25;
@@ -257,6 +260,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool _hasShownStartupConnectSheet = false;
   bool _isFindingDevice = false;
   bool _syncBannerDismissed = false;
+  String _lastMode = '';
   bool _isLoadingOfflineSessions = false;
   int _lastSyncTick = 0;
   DateTime? _lastSessionLoadTime;
@@ -354,11 +358,15 @@ class _HomeDashboardState extends State<HomeDashboard>
     _readingSubscription = _deviceService.readings.listen((reading) {
       if (!mounted) return;
 
-      FlutterBackgroundService().invoke('posture_update', {
-        'is_bad_posture': reading.isBadPosture,
-        'mode': reading.mode,
-        'therapy_remaining': reading.therapyRemainingSeconds,
-      });
+      if (reading.isBadPosture != isBadPostureNotifier.value ||
+          reading.mode != _lastMode) {
+        FlutterBackgroundService().invoke('posture_update', {
+          'is_bad_posture': reading.isBadPosture,
+          'mode': reading.mode,
+          'therapy_remaining': reading.therapyRemainingSeconds,
+        });
+        _lastMode = reading.mode;
+      }
       // 🔥 [FIX]: In values ko direct update karein bina pure page ko setState se heavy re-build kiye
       postureAngleNotifier.value = reading.angle;
       isBadPostureNotifier.value = reading.isBadPosture;
@@ -371,14 +379,17 @@ class _HomeDashboardState extends State<HomeDashboard>
               reading.mode.trim().toUpperCase() == 'POSTURE';
       final reportedRemainingSec = reading.therapyRemainingSeconds;
 
+      _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
+      final newMode = _modeFromDevice(reading.mode);
+      final newTiming = _postureTimingFromDevice(reading.subMode);
+      if (_selectedMode == newMode && _selectedPostureTiming == newTiming) return;
       setState(() {
-        _syncBannerDismissed = false;
+        // _syncBannerDismissed = false;
 
         // NOTE: _postureAngle, _isBadPosture, _postureStatus ko yahan se safely remove kar diya hai
 
-        _batteryLevel = reading.batteryPercentage.clamp(0, 100);
-        _selectedMode = _modeFromDevice(reading.mode);
-        _selectedPostureTiming = _postureTimingFromDevice(reading.subMode);
+        _selectedMode = newMode;
+        _selectedPostureTiming = newTiming;
         _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
 
         if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
@@ -449,7 +460,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     postureAngleNotifier.dispose();
     isBadPostureNotifier.dispose();
     postureStatusNotifier.dispose();
-
+    _batteryLevel.dispose();
     // Don't dispose the device service here - it's managed by BluetoothServiceManager
     // unawaited(_deviceService.dispose());
     _controller.dispose();
@@ -458,7 +469,6 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   void _handleSyncingChanged() {
     if (!mounted) return;
-    setState(() {});
   }
 
   void _handleActiveSessionChanged() {
@@ -1280,7 +1290,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) => _ConnectedDeviceSheet(
-        batteryLevel: _batteryLevel,
+        batteryLevel: _batteryLevel.value,
         onDisconnect: () async {
           Navigator.of(ctx).pop();
           await _deviceService.disconnect(userInitiated: true);
@@ -1792,7 +1802,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                                   isFindingDevice: _isFindingDevice,
                                   isSyncing: isSyncing,
                                   isLive: activeSessionId != null,
-                                  batteryLevel: _batteryLevel,
+                                  batteryLevel: _batteryLevel.value,
                                   onTap: _handleDeviceStatusTap,
                                 );
                               },
@@ -1838,12 +1848,35 @@ class _HomeDashboardState extends State<HomeDashboard>
                         totalMinutes: _therapyDurationMinutes,
                         onTap: _openOngoingTherapyFromHome,
                       )
-                    : _PostureGaugeCard(
-                        postureAngle: _postureAngle,
-                        postureStatus: _postureStatus,
-                        isBadPosture: _isBadPosture,
-                        controller: _controller,
-                      ),
+                    // : _PostureGaugeCard(
+                    //     postureAngle: _postureAngle,
+                    //     postureStatus: _postureStatus,
+                    //     isBadPosture: _isBadPosture,
+                    //     controller: _controller,
+                    //   ),
+                    : ValueListenableBuilder<double>(
+
+                  valueListenable: postureAngleNotifier,
+
+                  builder: (context, angle, _) => ValueListenableBuilder<bool>(
+
+                    valueListenable: isBadPostureNotifier,
+
+                    builder: (context, isBad, _) => _PostureGaugeCard(
+
+                      postureAngle: angle,
+
+                      postureStatus: isBad ? 'Bad posture' : 'Good posture',
+
+                      isBadPosture: isBad,
+
+                      controller: _controller,
+
+                    ),
+
+                  ),
+
+                )
               ),
               _kSectionSpacing,
               _StaggeredFadeSlide(
