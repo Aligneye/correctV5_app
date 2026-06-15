@@ -382,18 +382,20 @@ class _HomeDashboardState extends State<HomeDashboard>
       _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
       final newMode = _modeFromDevice(reading.mode);
       final newTiming = _postureTimingFromDevice(reading.subMode);
-      if (_selectedMode == newMode && _selectedPostureTiming == newTiming) return;
+      final modeOrTimingChanged = _selectedMode != newMode || _selectedPostureTiming != newTiming;
       setState(() {
         // _syncBannerDismissed = false;
 
         // NOTE: _postureAngle, _isBadPosture, _postureStatus ko yahan se safely remove kar diya hai
 
-        _selectedMode = newMode;
-        _selectedPostureTiming = newTiming;
-        _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
+        if (modeOrTimingChanged) {
+          _selectedMode = newMode;
+          _selectedPostureTiming = newTiming;
+          _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
 
-        if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
-          _selectedDifficulty = reading.difficultyDeg;
+          if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
+            _selectedDifficulty = reading.difficultyDeg;
+          }
         }
 
         if (isTherapyMode && reportedRemainingSec > 0) {
