@@ -8,6 +8,8 @@ import 'package:correctv1/services/session_sync_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:correctv1/services/background_service.dart';
 
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -29,7 +31,7 @@ Future<void> main() async {
   await SessionDatabase.instance.initialize();
   SessionSyncService.instance.start();
   await initBackgroundService();
-
+  FlutterBluePlus.setLogLevel(LogLevel.none);
   runApp(MyApp(isSupabaseConfigured: isSupabaseConfigured));
 }
 

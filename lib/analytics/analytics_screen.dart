@@ -2541,13 +2541,15 @@ class _DetailStat extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
     decoration: _cardDecoration(radius: 14),
     child: Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(
           value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-            fontSize: 20,
+            fontSize: 19,
             fontWeight: FontWeight.w700,
             color: _kText,
             height: 1.2,

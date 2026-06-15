@@ -85,14 +85,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _onItemTapped(int index) {
+    final isAdjacent = (index - _currentIndex).abs() <= 1;
     setState(() {
       _currentIndex = index;
     });
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
+    if (isAdjacent) {
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _pageController.jumpToPage(index);
+    }
   }
 
   Future<void> _openTherapyPage() async {
@@ -270,6 +275,12 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool _streakPopupCheckedThisSession = false;
   final GlobalKey _streakTileKey = GlobalKey();
 
+  // ── [TEMP DEBUG] Hardware log fields ─────────────────────────────
+  final List<Map<String, dynamic>> _debugLogs = [];
+  static const int _kMaxDebugLogs = 60;
+  bool _showDebugLog = false;
+  final ValueNotifier<int> _debugFrameCount = ValueNotifier<int>(0);
+
   static final List<_QuickMode> _quickModes = [
     _QuickMode(
       title: 'Therapy',
@@ -357,7 +368,53 @@ class _HomeDashboardState extends State<HomeDashboard>
     // });
     _readingSubscription = _deviceService.readings.listen((reading) {
       if (!mounted) return;
-
+// ── [TEMP DEBUG] Capture all hardware fields ──────────────
+      final debugEntry = <String, dynamic>{
+        'time': DateTime.now().toIso8601String().substring(11, 19),
+        'mode': reading.mode,
+        'subMode': reading.subMode,
+        // Posture
+        'angle': reading.angle,
+        'angleX': reading.angleX,
+        'angleY': reading.angleY,
+        'angleZ': reading.angleZ,
+        'posture': reading.posture,
+        'isBad': reading.isBadPosture,
+        'difficulty': reading.difficultyDeg,
+        // Raw sensor
+        'rawX': reading.rawXG,
+        'rawY': reading.rawYG,
+        'rawZ': reading.rawZG,
+        'calY': reading.calY,
+        'calZ': reading.calZ,
+        // Battery
+        'batV': reading.batteryVoltage,
+        'bat%': reading.batteryPercentage,
+        // Calibration
+        'isCalib': reading.isCalibrating,
+        'calibPhase': reading.calibrationPhase,
+        'calibResult': reading.calibrationResult,
+        'calibElapsed': reading.calibrationElapsedMs,
+        'calibTotal': reading.calibrationTotalMs,
+        // Therapy
+        'tPattern': reading.therapyPattern,
+        'tNextPat': reading.therapyNextPattern,
+        'tElapsed': reading.therapyElapsedSeconds,
+        'tRemaining': reading.therapyRemainingSeconds,
+        'tIntensity': reading.therapyIntensityLevel,
+        'tCurIndex': reading.therapyCurrentPatternIndex,
+        'tTotal': reading.therapyTotalPatterns,
+        'tSeq': reading.therapyPatternSequence.join(','),
+        // Live session
+        'sessId': reading.liveSessionId,
+        'sessElapsed': reading.liveSessionElapsedSeconds,
+        'sessBadCount': reading.liveSessionBadCount,
+        'sessEpoch': reading.liveSessionStartEpoch,
+      };
+      if (_debugLogs.length >= _kMaxDebugLogs) _debugLogs.removeAt(0);
+      _debugLogs.add(debugEntry);
+      _debugFrameCount.value++;
+      // ─────────────────────────────────────────────────────────
       if (reading.isBadPosture != isBadPostureNotifier.value ||
           reading.mode != _lastMode) {
         FlutterBackgroundService().invoke('posture_update', {
@@ -383,37 +440,81 @@ class _HomeDashboardState extends State<HomeDashboard>
       final newMode = _modeFromDevice(reading.mode);
       final newTiming = _postureTimingFromDevice(reading.subMode);
       final modeOrTimingChanged = _selectedMode != newMode || _selectedPostureTiming != newTiming;
-      setState(() {
-        // _syncBannerDismissed = false;
+      // setState(() {
+      //   // _syncBannerDismissed = false;
+      //
+      //   // NOTE: _postureAngle, _isBadPosture, _postureStatus ko yahan se safely remove kar diya hai
+      //
+      //   if (modeOrTimingChanged) {
+      //     _selectedMode = newMode;
+      //     _selectedPostureTiming = newTiming;
+      //     _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
+      //
+      //     if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
+      //       _selectedDifficulty = reading.difficultyDeg;
+      //     }
+      //   }
+      //
+      //   if (isTherapyMode && reportedRemainingSec > 0) {
+      //     _therapyRemainingSeconds = reportedRemainingSec;
+      //     _ensureTherapyCountdownRunning();
+      //   } else if (!isTherapyMode) {
+      //     _therapyCountdownTimer?.cancel();
+      //     _therapyRemainingSeconds = 0;
+      //   }
+      //
+      //   if (isLiveMode) {
+      //     _snapLiveSessionDuration(reading);
+      //   } else {
+      //     _stopLiveSessionTicker(
+      //       clearFrame: _deviceManager.activeSessionId.value == null,
+      //     );
+      //   }
+      // });
+      // Compute whether anything that actually affects build() output is
+      // changing. Calling setState on every BLE frame (~10/sec) rebuilds
+      // this entire 6000-line widget tree and is the main cause of jank.
+      bool needsRebuild = false;
 
-        // NOTE: _postureAngle, _isBadPosture, _postureStatus ko yahan se safely remove kar diya hai
+      if (modeOrTimingChanged) {
+        _selectedMode = newMode;
+        _selectedPostureTiming = newTiming;
+        _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
 
-        if (modeOrTimingChanged) {
-          _selectedMode = newMode;
-          _selectedPostureTiming = newTiming;
-          _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
-
-          if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
-            _selectedDifficulty = reading.difficultyDeg;
-          }
+        if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
+          _selectedDifficulty = reading.difficultyDeg;
         }
+        needsRebuild = true;
+      }
 
-        if (isTherapyMode && reportedRemainingSec > 0) {
-          _therapyRemainingSeconds = reportedRemainingSec;
-          _ensureTherapyCountdownRunning();
-        } else if (!isTherapyMode) {
+      if (isTherapyMode && reportedRemainingSec > 0) {
+        final secondsChanged = _therapyRemainingSeconds != reportedRemainingSec;
+        _therapyRemainingSeconds = reportedRemainingSec;
+        _ensureTherapyCountdownRunning();
+        if (secondsChanged) needsRebuild = true;
+      } else if (!isTherapyMode) {
+        if (_therapyCountdownTimer != null || _therapyRemainingSeconds != 0) {
           _therapyCountdownTimer?.cancel();
+          _therapyCountdownTimer = null;
           _therapyRemainingSeconds = 0;
+          needsRebuild = true;
         }
+      }
 
-        if (isLiveMode) {
-          _snapLiveSessionDuration(reading);
-        } else {
-          _stopLiveSessionTicker(
-            clearFrame: _deviceManager.activeSessionId.value == null,
-          );
-        }
-      });
+      if (isLiveMode) {
+        _snapLiveSessionDuration(reading);
+        needsRebuild = true;
+      } else {
+        final wasTicking = _liveSessionTicker != null;
+        _stopLiveSessionTicker(
+          clearFrame: _deviceManager.activeSessionId.value == null,
+        );
+        if (wasTicking) needsRebuild = true;
+      }
+
+      if (needsRebuild && mounted) {
+        setState(() {});
+      }
     });
 
     unawaited(_handleStartupDevicePrompt());
@@ -460,6 +561,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     _liveSessionTicker = null;
 
     postureAngleNotifier.dispose();
+    _debugFrameCount.dispose();
     isBadPostureNotifier.dispose();
     postureStatusNotifier.dispose();
     _batteryLevel.dispose();
@@ -1888,13 +1990,43 @@ class _HomeDashboardState extends State<HomeDashboard>
                   selectedMode: _selectedMode,
                   selectedPostureTiming: _selectedPostureTiming,
                   selectedDifficulty: _selectedDifficulty,
+                  // onModeSelected: (mode) {
+                  //   setState(() => _selectedMode = mode);
+                  //   if (mode == _ModeControlType.therapy) {
+                  //     _startTherapyCountdown(_therapyDurationMinutes);
+                  //   } else {
+                  //     _stopTherapyCountdown();
+                  //   }
+                  //   unawaited(
+                  //     _syncModeControlToDevice(
+                  //       mode: mode,
+                  //       postureTiming: _selectedPostureTiming,
+                  //       therapyDurationMinutes: _therapyDurationMinutes,
+                  //       difficultyDegrees: _selectedDifficulty,
+                  //     ),
+                  //   );
+                  //   // Therapy button inside Default Mode should also surface
+                  //   // the immersive ongoing-therapy screen using the current
+                  //   // defaults. The MODE=THERAPY command was just sent above,
+                  //   // so the device is already configured.
+                  //   // if (mode == _ModeControlType.therapy) {
+                  //   //   unawaited(_openOngoingTherapyWithDefaults());
+                  //   // }
+                  //   if (mode == _ModeControlType.therapy) {
+                  //     widget.onOpenTherapy();
+                  //   }
+                  // },
                   onModeSelected: (mode) {
-                    setState(() => _selectedMode = mode);
                     if (mode == _ModeControlType.therapy) {
-                      _startTherapyCountdown(_therapyDurationMinutes);
-                    } else {
-                      _stopTherapyCountdown();
+                      // Hand off to the configurable Therapy page — the user
+                      // picks point/intensity/duration and presses Start
+                      // there, which owns the full start sequence (sync,
+                      // prime context, sendTherapyStart, countdown).
+                      widget.onOpenTherapy();
+                      return;
                     }
+                    setState(() => _selectedMode = mode);
+                    _stopTherapyCountdown();
                     unawaited(
                       _syncModeControlToDevice(
                         mode: mode,
@@ -1903,13 +2035,6 @@ class _HomeDashboardState extends State<HomeDashboard>
                         difficultyDegrees: _selectedDifficulty,
                       ),
                     );
-                    // Therapy button inside Default Mode should also surface
-                    // the immersive ongoing-therapy screen using the current
-                    // defaults. The MODE=THERAPY command was just sent above,
-                    // so the device is already configured.
-                    if (mode == _ModeControlType.therapy) {
-                      unawaited(_openOngoingTherapyWithDefaults());
-                    }
                   },
                   onPostureTimingSelected: (timing) {
                     setState(() => _selectedPostureTiming = timing);
@@ -2002,6 +2127,24 @@ class _HomeDashboardState extends State<HomeDashboard>
                   },
                 ),
               ),
+              const SizedBox(height: 24),
+              // ── [TEMP DEBUG] Remove before release ─────────────
+              ValueListenableBuilder<int>(
+                valueListenable: _debugFrameCount,
+                builder: (context, _, __) {
+                  return _DebugLogSection(
+                    visible: _showDebugLog,
+                    logs: _debugLogs,
+                    onToggle: () => setState(() => _showDebugLog = !_showDebugLog),
+                    onClear: () {
+                      _debugLogs.clear();
+                      _debugFrameCount.value = 0;
+                    },
+                  );
+                },
+              ),
+              // ───────────────────────────────────────────────────
+
             ],
           ),
         ),
@@ -6409,7 +6552,248 @@ class _AllModesSheetItem extends StatelessWidget {
     );
   }
 }
+// ── [TEMP DEBUG] Remove this entire class before release ─────────
+class _DebugLogSection extends StatelessWidget {
+  final bool visible;
+  final List<Map<String, dynamic>> logs;
+  final VoidCallback onToggle;
+  final VoidCallback onClear;
 
+  const _DebugLogSection({
+    required this.visible,
+    required this.logs,
+    required this.onToggle,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = logs.isNotEmpty ? logs.last : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Toggle bar
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: onToggle,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.bug_report_rounded, color: Color(0xFF94A3B8), size: 16),
+                      const SizedBox(width: 8),
+                      Text(
+                        visible
+                            ? '▲ Hide Hardware Log'
+                            : '▼ Hardware Debug Log  (${logs.length} frames)',
+                        style: const TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (visible) ...[
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onClear,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7F1D1D),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'Clear',
+                    style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+
+        if (visible) ...[
+          const SizedBox(height: 8),
+
+          // Latest frame — full detail card
+          if (latest != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF22C55E).withOpacity(0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '● LATEST FRAME  [${latest['time']}]',
+                    style: const TextStyle(
+                      color: Color(0xFF22C55E),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const Divider(color: Color(0xFF1E293B), height: 12),
+                  _DebugGrid(entries: [
+                    // Basic
+                    _kv('mode', latest['mode']),
+                    _kv('subMode', latest['subMode']),
+                    _kv('posture', latest['posture']),
+                    _kv('isBad', latest['isBad']),
+                    _kv('difficulty', '${latest['difficulty']}°'),
+                    // Angle
+                    _kv('angle', '${(latest['angle'] as double).toStringAsFixed(2)}°'),
+                    _kv('angleX', '${(latest['angleX'] as double).toStringAsFixed(2)}°'),
+                    _kv('angleY', '${(latest['angleY'] as double).toStringAsFixed(2)}°'),
+                    _kv('angleZ', '${(latest['angleZ'] as double).toStringAsFixed(2)}°'),
+                    // Raw sensor
+                    _kv('rawX', (latest['rawX'] as double).toStringAsFixed(3)),
+                    _kv('rawY', (latest['rawY'] as double).toStringAsFixed(3)),
+                    _kv('rawZ', (latest['rawZ'] as double).toStringAsFixed(3)),
+                    _kv('calY', (latest['calY'] as double).toStringAsFixed(3)),
+                    _kv('calZ', (latest['calZ'] as double).toStringAsFixed(3)),
+                    // Battery
+                    _kv('bat%', '${latest['bat%']}%'),
+                    _kv('batV', '${(latest['batV'] as double).toStringAsFixed(2)}V'),
+                    // Calibration
+                    _kv('isCalib', latest['isCalib']),
+                    _kv('calibPhase', latest['calibPhase']),
+                    _kv('calibResult', latest['calibResult']),
+                    _kv('calibElapsed', '${latest['calibElapsed']}ms'),
+                    _kv('calibTotal', '${latest['calibTotal']}ms'),
+                    // Therapy
+                    _kv('tPattern', latest['tPattern']),
+                    _kv('tNextPat', latest['tNextPat']),
+                    _kv('tElapsed', '${latest['tElapsed']}s'),
+                    _kv('tRemaining', '${latest['tRemaining']}s'),
+                    _kv('tIntensity', latest['tIntensity']),
+                    _kv('tCurIndex', latest['tCurIndex']),
+                    _kv('tTotal', latest['tTotal']),
+                    _kv('tSeq', latest['tSeq'].toString().isEmpty ? '—' : latest['tSeq']),
+                    // Live session
+                    _kv('sessId', latest['sessId']),
+                    _kv('sessElapsed', '${latest['sessElapsed']}s'),
+                    _kv('sessBadCount', latest['sessBadCount']),
+                    _kv('sessEpoch', latest['sessEpoch']),
+                  ]),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          // Scrollable log history
+          Container(
+            height: 180,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF1E293B)),
+            ),
+            child: logs.isEmpty
+                ? const Center(
+              child: Text(
+                'Waiting for hardware data...',
+                style: TextStyle(color: Color(0xFF475569), fontSize: 12),
+              ),
+            )
+                : ListView.builder(
+              reverse: true,
+              padding: const EdgeInsets.all(8),
+              itemCount: logs.length,
+              itemBuilder: (context, index) {
+                final entry = logs[logs.length - 1 - index];
+                final isLatest = index == 0;
+                final line =
+                    '[${entry['time']}] mode=${entry['mode']}  '
+                    'angle=${(entry['angle'] as double).toStringAsFixed(1)}°  '
+                    'bad=${entry['isBad']}  '
+                    'bat=${entry['bat%']}%  '
+                    'sess=${entry['sessElapsed']}s';
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                    line,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontFamily: 'monospace',
+                      color: isLatest
+                          ? const Color(0xFF86EFAC)
+                          : const Color(0xFF475569),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  static Map<String, dynamic> _kv(String k, dynamic v) => {'k': k, 'v': v};
+}
+
+class _DebugGrid extends StatelessWidget {
+  final List<Map<String, dynamic>> entries;
+  const _DebugGrid({required this.entries});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: entries.map((e) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: RichText(
+            text: TextSpan(
+              children: [
+                TextSpan(
+                  text: '${e['k']}: ',
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                TextSpan(
+                  text: '${e['v']}',
+                  style: const TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+// ── [TEMP DEBUG END] ─────────────────────────────────────────────
 class _ComingSoonPage extends StatelessWidget {
   final String title;
   const _ComingSoonPage({required this.title});

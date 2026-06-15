@@ -231,6 +231,8 @@ class AlignEyeDeviceService {
   final isAutoConnectionAttempt = ValueNotifier<bool>(false);
   final currentReading = ValueNotifier<PostureReading?>(null);
   DateTime? _lastUiFrame;
+  Timer? _dataWatchdogTimer;
+  DateTime? _lastDataReceivedAt;
 
   /// Sticky cache of the latest therapy pattern plan + live index. Firmware
   /// publishes `t_seq` / `t_cur` only periodically (not every JSON frame),
@@ -859,7 +861,7 @@ class AlignEyeDeviceService {
       // Enable notifications with retry
       await _enableNotificationsWithRetry();
 
-      // Set up notification subscription
+// Set up notification subscription
       await _notifySubscription?.cancel();
       _notifySubscription = _notifyCharacteristic!.onValueReceived.listen(
         _handleNotifyData,
@@ -871,6 +873,26 @@ class AlignEyeDeviceService {
           }
         },
       );
+
+      // Watchdog: if no BLE data arrives for too long while we still think
+      // we're connected, force a reconnect to recover the stream.
+      _lastDataReceivedAt = DateTime.now();
+      _dataWatchdogTimer?.cancel();
+      _dataWatchdogTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+        if (connectionStatus.value != DeviceConnectionStatus.connected) {
+          timer.cancel();
+          return;
+        }
+        final last = _lastDataReceivedAt;
+        if (last != null && DateTime.now().difference(last).inSeconds > 8) {
+          debugPrint('WATCHDOG: No data for 8s, forcing reconnect');
+          disconnect().then((_) {
+            if (!_userInitiatedDisconnect) {
+              connect(isAutoConnect: true);
+            }
+          });
+        }
+      });
 
       // Verify connection is working by checking if we can receive data
       if (!await _verifyConnection()) {
@@ -993,6 +1015,7 @@ class AlignEyeDeviceService {
         }
       }
     }
+    _dataWatchdogTimer?.cancel();
 
     _device = null;
     _notifyCharacteristic = null;
@@ -1421,6 +1444,7 @@ class AlignEyeDeviceService {
 
   void _handleNotifyData(List<int> data) {
     if (data.isEmpty) return;
+    _lastDataReceivedAt = DateTime.now();
     _buffer += utf8.decode(data, allowMalformed: true);
 
     while (true) {
