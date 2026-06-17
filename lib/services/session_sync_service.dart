@@ -65,6 +65,8 @@ class SessionSyncService {
       final localId = row['id'] as String?;
       if (localId == null) continue;
 
+      if (row['is_live'] == true || row['is_live'] == 1) continue;
+
       final remoteId = row['remote_id'] as String?;
 
       final payload = <String, dynamic>{

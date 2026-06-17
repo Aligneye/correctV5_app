@@ -32,7 +32,7 @@ class _CalibrationPageState extends State<CalibrationPage>
     with TickerProviderStateMixin {
   static const int _getReadyMs = 3000;
   static const int _holdStillMs = 5000;
-  static const Duration _startDetectTimeout = Duration(seconds: 6);
+  static const Duration _startDetectTimeout = Duration(seconds: 10);
 
   late final AnimationController _pulseController;
   late final AnimationController _scaleController;
@@ -50,7 +50,8 @@ class _CalibrationPageState extends State<CalibrationPage>
   // Device-driven progress (from BLE)
   int _deviceElapsedMs = 0;
   String _devicePhase = 'IDLE';
-
+  int _deviceHoldStartMs = 0;
+  int _cancelMissCount = 0;
   @override
   void initState() {
     super.initState();
@@ -125,6 +126,9 @@ class _CalibrationPageState extends State<CalibrationPage>
   }
 
   void _onReading(PostureReading reading) {
+    debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
+    'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
+    'elapsed=${reading.calibrationElapsedMs}');
     if (_stage == _CalibrationStage.success || _completionHandled) return;
 
     if (!_isConnected && _stage != _CalibrationStage.intro) {
@@ -132,18 +136,24 @@ class _CalibrationPageState extends State<CalibrationPage>
       return;
     }
 
-    // Device-driven: calibration_result is authoritative
-    // But ignore stale results when just starting (they're from previous calibration)
-    if (reading.calibrationResult.isNotEmpty &&
-        _stage != _CalibrationStage.starting &&
-        _stage != _CalibrationStage.intro) {
-      _handleCalibrationResult(reading.calibrationResult == 'complete');
-      return;
-    }
-
     // Sync progress from device
     _deviceElapsedMs = reading.calibrationElapsedMs;
     _devicePhase = reading.calibrationPhase;
+
+    // ✅ FIX: Result sirf tab accept karo jab hum actually calibration mein hon
+    // aur startRequestedAt ke BAAD ka result ho (stale result ignore)
+    if (reading.calibrationResult.isNotEmpty &&
+        _stage != _CalibrationStage.starting &&
+        _stage != _CalibrationStage.intro &&
+        _startRequestedAt != null) {
+      // Ye result purana toh nahi? Device se aane mein thodi delay hoti hai
+      // isliye 2 second ka buffer — usse pehle aaya result = stale
+      final elapsed = DateTime.now().difference(_startRequestedAt!);
+      if (elapsed.inMilliseconds > 2000) {
+        _handleCalibrationResult(reading.calibrationResult == 'complete');
+        return;
+      }
+    }
 
     // Transition to getReady when device starts calibrating
     if ((_stage == _CalibrationStage.starting || _stage == _CalibrationStage.intro) &&
@@ -155,15 +165,21 @@ class _CalibrationPageState extends State<CalibrationPage>
     // Phase transitions from device
     if (_stage == _CalibrationStage.getReady &&
         _devicePhase == 'HOLD_STILL') {
+      _deviceHoldStartMs = _deviceElapsedMs;
       setState(() => _stage = _CalibrationStage.holdStill);
     }
 
-    // Calibration cancelled from device (e.g. button press) - no result sent
+    // Calibration cancelled from device
     if ((_stage == _CalibrationStage.getReady ||
-            _stage == _CalibrationStage.holdStill) &&
+        _stage == _CalibrationStage.holdStill) &&
         !reading.isCalibrating &&
         reading.calibrationResult.isEmpty) {
-      if (mounted) Navigator.of(context).pop(false);
+      _cancelMissCount++;
+      if (_cancelMissCount >= 3) {
+        if (mounted) Navigator.of(context).pop(false);
+      }
+    } else {
+      _cancelMissCount = 0;
     }
   }
 

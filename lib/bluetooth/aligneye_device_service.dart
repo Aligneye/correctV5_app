@@ -62,13 +62,16 @@ class PostureReading {
   final int therapyElapsedSeconds;
   final int therapyRemainingSeconds;
   final int therapyIntensityLevel;
+
   /// Full therapy pattern plan for the active session. Each entry is a
   /// firmware TherapyPattern index (0..13). Empty when not in therapy or
   /// the device hasn't announced the sequence yet.
   final List<int> therapyPatternSequence;
+
   /// Index inside [therapyPatternSequence] of the currently-playing pattern.
   /// -1 when unknown / not in therapy.
   final int therapyCurrentPatternIndex;
+
   /// Total patterns scheduled for this session. Firmware publishes this via
   /// `t_total`; used as a fallback length when `t_seq` is missing so the
   /// pager can still render a placeholder card per slot.
@@ -189,7 +192,9 @@ class PostureReading {
         if (raw is num) return raw.toInt();
         return int.tryParse(raw.toString()) ?? -1;
       }(),
-      therapyTotalPatterns: toInt(json['t_total'] ?? json['therapy_total_patterns']),
+      therapyTotalPatterns: toInt(
+        json['t_total'] ?? json['therapy_total_patterns'],
+      ),
       liveSessionId: toInt(json['s_id'] ?? json['session_id']),
       liveSessionElapsedSeconds: toInt(
         json['s_elap'] ?? json['session_elapsed_sec'],
@@ -230,6 +235,9 @@ class AlignEyeDeviceService {
   );
   final isAutoConnectionAttempt = ValueNotifier<bool>(false);
   final currentReading = ValueNotifier<PostureReading?>(null);
+  DateTime? _lastUiFrame;
+  Timer? _dataWatchdogTimer;
+  DateTime? _lastDataReceivedAt;
 
   /// Sticky cache of the latest therapy pattern plan + live index. Firmware
   /// publishes `t_seq` / `t_cur` only periodically (not every JSON frame),
@@ -500,8 +508,7 @@ class AlignEyeDeviceService {
       final scanStatus = await Permission.bluetoothScan.status;
       final connectStatus = await Permission.bluetoothConnect.status;
 
-      if (scanStatus.isPermanentlyDenied ||
-          connectStatus.isPermanentlyDenied) {
+      if (scanStatus.isPermanentlyDenied || connectStatus.isPermanentlyDenied) {
         return BleReadiness.permissionPermanentlyDenied;
       }
 
@@ -771,14 +778,15 @@ class AlignEyeDeviceService {
           // Small delay to ensure connection is stable
           await Future.delayed(const Duration(milliseconds: 300));
 
-          // Request larger MTU on Android to handle JSON telemetry payloads without truncation
-          if (Platform.isAndroid) {
+          // Request larger MTU on Android BEFORE enabling notifications
+          // so large JSON payloads are never truncated mid-packet.
+          if (Platform.isAndroid || Platform.isIOS) {
+            debugPrint('Requesting MTU of 251...');
             try {
-              debugPrint('Requesting MTU of 251 for Android...');
               await _device!.requestMtu(251, timeout: 3);
               debugPrint('MTU request completed');
             } catch (e) {
-              debugPrint('Failed to request MTU: $e');
+              debugPrint('Failed to request MTU (non-fatal): $e');
             }
           }
 
@@ -854,12 +862,12 @@ class AlignEyeDeviceService {
         'Found characteristic: ${_notifyCharacteristic!.uuid} in service: ${_notifyCharacteristic!.serviceUuid}',
       );
 
-      // Enable notifications with retry
-      await _enableNotificationsWithRetry();
-
-      // Set up notification subscription
+      // Subscribe before enabling notifications. Some Android BLE stacks can
+      // deliver the first cached/live value immediately after the CCCD write.
+      // If we attach the listener afterwards, the app may show "connected"
+      // while the live stream never gets its first frame.
       await _notifySubscription?.cancel();
-      _notifySubscription = _notifyCharacteristic!.lastValueStream.listen(
+      _notifySubscription = _notifyCharacteristic!.onValueReceived.listen(
         _handleNotifyData,
         onError: (error) {
           debugPrint('Notification error: $error');
@@ -869,6 +877,35 @@ class AlignEyeDeviceService {
           }
         },
       );
+
+      // Enable notifications with retry
+      await _enableNotificationsWithRetry();
+
+      final cachedValue = _notifyCharacteristic!.lastValue;
+      if (cachedValue.isNotEmpty) {
+        _handleNotifyData(cachedValue);
+      }
+
+      // Watchdog: if no BLE data arrives for too long while we still think
+      // we're connected, force a reconnect to recover the stream.
+      _lastDataReceivedAt = DateTime.now();
+      _dataWatchdogTimer?.cancel();
+      _dataWatchdogTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+        if (connectionStatus.value != DeviceConnectionStatus.connected) {
+          timer.cancel();
+          return;
+        }
+        final last = _lastDataReceivedAt;
+        if (last != null && DateTime.now().difference(last).inSeconds > 15) {
+          debugPrint('WATCHDOG: No data for 15s, forcing reconnect');
+          disconnect().then((_) {
+            if (!_userInitiatedDisconnect &&
+                connectionStatus.value == DeviceConnectionStatus.disconnected) {
+              connect(isAutoConnect: true);
+            }
+          });
+        }
+      });
 
       // Verify connection is working by checking if we can receive data
       if (!await _verifyConnection()) {
@@ -920,7 +957,8 @@ class AlignEyeDeviceService {
       // Only retry for transient failures (scan timeout, connection drop).
       // Never retry when user denied permissions or Bluetooth.
       final msg = e.toString().toLowerCase();
-      final isDenied = msg.contains('permission') ||
+      final isDenied =
+          msg.contains('permission') ||
           msg.contains('bluetooth is not enabled') ||
           msg.contains('not granted');
       if (!isDenied &&
@@ -991,6 +1029,7 @@ class AlignEyeDeviceService {
         }
       }
     }
+    _dataWatchdogTimer?.cancel();
 
     _device = null;
     _notifyCharacteristic = null;
@@ -1319,7 +1358,20 @@ class AlignEyeDeviceService {
       return null;
     }
 
-    await Future.delayed(timeout + const Duration(milliseconds: 250));
+    final scanStart = DateTime.now();
+    while (DateTime.now().difference(scanStart) <
+        timeout + const Duration(milliseconds: 250)) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (preferredRemoteId != null) {
+        final remoteIdLower = preferredRemoteId.toLowerCase();
+        final match = candidates[remoteIdLower];
+        if (match != null && (match.isBonded || !requirePairedDevice)) {
+          break;
+        }
+      } else if (candidates.values.any((c) => c.isBonded)) {
+        break;
+      }
+    }
     await _cleanupScan();
 
     if (candidates.isEmpty) {
@@ -1407,15 +1459,75 @@ class AlignEyeDeviceService {
 
   void _handleNotifyData(List<int> data) {
     if (data.isEmpty) return;
+    _lastDataReceivedAt = DateTime.now();
     _buffer += utf8.decode(data, allowMalformed: true);
+
+    if (_buffer.length > 2048) {
+      debugPrint('BLE buffer overflow cleared: ${_buffer.length}B');
+      _buffer = '';
+      return;
+    }
 
     while (true) {
       final start = _buffer.indexOf('{');
-      final end = _buffer.indexOf('}', start + 1);
-      if (start == -1 || end == -1) {
+      if (start == -1) {
+        _buffer = '';
         break;
       }
-      final chunk = _buffer.substring(start, end + 1).trim();
+      if (start > 0) {
+        _buffer = _buffer.substring(start);
+      }
+
+      int depth = 0;
+      int end = -1;
+      bool inString = false;
+      bool escape = false;
+      bool restartFromNestedStart = false;
+      for (int i = 0; i < _buffer.length; i++) {
+        final ch = _buffer[i];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (ch == '\\') {
+          escape = true;
+          continue;
+        }
+        if (ch == '"') {
+          inString = !inString;
+          continue;
+        }
+        if (inString) continue;
+        if (ch == '{') {
+          if (depth > 0) {
+            _buffer = _buffer.substring(i);
+            restartFromNestedStart = true;
+            break;
+          }
+          depth++;
+        }
+        if (ch == '}') {
+          depth--;
+          if (depth == 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+
+      if (restartFromNestedStart) {
+        continue;
+      }
+
+      if (end == -1) {
+        if (_buffer.length > 600) {
+          debugPrint('BLE stale buffer cleared: ${_buffer.length}B');
+          _buffer = '';
+        }
+        break;
+      }
+
+      final chunk = _buffer.substring(0, end + 1).trim();
       _buffer = _buffer.substring(end + 1);
       try {
         final decoded = jsonDecode(chunk);
@@ -1429,8 +1541,9 @@ class AlignEyeDeviceService {
           final isTherapy = reading.mode.trim().toUpperCase() == 'THERAPY';
           if (isTherapy) {
             if (reading.therapyPatternSequence.isNotEmpty) {
-              latestTherapyPatternSequence =
-                  List<int>.unmodifiable(reading.therapyPatternSequence);
+              latestTherapyPatternSequence = List<int>.unmodifiable(
+                reading.therapyPatternSequence,
+              );
             }
             if (reading.therapyCurrentPatternIndex >= 0) {
               latestTherapyCurrentPatternIndex =
@@ -1448,6 +1561,7 @@ class AlignEyeDeviceService {
                 final b = v.indexOf('[');
                 return b <= 0 ? v.trim() : v.substring(0, b).trim();
               }
+
               final prevClean = strip(latestTherapyPatternName);
               final newClean = strip(pattName);
               if (prevClean != newClean) {
@@ -1483,7 +1597,12 @@ class AlignEyeDeviceService {
             _currentPatternStartElapsedSec = 0;
           }
           // Emit to stream
-          _readingController.add(reading);
+          final now = DateTime.now();
+          if (_lastUiFrame == null ||
+              now.difference(_lastUiFrame!).inMilliseconds >= 100) {
+            _lastUiFrame = now;
+            _readingController.add(reading);
+          }
         }
       } catch (_) {
         // Ignore malformed payloads; we'll wait for the next valid JSON packet.

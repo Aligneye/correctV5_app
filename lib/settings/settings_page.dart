@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/theme/app_theme.dart';
+import 'package:correctv1/auth/auth_service.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -50,7 +51,29 @@ class _SettingsPageState extends State<SettingsPage>
     _controller.dispose();
     super.dispose();
   }
+  Future<void> _confirmLogout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log Out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
 
+    if (confirmed == true) {
+      await AuthService.signOut();
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -125,6 +148,22 @@ class _SettingsPageState extends State<SettingsPage>
                     },
                   ),
                 ),
+                  _kSectionSpacing,
+
+                  // ── Logout Button ───────────────────────────────────
+                  _StaggeredFadeSlide(
+                    controller: _controller,
+                    delayMs: 600,
+                    child: _GradientButton(
+                      label: 'Log Out',
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      onTap: () => _confirmLogout(context),
+                    ),
+                  ),
               ],
             ),
           ),

@@ -153,7 +153,7 @@ class BleSessionSync {
 
   /// Bumps inactivity-based completion when the device stops streaming.
   /// 4s gives the firmware ample time between sessions on a busy link.
-  static const Duration _idleTimeout = Duration(seconds: 4);
+  static const Duration _idleTimeout = Duration(seconds: 8);
 
   /// ±10s window for stitching an offline-sync row onto an existing live
   /// session row (e.g. BT dropped mid-session and the firmware rebroadcasts
