@@ -52,7 +52,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _currentIndex = 0;
   final BluetoothServiceManager _bluetoothManager = BluetoothServiceManager();
 
-
   @override
   void initState() {
     super.initState();
@@ -243,7 +242,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   // _HomeDashboardState ke andar, existing fields ke neeche add karo:
   final ValueNotifier<double> postureAngleNotifier = ValueNotifier<double>(0.0);
   final ValueNotifier<bool> isBadPostureNotifier = ValueNotifier<bool>(false);
-  final ValueNotifier<String> postureStatusNotifier = ValueNotifier<String>('Good posture');
+  final ValueNotifier<String> postureStatusNotifier = ValueNotifier<String>(
+    'Good posture',
+  );
 
   // double _postureAngle = 0;
   // String _postureStatus = 'Waiting for data';
@@ -368,7 +369,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     // });
     _readingSubscription = _deviceService.readings.listen((reading) {
       if (!mounted) return;
-// ── [TEMP DEBUG] Capture all hardware fields ──────────────
+      // ── [TEMP DEBUG] Capture all hardware fields ──────────────
       final debugEntry = <String, dynamic>{
         'time': DateTime.now().toIso8601String().substring(11, 19),
         'mode': reading.mode,
@@ -427,19 +428,22 @@ class _HomeDashboardState extends State<HomeDashboard>
       // 🔥 [FIX]: In values ko direct update karein bina pure page ko setState se heavy re-build kiye
       postureAngleNotifier.value = reading.angle;
       isBadPostureNotifier.value = reading.isBadPosture;
-      postureStatusNotifier.value = reading.isBadPosture ? 'Bad posture' : 'Good posture';
+      postureStatusNotifier.value = reading.isBadPosture
+          ? 'Bad posture'
+          : 'Good posture';
 
       final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
       final isLiveMode =
           isTherapyMode ||
-              reading.mode.trim().toUpperCase() == 'TRAINING' ||
-              reading.mode.trim().toUpperCase() == 'POSTURE';
+          reading.mode.trim().toUpperCase() == 'TRAINING' ||
+          reading.mode.trim().toUpperCase() == 'POSTURE';
       final reportedRemainingSec = reading.therapyRemainingSeconds;
 
       _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
       final newMode = _modeFromDevice(reading.mode);
       final newTiming = _postureTimingFromDevice(reading.subMode);
-      final modeOrTimingChanged = _selectedMode != newMode || _selectedPostureTiming != newTiming;
+      final modeOrTimingChanged =
+          _selectedMode != newMode || _selectedPostureTiming != newTiming;
       // setState(() {
       //   // _syncBannerDismissed = false;
       //
@@ -592,7 +596,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     _syncLiveSessionTickerWithConnection();
 
     // connect hone pe offline sessions reload karo
-    if (_deviceService.connectionStatus.value == DeviceConnectionStatus.connected) {
+    if (_deviceService.connectionStatus.value ==
+        DeviceConnectionStatus.connected) {
       unawaited(_loadOfflineSessions());
     }
   }
@@ -631,6 +636,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   //   });
   // }
   void _ensureLiveSessionTicker() {
+    if (_liveSessionTicker?.isActive ?? false) return;
+
     // 🔥 CHANGE 1: Pehle chal rahe kisi bhi purane ticker ko safely cancel aur null karein
     _liveSessionTicker?.cancel();
     _liveSessionTicker = null;
@@ -644,13 +651,15 @@ class _HomeDashboardState extends State<HomeDashboard>
 
       // 🔥 CHANGE 2: Agar conditions follow nahi ho rahi hain, toh return karne ke bajay
       // ticker ko cancel karke band kar dein taaki battery aur memory bache.
-      if (_deviceService.connectionStatus.value != DeviceConnectionStatus.connected ||
+      if (_deviceService.connectionStatus.value !=
+              DeviceConnectionStatus.connected ||
           _deviceManager.activeSessionId.value == null ||
           !_liveDisplayHasFrame) {
-
         _liveSessionTicker?.cancel();
         _liveSessionTicker = null;
-        setState(() {}); // UI ko state refresh karne ke liye ek baar trigger dein
+        setState(
+          () {},
+        ); // UI ko state refresh karne ke liye ek baar trigger dein
         return;
       }
 
@@ -1250,8 +1259,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   /// therapy mode and we still have time on the clock. Used to swap the
   /// live-posture card for a compact ongoing-therapy preview.
   bool get _isTherapyLive =>
-      _selectedMode == _ModeControlType.therapy &&
-      _therapyRemainingSeconds > 0;
+      _selectedMode == _ModeControlType.therapy && _therapyRemainingSeconds > 0;
 
   void _startTherapyCountdown(int minutes) {
     _therapyCountdownTimer?.cancel();
@@ -1959,28 +1967,25 @@ class _HomeDashboardState extends State<HomeDashboard>
                     //     controller: _controller,
                     //   ),
                     : ValueListenableBuilder<double>(
+                        valueListenable: postureAngleNotifier,
 
-                  valueListenable: postureAngleNotifier,
+                        builder: (context, angle, _) =>
+                            ValueListenableBuilder<bool>(
+                              valueListenable: isBadPostureNotifier,
 
-                  builder: (context, angle, _) => ValueListenableBuilder<bool>(
+                              builder: (context, isBad, _) => _PostureGaugeCard(
+                                postureAngle: angle,
 
-                    valueListenable: isBadPostureNotifier,
+                                postureStatus: isBad
+                                    ? 'Bad posture'
+                                    : 'Good posture',
 
-                    builder: (context, isBad, _) => _PostureGaugeCard(
+                                isBadPosture: isBad,
 
-                      postureAngle: angle,
-
-                      postureStatus: isBad ? 'Bad posture' : 'Good posture',
-
-                      isBadPosture: isBad,
-
-                      controller: _controller,
-
-                    ),
-
-                  ),
-
-                )
+                                controller: _controller,
+                              ),
+                            ),
+                      ),
               ),
               _kSectionSpacing,
               _StaggeredFadeSlide(
@@ -2135,7 +2140,8 @@ class _HomeDashboardState extends State<HomeDashboard>
                   return _DebugLogSection(
                     visible: _showDebugLog,
                     logs: _debugLogs,
-                    onToggle: () => setState(() => _showDebugLog = !_showDebugLog),
+                    onToggle: () =>
+                        setState(() => _showDebugLog = !_showDebugLog),
                     onClear: () {
                       _debugLogs.clear();
                       _debugFrameCount.value = 0;
@@ -2143,8 +2149,8 @@ class _HomeDashboardState extends State<HomeDashboard>
                   );
                 },
               ),
-              // ───────────────────────────────────────────────────
 
+              // ───────────────────────────────────────────────────
             ],
           ),
         ),
@@ -2826,8 +2832,9 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
   void dispose() {
     _readingSub?.cancel();
     _localTicker?.cancel();
-    widget.deviceService.connectionStatus
-        .removeListener(_handleConnectionStatus);
+    widget.deviceService.connectionStatus.removeListener(
+      _handleConnectionStatus,
+    );
     _breathController.dispose();
     _wavesController.dispose();
     super.dispose();
@@ -2838,7 +2845,8 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
   }
 
   void _syncLocalTickerWithConnection() {
-    final connected = widget.deviceService.connectionStatus.value ==
+    final connected =
+        widget.deviceService.connectionStatus.value ==
         DeviceConnectionStatus.connected;
     if (connected) {
       _ensureLocalTicker();
@@ -2876,8 +2884,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
         DeviceConnectionStatus.connected) {
       return;
     }
-    final anchoredRemaining =
-        widget.deviceService.therapyRemainingSecondsNow;
+    final anchoredRemaining = widget.deviceService.therapyRemainingSecondsNow;
     final anchoredElapsed = widget.deviceService.therapyElapsedSecondsNow;
     setState(() {
       if (anchoredRemaining >= 0) {
@@ -2965,13 +2972,15 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
         ? (_totalDurationSeconds / 60).round()
         : widget.totalMinutes;
     final patternElapsed = _patternElapsedSeconds;
-    final patternProgress =
-        (patternElapsed / _patternDurationSeconds).clamp(0.0, 1.0);
+    final patternProgress = (patternElapsed / _patternDurationSeconds).clamp(
+      0.0,
+      1.0,
+    );
 
     final friendlyPattern = friendlyTherapyPatternLabel(_lastPatternName);
     final pillLabel =
-        friendlyPattern.isEmpty || friendlyPattern.toLowerCase() ==
-                'preparing pattern...' ||
+        friendlyPattern.isEmpty ||
+            friendlyPattern.toLowerCase() == 'preparing pattern...' ||
             friendlyPattern.toLowerCase() == 'waiting for therapy'
         ? 'Preparing pattern…'
         : friendlyPattern;
@@ -2988,11 +2997,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                Color(0xFFFFF4F6),
-                Colors.white,
-                Color(0xFFFDF2F8),
-              ],
+              colors: [Color(0xFFFFF4F6), Colors.white, Color(0xFFFDF2F8)],
             ),
           ),
           child: Column(
@@ -3000,10 +3005,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
             children: [
               const Text(
                 'Therapy in Progress',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
@@ -3025,8 +3027,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
                             painter: _MiniTherapyOrbPainter(
                               breathValue: _breathController.value,
                               wavesValue: _wavesController.value,
-                              sessionProgress:
-                                  sessionProgress.clamp(0.0, 1.0),
+                              sessionProgress: sessionProgress.clamp(0.0, 1.0),
                               patternProgress: patternProgress,
                             ),
                           );
@@ -3231,15 +3232,16 @@ class _MiniTherapyOrbPainter extends CustomPainter {
     final breathRadius = baseRadius * (1.0 + breath * 0.045);
 
     final ambientHaloPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          const Color(0xFFFFB4C5).withValues(alpha: 0.28),
-          const Color(0xFFFFB4C5).withValues(alpha: 0.0),
-        ],
-        stops: const [0.25, 1.0],
-      ).createShader(
-        Rect.fromCircle(center: center, radius: breathRadius * 1.7),
-      );
+      ..shader =
+          RadialGradient(
+            colors: [
+              const Color(0xFFFFB4C5).withValues(alpha: 0.28),
+              const Color(0xFFFFB4C5).withValues(alpha: 0.0),
+            ],
+            stops: const [0.25, 1.0],
+          ).createShader(
+            Rect.fromCircle(center: center, radius: breathRadius * 1.7),
+          );
     canvas.drawCircle(center, breathRadius * 1.7, ambientHaloPaint);
 
     final orbRect = Rect.fromCircle(center: center, radius: breathRadius);
@@ -3247,11 +3249,7 @@ class _MiniTherapyOrbPainter extends CustomPainter {
       ..shader = const RadialGradient(
         center: Alignment(-0.15, -0.20),
         radius: 1.05,
-        colors: [
-          Color(0xFFFFF5F7),
-          Color(0xFFFFE4E6),
-          Color(0xFFFDD5E0),
-        ],
+        colors: [Color(0xFFFFF5F7), Color(0xFFFFE4E6), Color(0xFFFDD5E0)],
         stops: [0.0, 0.55, 1.0],
       ).createShader(orbRect);
     canvas.drawCircle(center, breathRadius, orbPaint);
@@ -6552,6 +6550,7 @@ class _AllModesSheetItem extends StatelessWidget {
     );
   }
 }
+
 // ── [TEMP DEBUG] Remove this entire class before release ─────────
 class _DebugLogSection extends StatelessWidget {
   final bool visible;
@@ -6580,14 +6579,21 @@ class _DebugLogSection extends StatelessWidget {
               child: GestureDetector(
                 onTap: onToggle,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E293B),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.bug_report_rounded, color: Color(0xFF94A3B8), size: 16),
+                      const Icon(
+                        Icons.bug_report_rounded,
+                        color: Color(0xFF94A3B8),
+                        size: 16,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         visible
@@ -6609,14 +6615,21 @@ class _DebugLogSection extends StatelessWidget {
               GestureDetector(
                 onTap: onClear,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF7F1D1D),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Text(
                     'Clear',
-                    style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 12, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: Color(0xFFFCA5A5),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -6635,7 +6648,9 @@ class _DebugLogSection extends StatelessWidget {
               decoration: BoxDecoration(
                 color: const Color(0xFF0F172A),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF22C55E).withOpacity(0.4)),
+                border: Border.all(
+                  color: const Color(0xFF22C55E).withOpacity(0.4),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -6650,48 +6665,85 @@ class _DebugLogSection extends StatelessWidget {
                     ),
                   ),
                   const Divider(color: Color(0xFF1E293B), height: 12),
-                  _DebugGrid(entries: [
-                    // Basic
-                    _kv('mode', latest['mode']),
-                    _kv('subMode', latest['subMode']),
-                    _kv('posture', latest['posture']),
-                    _kv('isBad', latest['isBad']),
-                    _kv('difficulty', '${latest['difficulty']}°'),
-                    // Angle
-                    _kv('angle', '${(latest['angle'] as double).toStringAsFixed(2)}°'),
-                    _kv('angleX', '${(latest['angleX'] as double).toStringAsFixed(2)}°'),
-                    _kv('angleY', '${(latest['angleY'] as double).toStringAsFixed(2)}°'),
-                    _kv('angleZ', '${(latest['angleZ'] as double).toStringAsFixed(2)}°'),
-                    // Raw sensor
-                    _kv('rawX', (latest['rawX'] as double).toStringAsFixed(3)),
-                    _kv('rawY', (latest['rawY'] as double).toStringAsFixed(3)),
-                    _kv('rawZ', (latest['rawZ'] as double).toStringAsFixed(3)),
-                    _kv('calY', (latest['calY'] as double).toStringAsFixed(3)),
-                    _kv('calZ', (latest['calZ'] as double).toStringAsFixed(3)),
-                    // Battery
-                    _kv('bat%', '${latest['bat%']}%'),
-                    _kv('batV', '${(latest['batV'] as double).toStringAsFixed(2)}V'),
-                    // Calibration
-                    _kv('isCalib', latest['isCalib']),
-                    _kv('calibPhase', latest['calibPhase']),
-                    _kv('calibResult', latest['calibResult']),
-                    _kv('calibElapsed', '${latest['calibElapsed']}ms'),
-                    _kv('calibTotal', '${latest['calibTotal']}ms'),
-                    // Therapy
-                    _kv('tPattern', latest['tPattern']),
-                    _kv('tNextPat', latest['tNextPat']),
-                    _kv('tElapsed', '${latest['tElapsed']}s'),
-                    _kv('tRemaining', '${latest['tRemaining']}s'),
-                    _kv('tIntensity', latest['tIntensity']),
-                    _kv('tCurIndex', latest['tCurIndex']),
-                    _kv('tTotal', latest['tTotal']),
-                    _kv('tSeq', latest['tSeq'].toString().isEmpty ? '—' : latest['tSeq']),
-                    // Live session
-                    _kv('sessId', latest['sessId']),
-                    _kv('sessElapsed', '${latest['sessElapsed']}s'),
-                    _kv('sessBadCount', latest['sessBadCount']),
-                    _kv('sessEpoch', latest['sessEpoch']),
-                  ]),
+                  _DebugGrid(
+                    entries: [
+                      // Basic
+                      _kv('mode', latest['mode']),
+                      _kv('subMode', latest['subMode']),
+                      _kv('posture', latest['posture']),
+                      _kv('isBad', latest['isBad']),
+                      _kv('difficulty', '${latest['difficulty']}°'),
+                      // Angle
+                      _kv(
+                        'angle',
+                        '${(latest['angle'] as double).toStringAsFixed(2)}°',
+                      ),
+                      _kv(
+                        'angleX',
+                        '${(latest['angleX'] as double).toStringAsFixed(2)}°',
+                      ),
+                      _kv(
+                        'angleY',
+                        '${(latest['angleY'] as double).toStringAsFixed(2)}°',
+                      ),
+                      _kv(
+                        'angleZ',
+                        '${(latest['angleZ'] as double).toStringAsFixed(2)}°',
+                      ),
+                      // Raw sensor
+                      _kv(
+                        'rawX',
+                        (latest['rawX'] as double).toStringAsFixed(3),
+                      ),
+                      _kv(
+                        'rawY',
+                        (latest['rawY'] as double).toStringAsFixed(3),
+                      ),
+                      _kv(
+                        'rawZ',
+                        (latest['rawZ'] as double).toStringAsFixed(3),
+                      ),
+                      _kv(
+                        'calY',
+                        (latest['calY'] as double).toStringAsFixed(3),
+                      ),
+                      _kv(
+                        'calZ',
+                        (latest['calZ'] as double).toStringAsFixed(3),
+                      ),
+                      // Battery
+                      _kv('bat%', '${latest['bat%']}%'),
+                      _kv(
+                        'batV',
+                        '${(latest['batV'] as double).toStringAsFixed(2)}V',
+                      ),
+                      // Calibration
+                      _kv('isCalib', latest['isCalib']),
+                      _kv('calibPhase', latest['calibPhase']),
+                      _kv('calibResult', latest['calibResult']),
+                      _kv('calibElapsed', '${latest['calibElapsed']}ms'),
+                      _kv('calibTotal', '${latest['calibTotal']}ms'),
+                      // Therapy
+                      _kv('tPattern', latest['tPattern']),
+                      _kv('tNextPat', latest['tNextPat']),
+                      _kv('tElapsed', '${latest['tElapsed']}s'),
+                      _kv('tRemaining', '${latest['tRemaining']}s'),
+                      _kv('tIntensity', latest['tIntensity']),
+                      _kv('tCurIndex', latest['tCurIndex']),
+                      _kv('tTotal', latest['tTotal']),
+                      _kv(
+                        'tSeq',
+                        latest['tSeq'].toString().isEmpty
+                            ? '—'
+                            : latest['tSeq'],
+                      ),
+                      // Live session
+                      _kv('sessId', latest['sessId']),
+                      _kv('sessElapsed', '${latest['sessElapsed']}s'),
+                      _kv('sessBadCount', latest['sessBadCount']),
+                      _kv('sessEpoch', latest['sessEpoch']),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -6708,39 +6760,39 @@ class _DebugLogSection extends StatelessWidget {
             ),
             child: logs.isEmpty
                 ? const Center(
-              child: Text(
-                'Waiting for hardware data...',
-                style: TextStyle(color: Color(0xFF475569), fontSize: 12),
-              ),
-            )
-                : ListView.builder(
-              reverse: true,
-              padding: const EdgeInsets.all(8),
-              itemCount: logs.length,
-              itemBuilder: (context, index) {
-                final entry = logs[logs.length - 1 - index];
-                final isLatest = index == 0;
-                final line =
-                    '[${entry['time']}] mode=${entry['mode']}  '
-                    'angle=${(entry['angle'] as double).toStringAsFixed(1)}°  '
-                    'bad=${entry['isBad']}  '
-                    'bat=${entry['bat%']}%  '
-                    'sess=${entry['sessElapsed']}s';
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(
-                    line,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontFamily: 'monospace',
-                      color: isLatest
-                          ? const Color(0xFF86EFAC)
-                          : const Color(0xFF475569),
+                    child: Text(
+                      'Waiting for hardware data...',
+                      style: TextStyle(color: Color(0xFF475569), fontSize: 12),
                     ),
+                  )
+                : ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      final entry = logs[logs.length - 1 - index];
+                      final isLatest = index == 0;
+                      final line =
+                          '[${entry['time']}] mode=${entry['mode']}  '
+                          'angle=${(entry['angle'] as double).toStringAsFixed(1)}°  '
+                          'bad=${entry['isBad']}  '
+                          'bat=${entry['bat%']}%  '
+                          'sess=${entry['sessElapsed']}s';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: Text(
+                          line,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontFamily: 'monospace',
+                            color: isLatest
+                                ? const Color(0xFF86EFAC)
+                                : const Color(0xFF475569),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ],
@@ -6793,6 +6845,7 @@ class _DebugGrid extends StatelessWidget {
     );
   }
 }
+
 // ── [TEMP DEBUG END] ─────────────────────────────────────────────
 class _ComingSoonPage extends StatelessWidget {
   final String title;

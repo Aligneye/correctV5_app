@@ -62,13 +62,16 @@ class PostureReading {
   final int therapyElapsedSeconds;
   final int therapyRemainingSeconds;
   final int therapyIntensityLevel;
+
   /// Full therapy pattern plan for the active session. Each entry is a
   /// firmware TherapyPattern index (0..13). Empty when not in therapy or
   /// the device hasn't announced the sequence yet.
   final List<int> therapyPatternSequence;
+
   /// Index inside [therapyPatternSequence] of the currently-playing pattern.
   /// -1 when unknown / not in therapy.
   final int therapyCurrentPatternIndex;
+
   /// Total patterns scheduled for this session. Firmware publishes this via
   /// `t_total`; used as a fallback length when `t_seq` is missing so the
   /// pager can still render a placeholder card per slot.
@@ -141,7 +144,7 @@ class PostureReading {
       calY: toDouble(json['cal_y']),
       calZ: toDouble(json['cal_z']),
       isCalibrating:
-      json['is_calibrating'] == true ||
+          json['is_calibrating'] == true ||
           json['is_calibrating']?.toString() == 'true',
       calibrationResult: json['calibration_result']?.toString() ?? '',
       calibrationElapsedMs: toInt(
@@ -151,7 +154,7 @@ class PostureReading {
       calibrationPhase: (json['c_phase']?.toString() ?? 'IDLE').toUpperCase(),
       posture: json['posture']?.toString() ?? 'UNKNOWN',
       isBadPosture:
-      json['is_bad_posture'] == true ||
+          json['is_bad_posture'] == true ||
           json['is_bad_posture']?.toString() == 'true',
       batteryVoltage: toDouble(json['battery_voltage']),
       batteryPercentage: toInt(json['battery_percentage']),
@@ -159,9 +162,9 @@ class PostureReading {
       // Device sends shortened field names: t_patt, t_next, t_elap, t_rem
       // Also check for full names for backward compatibility
       therapyPattern:
-      (json['t_patt'] ?? json['therapy_pattern'])?.toString() ?? '',
+          (json['t_patt'] ?? json['therapy_pattern'])?.toString() ?? '',
       therapyNextPattern:
-      (json['t_next'] ?? json['therapy_next_pattern'])?.toString() ?? '',
+          (json['t_next'] ?? json['therapy_next_pattern'])?.toString() ?? '',
       therapyElapsedSeconds: toInt(
         json['t_elap'] ?? json['therapy_elapsed_sec'],
       ),
@@ -189,7 +192,9 @@ class PostureReading {
         if (raw is num) return raw.toInt();
         return int.tryParse(raw.toString()) ?? -1;
       }(),
-      therapyTotalPatterns: toInt(json['t_total'] ?? json['therapy_total_patterns']),
+      therapyTotalPatterns: toInt(
+        json['t_total'] ?? json['therapy_total_patterns'],
+      ),
       liveSessionId: toInt(json['s_id'] ?? json['session_id']),
       liveSessionElapsedSeconds: toInt(
         json['s_elap'] ?? json['session_elapsed_sec'],
@@ -221,7 +226,7 @@ class PostureReading {
 
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
-      : _deviceNamePrefix = deviceNamePrefix;
+    : _deviceNamePrefix = deviceNamePrefix;
 
   final String _deviceNamePrefix;
   final _readingController = StreamController<PostureReading>.broadcast();
@@ -413,8 +418,8 @@ class AlignEyeDeviceService {
     // immediately on setTherapyMode().
     return _writeTextCommand(
       'THERAPY_INTENSITY=$clampedLevel;'
-          'THERAPY_DURATION_MIN=$minutes;'
-          'MODE=THERAPY',
+      'THERAPY_DURATION_MIN=$minutes;'
+      'MODE=THERAPY',
     );
   }
 
@@ -503,8 +508,7 @@ class AlignEyeDeviceService {
       final scanStatus = await Permission.bluetoothScan.status;
       final connectStatus = await Permission.bluetoothConnect.status;
 
-      if (scanStatus.isPermanentlyDenied ||
-          connectStatus.isPermanentlyDenied) {
+      if (scanStatus.isPermanentlyDenied || connectStatus.isPermanentlyDenied) {
         return BleReadiness.permissionPermanentlyDenied;
       }
 
@@ -776,8 +780,8 @@ class AlignEyeDeviceService {
 
           // Request larger MTU on Android BEFORE enabling notifications
           // so large JSON payloads are never truncated mid-packet.
-          if (Platform.isAndroid) {
-            debugPrint('Requesting MTU of 251 for Android...');
+          if (Platform.isAndroid || Platform.isIOS) {
+            debugPrint('Requesting MTU of 251...');
             try {
               await _device!.requestMtu(251, timeout: 3);
               debugPrint('MTU request completed');
@@ -794,9 +798,9 @@ class AlignEyeDeviceService {
           final stateAfterError = deviceAfterError == null
               ? BluetoothConnectionState.disconnected
               : await deviceAfterError.connectionState.first.timeout(
-            const Duration(seconds: 2),
-            onTimeout: () => BluetoothConnectionState.disconnected,
-          );
+                  const Duration(seconds: 2),
+                  onTimeout: () => BluetoothConnectionState.disconnected,
+                );
           debugPrint('Connection state after error: $stateAfterError');
 
           // Retry if we haven't exceeded max retries
@@ -858,10 +862,10 @@ class AlignEyeDeviceService {
         'Found characteristic: ${_notifyCharacteristic!.uuid} in service: ${_notifyCharacteristic!.serviceUuid}',
       );
 
-      // Enable notifications with retry
-      await _enableNotificationsWithRetry();
-
-// Set up notification subscription
+      // Subscribe before enabling notifications. Some Android BLE stacks can
+      // deliver the first cached/live value immediately after the CCCD write.
+      // If we attach the listener afterwards, the app may show "connected"
+      // while the live stream never gets its first frame.
       await _notifySubscription?.cancel();
       _notifySubscription = _notifyCharacteristic!.onValueReceived.listen(
         _handleNotifyData,
@@ -874,6 +878,14 @@ class AlignEyeDeviceService {
         },
       );
 
+      // Enable notifications with retry
+      await _enableNotificationsWithRetry();
+
+      final cachedValue = _notifyCharacteristic!.lastValue;
+      if (cachedValue.isNotEmpty) {
+        _handleNotifyData(cachedValue);
+      }
+
       // Watchdog: if no BLE data arrives for too long while we still think
       // we're connected, force a reconnect to recover the stream.
       _lastDataReceivedAt = DateTime.now();
@@ -884,10 +896,11 @@ class AlignEyeDeviceService {
           return;
         }
         final last = _lastDataReceivedAt;
-        if (last != null && DateTime.now().difference(last).inSeconds > 8) {
-          debugPrint('WATCHDOG: No data for 8s, forcing reconnect');
+        if (last != null && DateTime.now().difference(last).inSeconds > 15) {
+          debugPrint('WATCHDOG: No data for 15s, forcing reconnect');
           disconnect().then((_) {
-            if (!_userInitiatedDisconnect) {
+            if (!_userInitiatedDisconnect &&
+                connectionStatus.value == DeviceConnectionStatus.disconnected) {
               connect(isAutoConnect: true);
             }
           });
@@ -944,7 +957,8 @@ class AlignEyeDeviceService {
       // Only retry for transient failures (scan timeout, connection drop).
       // Never retry when user denied permissions or Bluetooth.
       final msg = e.toString().toLowerCase();
-      final isDenied = msg.contains('permission') ||
+      final isDenied =
+          msg.contains('permission') ||
           msg.contains('bluetooth is not enabled') ||
           msg.contains('not granted');
       if (!isDenied &&
@@ -1093,7 +1107,7 @@ class AlignEyeDeviceService {
     try {
       final bondedDevices = await FlutterBluePlus.bondedDevices;
       final isPaired = bondedDevices.any(
-            (bonded) => bonded.remoteId == device.remoteId,
+        (bonded) => bonded.remoteId == device.remoteId,
       );
       return isPaired;
     } catch (e) {
@@ -1106,7 +1120,7 @@ class AlignEyeDeviceService {
     try {
       final bondedDevices = await FlutterBluePlus.bondedDevices;
       return bondedDevices.any(
-            (device) => _matchesTargetDeviceName(device.platformName),
+        (device) => _matchesTargetDeviceName(device.platformName),
       );
     } catch (e) {
       debugPrint('Error checking bonded target devices: $e');
@@ -1305,10 +1319,10 @@ class AlignEyeDeviceService {
     final serviceUuidLower = _kServiceUuid.toLowerCase();
 
     _scanSubscription = FlutterBluePlus.scanResults.listen(
-          (results) {
+      (results) {
         for (final result in results) {
           final hasServiceMatch = result.advertisementData.serviceUuids.any(
-                (uuid) => uuid.toString().toLowerCase() == serviceUuidLower,
+            (uuid) => uuid.toString().toLowerCase() == serviceUuidLower,
           );
           // Require AlignEye service UUID to be present so we only consider
           // genuine AlignEye devices during scanning.
@@ -1345,7 +1359,8 @@ class AlignEyeDeviceService {
     }
 
     final scanStart = DateTime.now();
-    while (DateTime.now().difference(scanStart) < timeout + const Duration(milliseconds: 250)) {
+    while (DateTime.now().difference(scanStart) <
+        timeout + const Duration(milliseconds: 250)) {
       await Future.delayed(const Duration(milliseconds: 200));
       if (preferredRemoteId != null) {
         final remoteIdLower = preferredRemoteId.toLowerCase();
@@ -1405,8 +1420,8 @@ class AlignEyeDeviceService {
   }
 
   BluetoothCharacteristic? _findNotifyCharacteristic(
-      List<BluetoothService> services,
-      ) {
+    List<BluetoothService> services,
+  ) {
     final serviceUuidLower = _kServiceUuid.toLowerCase();
     final charUuidLower = _kCharacteristicUuid.toLowerCase();
 
@@ -1447,6 +1462,12 @@ class AlignEyeDeviceService {
     _lastDataReceivedAt = DateTime.now();
     _buffer += utf8.decode(data, allowMalformed: true);
 
+    if (_buffer.length > 2048) {
+      debugPrint('BLE buffer overflow cleared: ${_buffer.length}B');
+      _buffer = '';
+      return;
+    }
+
     while (true) {
       final start = _buffer.indexOf('{');
       if (start == -1) {
@@ -1461,6 +1482,7 @@ class AlignEyeDeviceService {
       int end = -1;
       bool inString = false;
       bool escape = false;
+      bool restartFromNestedStart = false;
       for (int i = 0; i < _buffer.length; i++) {
         final ch = _buffer[i];
         if (escape) {
@@ -1476,7 +1498,14 @@ class AlignEyeDeviceService {
           continue;
         }
         if (inString) continue;
-        if (ch == '{') depth++;
+        if (ch == '{') {
+          if (depth > 0) {
+            _buffer = _buffer.substring(i);
+            restartFromNestedStart = true;
+            break;
+          }
+          depth++;
+        }
         if (ch == '}') {
           depth--;
           if (depth == 0) {
@@ -1486,7 +1515,15 @@ class AlignEyeDeviceService {
         }
       }
 
+      if (restartFromNestedStart) {
+        continue;
+      }
+
       if (end == -1) {
+        if (_buffer.length > 600) {
+          debugPrint('BLE stale buffer cleared: ${_buffer.length}B');
+          _buffer = '';
+        }
         break;
       }
 
@@ -1504,8 +1541,9 @@ class AlignEyeDeviceService {
           final isTherapy = reading.mode.trim().toUpperCase() == 'THERAPY';
           if (isTherapy) {
             if (reading.therapyPatternSequence.isNotEmpty) {
-              latestTherapyPatternSequence =
-              List<int>.unmodifiable(reading.therapyPatternSequence);
+              latestTherapyPatternSequence = List<int>.unmodifiable(
+                reading.therapyPatternSequence,
+              );
             }
             if (reading.therapyCurrentPatternIndex >= 0) {
               latestTherapyCurrentPatternIndex =
@@ -1523,6 +1561,7 @@ class AlignEyeDeviceService {
                 final b = v.indexOf('[');
                 return b <= 0 ? v.trim() : v.substring(0, b).trim();
               }
+
               final prevClean = strip(latestTherapyPatternName);
               final newClean = strip(pattName);
               if (prevClean != newClean) {
@@ -1558,9 +1597,10 @@ class AlignEyeDeviceService {
             _currentPatternStartElapsedSec = 0;
           }
           // Emit to stream
-          final _now = DateTime.now();
-          if (_lastUiFrame == null || _now.difference(_lastUiFrame!).inMilliseconds >= 100) {
-            _lastUiFrame = _now;
+          final now = DateTime.now();
+          if (_lastUiFrame == null ||
+              now.difference(_lastUiFrame!).inMilliseconds >= 100) {
+            _lastUiFrame = now;
             _readingController.add(reading);
           }
         }
