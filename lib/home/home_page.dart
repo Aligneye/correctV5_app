@@ -2358,7 +2358,7 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
 
     _connectCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 80),
     );
     _connectScale = Tween<double>(
       begin: 1.0,

@@ -132,8 +132,10 @@ class PostureReading {
     }
 
     return PostureReading(
-      mode: json['mode']?.toString() ?? 'UNKNOWN',
-      subMode: json['sub_mode']?.toString() ?? 'UNKNOWN',
+      mode: json['mode']?.toString() ??
+          (json['t'] == 'L' ? 'TRACKING' : 'THERAPY'),
+      // subMode: json['sub_mode']?.toString() ?? 'UNKNOWN',
+      subMode: json['sub_mode']?.toString() ?? 'INSTANT',
       angle: toDouble(json['angle']),
       rawXG: toDouble(json['raw_x_g']),
       rawYG: toDouble(json['raw_y_g']),
@@ -154,10 +156,15 @@ class PostureReading {
       calibrationPhase: (json['c_phase']?.toString() ?? 'IDLE').toUpperCase(),
       posture: json['posture']?.toString() ?? 'UNKNOWN',
       isBadPosture:
-          json['is_bad_posture'] == true ||
-          json['is_bad_posture']?.toString() == 'true',
+      json['is_bad_posture'] == true ||
+          json['is_bad_posture']?.toString() == 'true' ||
+          (json['posture']?.toString().toUpperCase().contains('BAD') ?? false),
+
       batteryVoltage: toDouble(json['battery_voltage']),
-      batteryPercentage: toInt(json['battery_percentage']),
+      // batteryPercentage: toInt(json['battery_percentage']),
+      batteryPercentage: toInt(
+        json['battery_percentage'] ?? json['battery'],
+      ),
       difficultyDeg: toInt(json['difficulty_deg']),
       // Device sends shortened field names: t_patt, t_next, t_elap, t_rem
       // Also check for full names for backward compatibility
@@ -1459,10 +1466,14 @@ class AlignEyeDeviceService {
 
   void _handleNotifyData(List<int> data) {
     if (data.isEmpty) return;
+    final rawData = utf8.decode(data, allowMalformed: true);
+    debugPrint("BLE RAW: $rawData");
     _lastDataReceivedAt = DateTime.now();
-    _buffer += utf8.decode(data, allowMalformed: true);
+    // _buffer += utf8.decode(data, allowMalformed: true);
+    _buffer += rawData;
 
-    if (_buffer.length > 2048) {
+    // if (_buffer.length > 2048) {
+    if (_buffer.length > 10000) {
       debugPrint('BLE buffer overflow cleared: ${_buffer.length}B');
       _buffer = '';
       return;
@@ -1520,7 +1531,9 @@ class AlignEyeDeviceService {
       }
 
       if (end == -1) {
-        if (_buffer.length > 600) {
+        if (_buffer.length > 5000) {
+          debugPrint("BUFFER DATA:");
+          debugPrint(_buffer);
           debugPrint('BLE stale buffer cleared: ${_buffer.length}B');
           _buffer = '';
         }
@@ -1535,6 +1548,11 @@ class AlignEyeDeviceService {
           final reading = PostureReading.fromJson(decoded);
           // Store current reading
           currentReading.value = reading;
+          debugPrint(
+              "POSTURE=${reading.posture} "
+                  "BAD=${reading.isBadPosture} "
+                  "MODE=${reading.mode}"
+          );
           // Sticky-cache therapy fields that firmware only publishes every
           // few frames. Only update when the frame actually carries new
           // info, so the cache survives across transitions / page rebuilds.
@@ -1604,8 +1622,10 @@ class AlignEyeDeviceService {
             _readingController.add(reading);
           }
         }
-      } catch (_) {
-        // Ignore malformed payloads; we'll wait for the next valid JSON packet.
+      } catch (e) {
+        debugPrint("JSON ERROR: $e");
+        debugPrint("BAD JSON:");
+        debugPrint(chunk);
       }
     }
   }
