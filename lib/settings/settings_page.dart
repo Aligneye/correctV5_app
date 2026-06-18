@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
+import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:correctv1/auth/auth_service.dart';
 
@@ -148,22 +149,22 @@ class _SettingsPageState extends State<SettingsPage>
                     },
                   ),
                 ),
-                  _kSectionSpacing,
+                _kSectionSpacing,
 
-                  // ── Logout Button ───────────────────────────────────
-                  _StaggeredFadeSlide(
-                    controller: _controller,
-                    delayMs: 600,
-                    child: _GradientButton(
-                      label: 'Log Out',
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      onTap: () => _confirmLogout(context),
+                // ── Logout Button ───────────────────────────────────
+                _StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 600,
+                  child: _GradientButton(
+                    label: 'Log Out',
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
+                    onTap: () => _confirmLogout(context),
                   ),
+                ),
               ],
             ),
           ),
@@ -274,29 +275,29 @@ class _SettingsHeader extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: avatarUrl != null
               ? Image.network(
-                  avatarUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Center(
-                    child: Text(
-                      initials,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                )
-              : Center(
-                  child: Text(
-                    initials,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+            avatarUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Center(
+              child: Text(
+                initials,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                 ),
+              ),
+            ),
+          )
+              : Center(
+            child: Text(
+              initials,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
         const Spacer(),
         Text(
@@ -394,7 +395,7 @@ class _DeviceInfoCard extends StatelessWidget {
               ),
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: AppTheme.successBg,
                   borderRadius: BorderRadius.circular(8),
@@ -426,6 +427,18 @@ class _DeviceInfoCard extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           Divider(height: 1, thickness: 1, color: AppTheme.border),
+          const SizedBox(height: 14),
+          ValueListenableBuilder<PostureReading?>(
+            valueListenable:
+            BluetoothServiceManager().deviceService.currentReading,
+            builder: (context, reading, _) {
+              final profile =
+              (reading?.profile.isNotEmpty ?? false)
+                  ? reading!.profile
+                  : '-';
+              return _InfoRow(label: 'Active Profile', value: profile);
+            },
+          ),
           const SizedBox(height: 14),
           _InfoRow(label: 'Firmware Version', value: 'v2.4.1'),
           const SizedBox(height: 14),
@@ -635,7 +648,7 @@ class _AlignmentCalibrationCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Sit in your ideal posture position before calibrating. '
-                    'This will set your baseline reference angle.',
+                        'This will set your baseline reference angle.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 13,
@@ -666,138 +679,148 @@ class _BatteryTemperatureRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        // Battery card
-        Expanded(
-          child: _SurfaceCard(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: AppTheme.successBg,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.battery_std_rounded,
-                    color: AppTheme.successText,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  '85%',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Battery Health',
-                  style: TextStyle(
-                    color: _kMutedText,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: 0.85,
-                    minHeight: 6,
-                    backgroundColor:
-                        AppTheme.brandPrimary.withValues(alpha: 0.15),
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                      AppTheme.brandPrimary,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '~12 hours remaining',
-                  style: TextStyle(
-                    color: AppTheme.textMuted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 16),
-        // Temperature card
-        Expanded(
-          child: _SurfaceCard(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: AppTheme.connectedBg,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.thermostat_rounded,
-                    color: _kPrimaryBlue,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  '23°C',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Temperature',
-                  style: TextStyle(
-                    color: _kMutedText,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
+    return ValueListenableBuilder<PostureReading?>(
+      valueListenable:
+      BluetoothServiceManager().deviceService.currentReading,
+      builder: (context, reading, _) {
+        final battery = reading?.batteryPercentage ?? 0;
+        final batteryColor = battery > 30
+            ? AppTheme.successText
+            : const Color(0xFFEF4444);
+        return Row(
+          children: [
+            // Battery card
+            Expanded(
+              child: _SurfaceCard(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 7,
-                      height: 7,
-                      decoration: const BoxDecoration(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.successBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.battery_std_rounded,
                         color: AppTheme.successText,
-                        shape: BoxShape.circle,
+                        size: 18,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(height: 14),
                     Text(
-                      'Normal range',
+                      '$battery%',
                       style: TextStyle(
-                        color: AppTheme.successText,
+                        color: batteryColor,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Battery',
+                      style: TextStyle(
+                        color: _kMutedText,
                         fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: battery / 100,
+                        minHeight: 6,
+                        backgroundColor:
+                        AppTheme.brandPrimary.withValues(alpha: 0.15),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          batteryColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      battery > 0 ? '$battery% remaining' : 'Not connected',
+                      style: TextStyle(
+                        color: AppTheme.textMuted,
+                        fontSize: 11,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ],
+            const SizedBox(width: 16),
+            // Temperature card
+            Expanded(
+              child: _SurfaceCard(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.connectedBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.thermostat_rounded,
+                        color: _kPrimaryBlue,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      '23°C',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Temperature',
+                      style: TextStyle(
+                        color: _kMutedText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.successText,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Normal range',
+                          style: TextStyle(
+                            color: AppTheme.successText,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

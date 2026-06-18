@@ -56,6 +56,7 @@ class PostureReading {
   final bool isBadPosture;
   final double batteryVoltage;
   final int batteryPercentage;
+  final String profile;
   final int difficultyDeg;
   final String therapyPattern;
   final String therapyNextPattern;
@@ -103,6 +104,7 @@ class PostureReading {
     required this.isBadPosture,
     required this.batteryVoltage,
     required this.batteryPercentage,
+    required this.profile,
     required this.difficultyDeg,
     required this.therapyPattern,
     required this.therapyNextPattern,
@@ -132,8 +134,7 @@ class PostureReading {
     }
 
     return PostureReading(
-      mode: json['mode']?.toString() ??
-          (json['t'] == 'L' ? 'TRACKING' : 'THERAPY'),
+      mode: json['mode']?.toString() ?? 'UNKNOWN',
       // subMode: json['sub_mode']?.toString() ?? 'UNKNOWN',
       subMode: json['sub_mode']?.toString() ?? 'INSTANT',
       angle: toDouble(json['angle']),
@@ -165,6 +166,7 @@ class PostureReading {
       batteryPercentage: toInt(
         json['battery_percentage'] ?? json['battery'],
       ),
+      profile: json['profile']?.toString() ?? '',
       difficultyDeg: toInt(json['difficulty_deg']),
       // Device sends shortened field names: t_patt, t_next, t_elap, t_rem
       // Also check for full names for backward compatibility
@@ -242,6 +244,10 @@ class AlignEyeDeviceService {
   );
   final isAutoConnectionAttempt = ValueNotifier<bool>(false);
   final currentReading = ValueNotifier<PostureReading?>(null);
+  String _lastKnownMode = 'OFF';
+  String _lastKnownSubMode = 'INSTANT';
+  String _lastKnownProfile = '';
+  int _lastKnownBattery = -1;
   DateTime? _lastUiFrame;
   Timer? _dataWatchdogTimer;
   DateTime? _lastDataReceivedAt;
@@ -888,10 +894,10 @@ class AlignEyeDeviceService {
       // Enable notifications with retry
       await _enableNotificationsWithRetry();
 
-      final cachedValue = _notifyCharacteristic!.lastValue;
-      if (cachedValue.isNotEmpty) {
-        _handleNotifyData(cachedValue);
-      }
+      // final cachedValue = _notifyCharacteristic!.lastValue;
+      // if (cachedValue.isNotEmpty) {
+      //   _handleNotifyData(cachedValue);
+      // }
 
       // Watchdog: if no BLE data arrives for too long while we still think
       // we're connected, force a reconnect to recover the stream.
@@ -1544,6 +1550,39 @@ class AlignEyeDeviceService {
       _buffer = _buffer.substring(end + 1);
       try {
         final decoded = jsonDecode(chunk);
+        final packetType =
+
+        (decoded['t']?.toString() ?? '').toUpperCase();
+
+        if (packetType == 'T') {
+          if (decoded['mode'] != null) {
+            _lastKnownMode = decoded['mode'].toString();
+          }
+          if (decoded['sub_mode'] != null) {
+            _lastKnownSubMode = decoded['sub_mode'].toString();
+          }
+          if (decoded['profile'] != null) {
+            _lastKnownProfile = decoded['profile'].toString();
+          }
+          if (decoded['battery'] != null) {
+            _lastKnownBattery = int.tryParse(decoded['battery'].toString()) ?? _lastKnownBattery;
+          }
+          return;
+        }
+
+        if (packetType == 'L') {
+          if (decoded['mode'] == null) decoded['mode'] = _lastKnownMode;
+          if (decoded['sub_mode'] == null && _lastKnownSubMode.isNotEmpty) {
+            decoded['sub_mode'] = _lastKnownSubMode;
+          }
+          if (decoded['profile'] == null && _lastKnownProfile.isNotEmpty) {
+            decoded['profile'] = _lastKnownProfile;
+          }
+          if (decoded['battery'] == null && _lastKnownBattery >= 0) {
+            decoded['battery'] = _lastKnownBattery;
+          }
+        }
+        debugPrint("PACKET TYPE = ${decoded['t']}");
         if (decoded is Map<String, dynamic>) {
           final reading = PostureReading.fromJson(decoded);
           // Store current reading

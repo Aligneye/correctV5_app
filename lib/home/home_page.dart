@@ -49,6 +49,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late PageController _pageController;
+  late final List<Widget> _pages;
   int _currentIndex = 0;
   final BluetoothServiceManager _bluetoothManager = BluetoothServiceManager();
 
@@ -56,12 +57,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _pageController = PageController();
-    // Initialize Bluetooth connection when HomePage is created
     _bluetoothManager.initialize();
-    // Hook up the BLE -> Supabase sync coordinator. Idempotent so it's safe
-    // to call on every HomePage rebuild.
     WidgetsBinding.instance.addObserver(this);
     DeviceManager().init();
+    _pages = [
+      HomeDashboard(
+        onNavigateToPage: _onItemTapped,
+        onOpenTherapy: _openTherapyPage,
+        onOpenTraining: _openTrainingPage,
+        onOpenMeditation: _openMeditationPage,
+        deviceService: _bluetoothManager.deviceService,
+      ),
+      const DiscoverPage(),
+      const AnalyticsScreen(),
+      const SettingsPage(),
+    ];
   }
 
   @override
@@ -71,6 +81,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // The connection will persist across page navigations
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBody: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        physics: const BouncingScrollPhysics(),
+        children: _pages,
+      ),
+      bottomNavigationBar: ModernNavBar(
+        selectedIndex: _currentIndex,
+        onItemSelected: _onItemTapped,
+      ),
+    );
   }
 
   @override
@@ -128,7 +159,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (_, animation, __) =>
-            FadeTransition(opacity: animation, child: const TrainingPage()),
+            FadeTransition(opacity: animation, child: TrainingPage(deviceService: BluetoothServiceManager().deviceService)),
         transitionsBuilder: (_, animation, __, child) {
           final curved = CurvedAnimation(
             parent: animation,
@@ -171,44 +202,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final pages = [
-      HomeDashboard(
-        onNavigateToPage: _onItemTapped,
-        onOpenTherapy: _openTherapyPage,
-        onOpenTraining: _openTrainingPage,
-        onOpenMeditation: _openMeditationPage,
-        deviceService: _bluetoothManager.deviceService,
-      ),
-      const DiscoverPage(),
-      const AnalyticsScreen(),
-      const SettingsPage(),
-    ];
-
-    return Scaffold(
-      extendBody: true,
-      // The background is handled inside HomeDashboard for the gradient
-      // But for other pages we might need a background.
-      // For now, let's keep the Scaffold background simple or transparent if pages handle it.
-      // The React code showed a full page gradient for Home.
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        physics: const BouncingScrollPhysics(),
-        children: pages,
-      ),
-      bottomNavigationBar: ModernNavBar(
-        selectedIndex: _currentIndex,
-        onItemSelected: _onItemTapped,
-      ),
-    );
-  }
 }
 
 class HomeDashboard extends StatefulWidget {
@@ -254,14 +247,15 @@ class _HomeDashboardState extends State<HomeDashboard>
   final _batteryLevel = ValueNotifier<int>(0);
 
   _ModeControlType _selectedMode = _ModeControlType.track;
+  DateTime? _ignoreModeFromDeviceUntil;
   _PostureTimingType _selectedPostureTiming = _PostureTimingType.instant;
   int _selectedDifficulty = 25;
   int _therapyDurationMinutes = 10;
   Timer? _therapyCountdownTimer;
-  int _therapyRemainingSeconds = 0;
+  final _therapyRemainingSeconds = ValueNotifier<int>(0);
   Timer? _liveSessionTicker;
   String? _liveDisplaySessionId;
-  int _liveDisplayDurationSec = 0;
+  final _liveDisplayDurationSec = ValueNotifier<int>(0);
   bool _liveDisplayHasFrame = false;
   bool _hasShownStartupConnectSheet = false;
   bool _isFindingDevice = false;
@@ -480,7 +474,10 @@ class _HomeDashboardState extends State<HomeDashboard>
       // this entire 6000-line widget tree and is the main cause of jank.
       bool needsRebuild = false;
 
-      if (modeOrTimingChanged) {
+      final ignoreModeNow = _ignoreModeFromDeviceUntil != null &&
+          DateTime.now().isBefore(_ignoreModeFromDeviceUntil!);
+
+      if (modeOrTimingChanged && !ignoreModeNow) {
         _selectedMode = newMode;
         _selectedPostureTiming = newTiming;
         _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
@@ -490,17 +487,24 @@ class _HomeDashboardState extends State<HomeDashboard>
         }
         needsRebuild = true;
       }
+      final isOff = reading.mode.trim().toUpperCase() == 'OFF';
+      if (isOff) {
+
+        isBadPostureNotifier.value = false;
+        postureStatusNotifier.value = 'Device off';
+        needsRebuild = true;
+      }
 
       if (isTherapyMode && reportedRemainingSec > 0) {
-        final secondsChanged = _therapyRemainingSeconds != reportedRemainingSec;
-        _therapyRemainingSeconds = reportedRemainingSec;
+        final secondsChanged = _therapyRemainingSeconds.value != reportedRemainingSec;
+        _therapyRemainingSeconds.value = reportedRemainingSec;
         _ensureTherapyCountdownRunning();
         if (secondsChanged) needsRebuild = true;
       } else if (!isTherapyMode) {
-        if (_therapyCountdownTimer != null || _therapyRemainingSeconds != 0) {
+        if (_therapyCountdownTimer != null || _therapyRemainingSeconds.value != 0) {
           _therapyCountdownTimer?.cancel();
           _therapyCountdownTimer = null;
-          _therapyRemainingSeconds = 0;
+          _therapyRemainingSeconds.value = 0;
           needsRebuild = true;
         }
       }
@@ -657,15 +661,10 @@ class _HomeDashboardState extends State<HomeDashboard>
           !_liveDisplayHasFrame) {
         _liveSessionTicker?.cancel();
         _liveSessionTicker = null;
-        setState(
-          () {},
-        ); // UI ko state refresh karne ke liye ek baar trigger dein
         return;
       }
 
-      setState(() {
-        _liveDisplayDurationSec++;
-      });
+      _liveDisplayDurationSec.value++;
     });
   }
 
@@ -675,7 +674,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     if (clearFrame) {
       _liveDisplayHasFrame = false;
       _liveDisplaySessionId = null;
-      _liveDisplayDurationSec = 0;
+      _liveDisplayDurationSec.value = 0;
     }
   }
 
@@ -683,7 +682,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     final activeId = _deviceManager.activeSessionId.value;
     if (activeId == null) return;
     _liveDisplaySessionId = activeId;
-    _liveDisplayDurationSec = _liveDurationFromReading(reading);
+    _liveDisplayDurationSec.value = _liveDurationFromReading(reading);
     _liveDisplayHasFrame = true;
     _ensureLiveSessionTicker();
   }
@@ -696,7 +695,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         reading.therapyElapsedSeconds > 0) {
       return reading.therapyElapsedSeconds;
     }
-    return _liveDisplayDurationSec;
+    return _liveDisplayDurationSec.value;
   }
 
   List<SessionData> _sessionsWithLiveDisplayDuration() {
@@ -713,8 +712,8 @@ class _HomeDashboardState extends State<HomeDashboard>
             name: session.name,
             time: session.time,
             date: session.date,
-            duration: _formatSessionDuration(_liveDisplayDurationSec),
-            durationSec: _liveDisplayDurationSec,
+            duration: _formatSessionDuration(_liveDisplayDurationSec.value),
+            durationSec: _liveDisplayDurationSec.value,
             alerts: session.alerts,
             score: session.score,
             pattern: session.pattern,
@@ -1259,13 +1258,11 @@ class _HomeDashboardState extends State<HomeDashboard>
   /// therapy mode and we still have time on the clock. Used to swap the
   /// live-posture card for a compact ongoing-therapy preview.
   bool get _isTherapyLive =>
-      _selectedMode == _ModeControlType.therapy && _therapyRemainingSeconds > 0;
+      _selectedMode == _ModeControlType.therapy && _therapyRemainingSeconds.value > 0;
 
   void _startTherapyCountdown(int minutes) {
     _therapyCountdownTimer?.cancel();
-    setState(() {
-      _therapyRemainingSeconds = minutes * 60;
-    });
+    _therapyRemainingSeconds.value = minutes * 60;
     _ensureTherapyCountdownRunning();
   }
 
@@ -1282,25 +1279,19 @@ class _HomeDashboardState extends State<HomeDashboard>
         timer.cancel();
         return;
       }
-      if (_therapyRemainingSeconds <= 1) {
+      if (_therapyRemainingSeconds.value <= 1) {
         timer.cancel();
-        setState(() {
-          _therapyRemainingSeconds = 0;
-        });
+        _therapyRemainingSeconds.value = 0;
         return;
       }
-      setState(() {
-        _therapyRemainingSeconds -= 1;
-      });
+      _therapyRemainingSeconds.value -= 1;
     });
   }
 
   void _stopTherapyCountdown({bool clearTime = false}) {
     _therapyCountdownTimer?.cancel();
     if (clearTime) {
-      setState(() {
-        _therapyRemainingSeconds = 0;
-      });
+      _therapyRemainingSeconds.value = 0;
     }
   }
 
@@ -1403,6 +1394,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       isScrollControlled: true,
       builder: (ctx) => _ConnectedDeviceSheet(
         batteryLevel: _batteryLevel.value,
+        profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
         onDisconnect: () async {
           Navigator.of(ctx).pop();
           await _deviceService.disconnect(userInitiated: true);
@@ -1681,6 +1673,16 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
+  // _ModeControlType _modeFromDevice(String mode) {
+  //   final normalized = mode.trim().toUpperCase();
+  //   if (normalized == 'TRAINING' || normalized == 'POSTURE') {
+  //     return _ModeControlType.posture;
+  //   }
+  //   if (normalized == 'THERAPY') {
+  //     return _ModeControlType.therapy;
+  //   }
+  //   return _ModeControlType.track;
+  // }
   _ModeControlType _modeFromDevice(String mode) {
     final normalized = mode.trim().toUpperCase();
     if (normalized == 'TRAINING' || normalized == 'POSTURE') {
@@ -1915,6 +1917,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                                   isSyncing: isSyncing,
                                   isLive: activeSessionId != null,
                                   batteryLevel: _batteryLevel.value,
+                                  profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
                                   onTap: _handleDeviceStatusTap,
                                 );
                               },
@@ -2023,14 +2026,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                   // },
                   onModeSelected: (mode) {
                     if (mode == _ModeControlType.therapy) {
-                      // Hand off to the configurable Therapy page — the user
-                      // picks point/intensity/duration and presses Start
-                      // there, which owns the full start sequence (sync,
-                      // prime context, sendTherapyStart, countdown).
                       widget.onOpenTherapy();
                       return;
                     }
                     setState(() => _selectedMode = mode);
+                    _ignoreModeFromDeviceUntil =
+                        DateTime.now().add(const Duration(seconds: 1));
                     _stopTherapyCountdown();
                     unawaited(
                       _syncModeControlToDevice(
@@ -2224,6 +2225,7 @@ class _TopHeaderBar extends StatefulWidget {
   final bool isSyncing;
   final bool isLive;
   final int batteryLevel;
+  final String profile;
   final VoidCallback onTap;
 
   const _TopHeaderBar({
@@ -2233,6 +2235,7 @@ class _TopHeaderBar extends StatefulWidget {
     required this.isSyncing,
     required this.isLive,
     required this.batteryLevel,
+    required this.profile,
     required this.onTap,
   });
 
@@ -2634,6 +2637,17 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
                                 color: batteryColor,
                               ),
                             ),
+                            if (widget.profile.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                '· ${widget.profile}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: batteryColor.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       )
@@ -4012,11 +4026,13 @@ class _HomeLivePillState extends State<_HomeLivePill>
 
 class _ConnectedDeviceSheet extends StatelessWidget {
   final int batteryLevel;
+  final String profile;
   final VoidCallback onDisconnect;
   final VoidCallback onCancel;
 
   const _ConnectedDeviceSheet({
     required this.batteryLevel,
+    required this.profile,
     required this.onDisconnect,
     required this.onCancel,
   });
@@ -4148,6 +4164,25 @@ class _ConnectedDeviceSheet extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 8),
+          if (profile.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_outline_rounded, size: 14, color: Color(0xFF6B7280)),
+                  const SizedBox(width: 6),
+                  Text(
+                    profile,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
