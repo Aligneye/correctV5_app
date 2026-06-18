@@ -1553,6 +1553,9 @@ class AlignEyeDeviceService {
                   "BAD=${reading.isBadPosture} "
                   "MODE=${reading.mode}"
           );
+          debugPrint(
+              "MODE FRAME => mode=${reading.mode} sub=${reading.subMode}"
+          );
           // Sticky-cache therapy fields that firmware only publishes every
           // few frames. Only update when the frame actually carries new
           // info, so the cache survives across transitions / page rebuilds.
