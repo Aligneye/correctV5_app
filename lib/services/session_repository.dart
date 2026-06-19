@@ -276,6 +276,44 @@ class SessionRepository {
       return pct.toDouble();
     });
   }
+  Future<List<int>> fetchHeatmapData() async {
+    const days = 28;
+
+    final now = DateTime.now();
+    final start = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(days: days - 1));
+
+    final rows = await _fetchRowsBetween(start, now.add(const Duration(days: 1)));
+
+    final dailyMinutes = List<int>.filled(days, 0);
+
+    for (final row in rows) {
+      final ts = _parseTs(row['start_ts']);
+      if (ts == null) continue;
+
+      final local = ts.toLocal();
+      final day = DateTime(local.year, local.month, local.day);
+
+      final idx = day
+          .difference(DateTime(start.year, start.month, start.day))
+          .inDays;
+
+      if (idx < 0 || idx >= days) continue;
+
+      dailyMinutes[idx] += (_asInt(row['duration_sec']) ~/ 60);
+    }
+
+    return dailyMinutes.map((minutes) {
+      if (minutes == 0) return 0;
+      if (minutes < 15) return 1;
+      if (minutes < 30) return 2;
+      if (minutes < 60) return 3;
+      return 4;
+    }).toList();
+  }
 
   // ── internals ──────────────────────────────────────────────────────────────
 

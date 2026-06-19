@@ -393,35 +393,54 @@ class _DeviceInfoCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppTheme.successBg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.successText,
-                        shape: BoxShape.circle,
-                      ),
+              ValueListenableBuilder<DeviceConnectionStatus>(
+                valueListenable:
+                BluetoothServiceManager().deviceService.connectionStatus,
+                builder: (context, status, _) {
+                  final isConnected =
+                      status == DeviceConnectionStatus.connected;
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Connected',
-                      style: TextStyle(
-                        color: AppTheme.successText,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    decoration: BoxDecoration(
+                      color: isConnected
+                          ? AppTheme.successBg
+                          : Colors.red.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: isConnected
+                                ? AppTheme.successText
+                                : Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isConnected
+                              ? 'Connected'
+                              : 'Disconnected',
+                          style: TextStyle(
+                            color: isConnected
+                                ? AppTheme.successText
+                                : Colors.red,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
           ),
