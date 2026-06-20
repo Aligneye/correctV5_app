@@ -352,9 +352,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
       // Pull the full plan from the device. Firmware may publish sequence
       // fields a few JSON frames after therapy starts; once we have it we
       // keep it (don't let a momentarily missing frame blank the UI).
-      if (reading.therapyPatternSequence.isNotEmpty) {
-        _patternPlan = List<int>.unmodifiable(reading.therapyPatternSequence);
-      }
+      // therapyPatternSequence is deprecated
       if (reading.therapyTotalPatterns > 0) {
         _totalPatternSlots = reading.therapyTotalPatterns;
       }

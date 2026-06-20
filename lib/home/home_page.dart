@@ -238,6 +238,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   final DeviceManager _deviceManager = DeviceManager();
   final SessionRepository _sessionRepository = SessionRepository();
   StreamSubscription<PostureReading>? _readingSubscription;
+  StreamSubscription<CommandAck>? _ackSubscription;
+  StreamSubscription<DeviceEvent>? _eventSubscription;
+  StreamSubscription<DebugTelemetry>? _debugSubscription;
 
   // _HomeDashboardState ke andar, existing fields ke neeche add karo:
   final ValueNotifier<double> postureAngleNotifier = ValueNotifier<double>(0.0);
@@ -316,6 +319,86 @@ class _HomeDashboardState extends State<HomeDashboard>
     super.initState();
     _deviceService = widget.deviceService;
 
+    _ackSubscription = _deviceService.acks.listen((ack) {
+      if (!mounted) return;
+      if (!ack.ok) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text('Command failed: ${ack.reason}'),
+              behavior: SnackBarBehavior.floating,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              backgroundColor: AppTheme.destructive,
+            ),
+          );
+      }
+    });
+
+    _eventSubscription = _deviceService.deviceEvents.listen((event) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Device event: ${event.event}'),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            backgroundColor: event.ok ? AppTheme.brandPrimary : AppTheme.destructive,
+          ),
+        );
+    });
+
+    _debugSubscription = _deviceService.debugTelemetry.listen((debug) {
+      if (!mounted) return;
+      final reading = _deviceService.currentReading.value;
+      final debugEntry = <String, dynamic>{
+        'time': DateTime.now().toIso8601String().substring(11, 19),
+        'mode': reading?.mode ?? 'UNKNOWN',
+        'subMode': reading?.subMode ?? 'UNKNOWN',
+        'angle': reading?.angle ?? 0.0,
+        'angleX': debug.angX,
+        'angleY': debug.angY,
+        'angleZ': debug.angZ,
+        'posture': reading?.posture ?? 'UNKNOWN',
+        'isBad': reading?.isBadPosture ?? false,
+        'difficulty': reading?.difficultyDeg ?? 25,
+        'rawX': debug.rawX,
+        'rawY': debug.rawY,
+        'rawZ': debug.rawZ,
+        'calY': debug.calY,
+        'calZ': debug.calZ,
+        'batV': reading?.batteryVoltage ?? 0.0,
+        'bat%': reading?.batteryPercentage ?? 0,
+        'isCalib': reading?.isCalibrating ?? false,
+        'calibPhase': reading?.calibrationPhase ?? 'IDLE',
+        'calibResult': reading?.calibrationResult ?? '',
+        'calibElapsed': reading?.calibrationElapsedMs ?? 0,
+        'calibTotal': reading?.calibrationTotalMs ?? 0,
+        'tPattern': reading?.therapyPattern ?? '',
+        'tNextPat': reading?.therapyNextPattern ?? '',
+        'tElapsed': reading?.therapyElapsedSeconds ?? 0,
+        'tRemaining': reading?.therapyRemainingSeconds ?? 0,
+        'tIntensity': reading?.therapyIntensityLevel ?? 0,
+        'tCurIndex': reading?.therapyCurrentPatternIndex ?? -1,
+        'tTotal': reading?.therapyTotalPatterns ?? 0,
+        'tSeq': _deviceService.latestTherapyPatternSequence.join(','),
+        'sessId': reading?.liveSessionId ?? 0,
+        'sessElapsed': reading?.liveSessionElapsedSeconds ?? 0,
+        'sessBadCount': reading?.liveSessionBadCount ?? 0,
+        'sessEpoch': reading?.liveSessionStartEpoch ?? 0,
+      };
+      if (_debugLogs.length >= _kMaxDebugLogs) _debugLogs.removeAt(0);
+      _debugLogs.add(debugEntry);
+      _debugFrameCount.value++;
+    });
+
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
@@ -369,53 +452,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     // });
     _readingSubscription = _deviceService.readings.listen((reading) {
       if (!mounted) return;
-      // ── [TEMP DEBUG] Capture all hardware fields ──────────────
-      final debugEntry = <String, dynamic>{
-        'time': DateTime.now().toIso8601String().substring(11, 19),
-        'mode': reading.mode,
-        'subMode': reading.subMode,
-        // Posture
-        'angle': reading.angle,
-        'angleX': reading.angleX,
-        'angleY': reading.angleY,
-        'angleZ': reading.angleZ,
-        'posture': reading.posture,
-        'isBad': reading.isBadPosture,
-        'difficulty': reading.difficultyDeg,
-        // Raw sensor
-        'rawX': reading.rawXG,
-        'rawY': reading.rawYG,
-        'rawZ': reading.rawZG,
-        'calY': reading.calY,
-        'calZ': reading.calZ,
-        // Battery
-        'batV': reading.batteryVoltage,
-        'bat%': reading.batteryPercentage,
-        // Calibration
-        'isCalib': reading.isCalibrating,
-        'calibPhase': reading.calibrationPhase,
-        'calibResult': reading.calibrationResult,
-        'calibElapsed': reading.calibrationElapsedMs,
-        'calibTotal': reading.calibrationTotalMs,
-        // Therapy
-        'tPattern': reading.therapyPattern,
-        'tNextPat': reading.therapyNextPattern,
-        'tElapsed': reading.therapyElapsedSeconds,
-        'tRemaining': reading.therapyRemainingSeconds,
-        'tIntensity': reading.therapyIntensityLevel,
-        'tCurIndex': reading.therapyCurrentPatternIndex,
-        'tTotal': reading.therapyTotalPatterns,
-        'tSeq': reading.therapyPatternSequence.join(','),
-        // Live session
-        'sessId': reading.liveSessionId,
-        'sessElapsed': reading.liveSessionElapsedSeconds,
-        'sessBadCount': reading.liveSessionBadCount,
-        'sessEpoch': reading.liveSessionStartEpoch,
-      };
-      if (_debugLogs.length >= _kMaxDebugLogs) _debugLogs.removeAt(0);
-      _debugLogs.add(debugEntry);
-      _debugFrameCount.value++;
-      // ─────────────────────────────────────────────────────────
       if (reading.isBadPosture != isBadPostureNotifier.value ||
           reading.mode != _lastMode) {
         FlutterBackgroundService().invoke('posture_update', {
@@ -550,6 +586,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   @override
   void dispose() {
     _readingSubscription?.cancel();
+    _ackSubscription?.cancel();
+    _eventSubscription?.cancel();
+    _debugSubscription?.cancel();
     _deviceManager.syncCompletedTick.removeListener(_handleSessionSyncFinished);
     _deviceManager.isSyncing.removeListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.removeListener(_handleActiveSessionChanged);
@@ -1261,13 +1300,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool get _isTherapyLive =>
       _selectedMode == _ModeControlType.therapy && _therapyRemainingSeconds > 0;
 
-  void _startTherapyCountdown(int minutes) {
-    _therapyCountdownTimer?.cancel();
-    setState(() {
-      _therapyRemainingSeconds = minutes * 60;
-    });
-    _ensureTherapyCountdownRunning();
-  }
 
   /// Idempotent: spin up the 1 Hz ticker if it isn't already alive. Called
   /// from the BLE reading handler on every frame so the countdown keeps
@@ -1593,56 +1625,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  Future<void> _syncModeControlToDevice({
-    required _ModeControlType mode,
-    required _PostureTimingType postureTiming,
-    required int therapyDurationMinutes,
-    required int difficultyDegrees,
-  }) async {
-    final modeLabel = switch (mode) {
-      _ModeControlType.track => 'TRACKING',
-      _ModeControlType.posture => 'TRAINING',
-      _ModeControlType.therapy => 'THERAPY',
-    };
-    final timingLabel = switch (postureTiming) {
-      _PostureTimingType.instant => 'INSTANT',
-      _PostureTimingType.delayed => 'DELAYED',
-      _PostureTimingType.automatic => 'AUTOMATIC',
-    };
-
-    await _deviceService.sendModeControl(
-      mode: modeLabel,
-      postureTiming: timingLabel,
-      therapyDurationMinutes: therapyDurationMinutes,
-      difficultyDegrees: difficultyDegrees,
-    );
-  }
-
-  /// Launch the immersive therapy screen using the device's current default
-  /// therapy configuration. Wired to the Therapy button inside the Default
-  /// Mode card — the `MODE=THERAPY` command is sent by the surrounding
-  /// handler before this fires, so firmware is already configured.
-  Future<void> _openOngoingTherapyWithDefaults() async {
-    if (_deviceService.connectionStatus.value !=
-        DeviceConnectionStatus.connected) {
-      return;
-    }
-    // Default intensity mirrors the therapy page's initial slider position so
-    // the ongoing UI and Supabase row carry consistent values when the user
-    // hasn't manually picked one.
-    const int defaultIntensityLevel = 2;
-    DeviceManager().primeTherapyContext(
-      targetPoint: null,
-      intensityLevel: defaultIntensityLevel,
-      plannedDurationMinutes: _therapyDurationMinutes,
-    );
-    await _deviceService.sendTherapyStart(
-      durationMinutes: _therapyDurationMinutes,
-      intensityLevel: defaultIntensityLevel,
-    );
-    if (!mounted) return;
-    _pushOngoingTherapyPage(intensity: defaultIntensityLevel);
-  }
 
   /// Variant for the mini card tap: therapy is already running on the pod,
   /// so we just navigate without re-issuing start/prime commands.
@@ -1991,76 +1973,50 @@ class _HomeDashboardState extends State<HomeDashboard>
               _StaggeredFadeSlide(
                 controller: _controller,
                 delayMs: 300,
-                child: _ModeControlCard(
-                  selectedMode: _selectedMode,
-                  selectedPostureTiming: _selectedPostureTiming,
-                  selectedDifficulty: _selectedDifficulty,
-                  // onModeSelected: (mode) {
-                  //   setState(() => _selectedMode = mode);
-                  //   if (mode == _ModeControlType.therapy) {
-                  //     _startTherapyCountdown(_therapyDurationMinutes);
-                  //   } else {
-                  //     _stopTherapyCountdown();
-                  //   }
-                  //   unawaited(
-                  //     _syncModeControlToDevice(
-                  //       mode: mode,
-                  //       postureTiming: _selectedPostureTiming,
-                  //       therapyDurationMinutes: _therapyDurationMinutes,
-                  //       difficultyDegrees: _selectedDifficulty,
-                  //     ),
-                  //   );
-                  //   // Therapy button inside Default Mode should also surface
-                  //   // the immersive ongoing-therapy screen using the current
-                  //   // defaults. The MODE=THERAPY command was just sent above,
-                  //   // so the device is already configured.
-                  //   // if (mode == _ModeControlType.therapy) {
-                  //   //   unawaited(_openOngoingTherapyWithDefaults());
-                  //   // }
-                  //   if (mode == _ModeControlType.therapy) {
-                  //     widget.onOpenTherapy();
-                  //   }
-                  // },
-                  onModeSelected: (mode) {
-                    if (mode == _ModeControlType.therapy) {
-                      // Hand off to the configurable Therapy page — the user
-                      // picks point/intensity/duration and presses Start
-                      // there, which owns the full start sequence (sync,
-                      // prime context, sendTherapyStart, countdown).
-                      widget.onOpenTherapy();
-                      return;
-                    }
-                    setState(() => _selectedMode = mode);
-                    _stopTherapyCountdown();
-                    unawaited(
-                      _syncModeControlToDevice(
-                        mode: mode,
-                        postureTiming: _selectedPostureTiming,
-                        therapyDurationMinutes: _therapyDurationMinutes,
-                        difficultyDegrees: _selectedDifficulty,
-                      ),
-                    );
-                  },
-                  onPostureTimingSelected: (timing) {
-                    setState(() => _selectedPostureTiming = timing);
-                    unawaited(
-                      _syncModeControlToDevice(
-                        mode: _selectedMode,
-                        postureTiming: timing,
-                        therapyDurationMinutes: _therapyDurationMinutes,
-                        difficultyDegrees: _selectedDifficulty,
-                      ),
-                    );
-                  },
-                  onDifficultySelected: (difficulty) {
-                    setState(() => _selectedDifficulty = difficulty);
-                    unawaited(
-                      _syncModeControlToDevice(
-                        mode: _selectedMode,
-                        postureTiming: _selectedPostureTiming,
-                        therapyDurationMinutes: _therapyDurationMinutes,
-                        difficultyDegrees: difficulty,
-                      ),
+                child: ValueListenableBuilder<String?>(
+                  valueListenable: _deviceService.pendingMode,
+                  builder: (context, pendingMode, _) {
+                    return ValueListenableBuilder<String?>(
+                      valueListenable: _deviceService.pendingSubMode,
+                      builder: (context, pendingSubMode, _) {
+                        return ValueListenableBuilder<int?>(
+                          valueListenable: _deviceService.pendingDifficulty,
+                          builder: (context, pendingDifficulty, _) {
+                            return _ModeControlCard(
+                              selectedMode: _selectedMode,
+                              selectedPostureTiming: _selectedPostureTiming,
+                              selectedDifficulty: _selectedDifficulty,
+                              pendingMode: pendingMode,
+                              pendingSubMode: pendingSubMode,
+                              pendingDifficulty: pendingDifficulty,
+                              onModeSelected: (mode) {
+                                if (mode == _ModeControlType.therapy) {
+                                  widget.onOpenTherapy();
+                                  return;
+                                }
+                                _stopTherapyCountdown();
+                                final modeLabel = switch (mode) {
+                                  _ModeControlType.track => 'TRACKING',
+                                  _ModeControlType.posture => 'TRAINING',
+                                  _ModeControlType.therapy => 'THERAPY',
+                                };
+                                unawaited(_deviceService.sendMode(modeLabel));
+                              },
+                              onPostureTimingSelected: (timing) {
+                                final timingLabel = switch (timing) {
+                                  _PostureTimingType.instant => 'INSTANT',
+                                  _PostureTimingType.delayed => 'DELAYED',
+                                  _PostureTimingType.automatic => 'AUTOMATIC',
+                                };
+                                unawaited(_deviceService.sendTrainingAlert(timingLabel));
+                              },
+                              onDifficultySelected: (difficulty) {
+                                unawaited(_deviceService.sendDifficulty(difficulty));
+                              },
+                            );
+                          },
+                        );
+                      },
                     );
                   },
                 ),
@@ -4251,6 +4207,9 @@ class _ModeControlCard extends StatelessWidget {
   final _ModeControlType selectedMode;
   final _PostureTimingType selectedPostureTiming;
   final int selectedDifficulty;
+  final String? pendingMode;
+  final String? pendingSubMode;
+  final int? pendingDifficulty;
   final ValueChanged<_ModeControlType> onModeSelected;
   final ValueChanged<_PostureTimingType> onPostureTimingSelected;
   final ValueChanged<int> onDifficultySelected;
@@ -4259,6 +4218,9 @@ class _ModeControlCard extends StatelessWidget {
     required this.selectedMode,
     required this.selectedPostureTiming,
     required this.selectedDifficulty,
+    this.pendingMode,
+    this.pendingSubMode,
+    this.pendingDifficulty,
     required this.onModeSelected,
     required this.onPostureTimingSelected,
     required this.onDifficultySelected,
@@ -4286,6 +4248,8 @@ class _ModeControlCard extends StatelessWidget {
                 child: _ModeButton(
                   label: 'Track/Off',
                   selected: selectedMode == _ModeControlType.track,
+                  pending: pendingMode == 'TRACKING',
+                  disabled: pendingMode != null,
                   onTap: () => onModeSelected(_ModeControlType.track),
                 ),
               ),
@@ -4294,6 +4258,8 @@ class _ModeControlCard extends StatelessWidget {
                 child: _ModeButton(
                   label: 'Posture',
                   selected: selectedMode == _ModeControlType.posture,
+                  pending: pendingMode == 'TRAINING',
+                  disabled: pendingMode != null,
                   onTap: () => onModeSelected(_ModeControlType.posture),
                 ),
               ),
@@ -4302,6 +4268,8 @@ class _ModeControlCard extends StatelessWidget {
                 child: _ModeButton(
                   label: 'Therapy',
                   selected: selectedMode == _ModeControlType.therapy,
+                  pending: pendingMode == 'THERAPY',
+                  disabled: pendingMode != null,
                   onTap: () => onModeSelected(_ModeControlType.therapy),
                 ),
               ),
@@ -4336,6 +4304,7 @@ class _ModeControlCard extends StatelessWidget {
                     icon: Icons.av_timer_rounded,
                     child: _DropdownModeButton<_PostureTimingType>(
                       value: selectedPostureTiming,
+                      pending: pendingSubMode != null,
                       items: _PostureTimingType.values
                           .map(
                             (timing) => DropdownMenuItem<_PostureTimingType>(
@@ -4358,6 +4327,7 @@ class _ModeControlCard extends StatelessWidget {
                     icon: Icons.speed_rounded,
                     child: _DropdownModeButton<int>(
                       value: selectedDifficulty,
+                      pending: pendingDifficulty != null,
                       items: _kDifficultyOptions
                           .map(
                             (difficulty) => DropdownMenuItem<int>(
@@ -4621,11 +4591,15 @@ class _TherapyStatusRowState extends State<_TherapyStatusRow> {
 class _ModeButton extends StatelessWidget {
   final String label;
   final bool selected;
+  final bool pending;
+  final bool disabled;
   final VoidCallback onTap;
 
   const _ModeButton({
     required this.label,
     required this.selected,
+    this.pending = false,
+    this.disabled = false,
     required this.onTap,
   });
 
@@ -4646,17 +4620,35 @@ class _ModeButton extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: onTap,
+            onTap: (disabled || pending) ? null : onTap,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: selected ? Colors.white : AppTheme.textPrimary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (pending) ...[
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: selected ? Colors.white : AppTheme.brandPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected
+                          ? Colors.white
+                          : (disabled ? AppTheme.textMuted : AppTheme.textPrimary),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -4944,14 +4936,16 @@ class _PageIndicator extends StatelessWidget {
 class _DropdownModeButton<T> extends StatelessWidget {
   final T value;
   final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?> onChanged;
+  final ValueChanged<T?>? onChanged;
   final String Function(T)? selectedLabelBuilder;
+  final bool pending;
 
   const _DropdownModeButton({
     required this.value,
     required this.items,
     required this.onChanged,
     this.selectedLabelBuilder,
+    this.pending = false,
   });
 
   @override
@@ -4968,7 +4962,16 @@ class _DropdownModeButton<T> extends StatelessWidget {
           value: value,
           isExpanded: true,
           isDense: true,
-          icon: const Icon(Icons.keyboard_arrow_down_rounded),
+          icon: pending
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.brandPrimary,
+                  ),
+                )
+              : const Icon(Icons.keyboard_arrow_down_rounded),
           style: const TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
@@ -4995,7 +4998,7 @@ class _DropdownModeButton<T> extends StatelessWidget {
                     )
                     .toList(),
           items: items,
-          onChanged: onChanged,
+          onChanged: pending ? null : onChanged,
         ),
       ),
     );
