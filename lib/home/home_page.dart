@@ -4614,7 +4614,7 @@ class _TherapyStatusRowState extends State<_TherapyStatusRow> {
                     },
                     children: [
                       _TherapyPatternCard(
-                        label: 'Running ',
+                        label: 'Running Now',
                         pattern: widget.currentPattern,
                         icon: Icons.play_circle_filled,
                         isActive: isActive,
