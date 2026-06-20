@@ -192,6 +192,11 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   int _period = 0;
+  StreakStats? _streakStats;
+  bool _isLoadingStreak = true;
+
+  List<int>? _heatmapData;
+  bool _isLoadingHeatmap = true;
 
   static const _periodLabels = ['Weekly', 'Monthly'];
   static const _periodKeys = ['week', 'month'];
@@ -206,6 +211,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   bool _isLoadingStats = true;
   bool _isLoadingDaily = true;
   int _lastSyncTick = 0;
+  bool _isReloading = false;
 
   @override
   void initState() {
@@ -234,19 +240,57 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   void _onActiveSessionChanged() {
     if (!mounted) return;
-    _reloadAll();
+    _loadSessionsOnly();
   }
 
   void _onSyncingChanged() {
     if (!mounted) return;
-    setState(() {}); // redraw the "Syncing..." banner
+    setState(() {});
   }
 
   Future<void> _reloadAll() async {
-    await Future.wait([_loadSessions(), _loadStats(), _loadDailyScores()]);
+    if (!mounted || _isReloading) return;
+    _isReloading = true;
+    setState(() {
+      _isLoadingSessions = true;
+      _isLoadingStats = true;
+      _isLoadingDaily = true;
+      _isLoadingStreak = true;
+      _isLoadingHeatmap = true;
+    });
+    final results = await Future.wait([
+      _repo.fetchByPeriod(
+        _periodKeys[_period],
+        liveSessionId: _deviceManager.activeSessionId.value,
+      ).catchError((_) => <SessionData>[]),
+
+      _repo.fetchWeeklyStats().catchError((_) => null),
+
+      _repo.fetchDailyScores(7).catchError((_) => null),
+
+      _repo.fetchStreakStats().catchError((_) => null),
+
+      _repo.fetchHeatmapData().catchError((_) => null),
+    ]);
+
+    if (!mounted) return;
+    setState(() {
+      _sessions = results[0] as List<SessionData>? ?? [];
+      _weeklyStats = results[1] as Map<String, dynamic>?;
+      _dailyScores = results[2] as List<double>?;
+      _streakStats = results[3] as StreakStats?;
+      _heatmapData = results[4] as List<int>?;
+      _isLoadingHeatmap = false;
+
+      _isLoadingStreak = false;
+      _isLoadingSessions = false;
+      _isLoadingStats = false;
+      _isLoadingDaily = false;
+    });
+    _isReloading = false;
   }
 
-  Future<void> _loadSessions() async {
+  Future<void> _loadSessionsOnly() async {
     if (!mounted) return;
     setState(() => _isLoadingSessions = true);
     try {
@@ -262,46 +306,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _sessions = <SessionData>[];
+        _sessions = [];
         _isLoadingSessions = false;
-      });
-    }
-  }
-
-  Future<void> _loadStats() async {
-    if (!mounted) return;
-    setState(() => _isLoadingStats = true);
-    try {
-      final stats = await _repo.fetchWeeklyStats();
-      if (!mounted) return;
-      setState(() {
-        _weeklyStats = stats;
-        _isLoadingStats = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _weeklyStats = null;
-        _isLoadingStats = false;
-      });
-    }
-  }
-
-  Future<void> _loadDailyScores() async {
-    if (!mounted) return;
-    setState(() => _isLoadingDaily = true);
-    try {
-      final scores = await _repo.fetchDailyScores(7);
-      if (!mounted) return;
-      setState(() {
-        _dailyScores = scores;
-        _isLoadingDaily = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _dailyScores = null;
-        _isLoadingDaily = false;
       });
     }
   }
@@ -330,16 +336,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     const SizedBox(height: 22),
                     _buildPeriodSelector(),
                     const SizedBox(height: 20),
-                    _DailyScoreTrendCard(
-                      goodData: _dailyScores,
-                      loading: _isLoadingDaily,
+                    RepaintBoundary(
+                      child: _DailyScoreTrendCard(
+                        goodData: _dailyScores,
+                        loading: _isLoadingDaily,
+                      ),
                     ),
                     const SizedBox(height: 20),
-                    const _AngleDeviationDayCard(),
+                    const RepaintBoundary(child: _AngleDeviationDayCard()),
                     _sectionLabel('Weekly streak'),
-                    _buildWeeklyStreak(),
+                    RepaintBoundary(child: _buildWeeklyStreak()),
                     _sectionLabel('4-week habit'),
-                    const _HeatmapCard(),
+                    RepaintBoundary(
+                      child: _HeatmapCard(
+                        heatmapData: _heatmapData ?? _kHeatmap,
+                      ),
+                    ),
                     _sectionLabel('Recent sessions'),
                     if (_isLoadingSessions)
                       const Padding(
@@ -355,12 +367,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       _buildEmptyState()
                     else
                       ...sessions.map(
-                        (s) => _SessionItem(
-                          session: s,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => SessionDetailScreen(session: s),
+                        (s) => RepaintBoundary(
+                          child: _SessionItem(
+                            session: s,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => SessionDetailScreen(session: s),
+                              ),
                             ),
                           ),
                         ),
@@ -613,7 +627,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               onTap: () {
                 if (_period == i) return;
                 setState(() => _period = i);
-                _loadSessions();
+                _reloadAll();
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
@@ -679,7 +693,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(_kDays.length, (i) {
-              final isComplete = i < 6;
+              final streak = _streakStats?.currentStreak ?? 0;
+              final isComplete = i >= (7 - streak);
+
               return _StreakDayBadge(day: _kDays[i], isComplete: isComplete);
             }),
           ),
@@ -705,8 +721,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 .toList(),
           ),
           const SizedBox(height: 14),
-          const Text(
-            '7 consecutive days — keep it up!',
+          Text(
+            '${_streakStats?.currentStreak ?? 0} consecutive days — keep it up!',
             style: TextStyle(
               fontSize: 13,
               color: Color(0xFF9AA0AA),
@@ -1143,23 +1159,24 @@ class _AngleDeviationDayPainter extends CustomPainter {
   static const _yMin = 60.0;
   static const _yMax = 100.0;
 
+  static final _gridPaint = Paint()
+    ..color = const Color(0xFFE3EAF3)
+    ..strokeWidth = 1
+    ..style = PaintingStyle.stroke;
+
   @override
   void paint(Canvas canvas, Size size) {
     final h = size.height;
     final w = size.width;
-    final gridPaint = Paint()
-      ..color = const Color(0xFFE3EAF3)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
 
+    // Solid grid lines — no dashes
     for (final v in [60.0, 70.0, 80.0, 100.0]) {
       final y = _yForValue(v, h);
-      _angleDashLine(canvas, Offset(0, y), Offset(w, y), gridPaint);
+      canvas.drawLine(Offset(0, y), Offset(w, y), _gridPaint);
     }
-
     for (var i = 0; i < values.length; i++) {
       final x = w * (i / (values.length - 1));
-      _angleDashLine(canvas, Offset(x, 0), Offset(x, h), gridPaint);
+      canvas.drawLine(Offset(x, 0), Offset(x, h), _gridPaint);
     }
 
     final pts = List<Offset>.generate(values.length, (i) {
@@ -1178,6 +1195,7 @@ class _AngleDeviationDayPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     canvas.drawPath(linePath, linePaint);
 
+    // Dots
     final fill = Paint()..color = lineColor;
     final ring = Paint()
       ..color = Colors.white
@@ -1205,24 +1223,15 @@ class _AngleDeviationDayPainter extends CustomPainter {
     return path;
   }
 
-  void _angleDashLine(Canvas canvas, Offset a, Offset b, Paint paint) {
-    const dash = 3.0;
-    const gap = 3.0;
-    final d = b - a;
-    final len = d.distance;
-    if (len == 0) return;
-    final dir = d / len;
-    var t = 0.0;
-    while (t < len) {
-      final end = (t + dash).clamp(0, len).toDouble();
-      canvas.drawLine(a + dir * t, a + dir * end, paint);
-      t += dash + gap;
-    }
-  }
-
   @override
-  bool shouldRepaint(covariant _AngleDeviationDayPainter oldDelegate) =>
-      oldDelegate.values != values || oldDelegate.lineColor != lineColor;
+  bool shouldRepaint(covariant _AngleDeviationDayPainter oldDelegate) {
+    if (oldDelegate.lineColor != lineColor) return true;
+    if (oldDelegate.values.length != values.length) return true;
+    for (int i = 0; i < values.length; i++) {
+      if (oldDelegate.values[i] != values[i]) return true;
+    }
+    return false;
+  }
 }
 
 class _ScoreAxisLabels extends StatelessWidget {
@@ -1266,51 +1275,52 @@ class _ScoreDayLabel extends StatelessWidget {
 class _ScoreTrendPainter extends CustomPainter {
   final List<double> values;
 
-  const _ScoreTrendPainter(this.values);
+  _ScoreTrendPainter(this.values);
+
+  static final _gridPaint = Paint()
+    ..color = const Color(0xFFE3EAF3)
+    ..strokeWidth = 1
+    ..style = PaintingStyle.stroke;
+
+  static final _linePaint = Paint()
+    ..color = const Color(0xFF3B82F6)
+    ..strokeWidth = 2.4
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round
+    ..style = PaintingStyle.stroke;
+
+  static final _areaPaint = Paint()
+    ..color = const Color(0x333B82F6)
+    ..style = PaintingStyle.fill;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final gridPaint = Paint()
-      ..color = const Color(0xFFE3EAF3)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-    final areaPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0x553B82F6), Color(0x103B82F6)],
-      ).createShader(Offset.zero & size)
-      ..style = PaintingStyle.fill;
-    final linePaint = Paint()
-      ..color = const Color(0xFF3B82F6)
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-
+    // Grid lines — simple solid, no dashes
     for (final pct in [0.0, 0.25, 0.5, 0.75, 1.0]) {
       final y = size.height * pct;
-      _drawDashedLine(canvas, Offset(0, y), Offset(size.width, y), gridPaint);
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), _gridPaint);
     }
-
     for (var i = 0; i < 7; i++) {
       final x = size.width * (i / 6);
-      _drawDashedLine(canvas, Offset(x, 0), Offset(x, size.height), gridPaint);
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), _gridPaint);
     }
+
+    if (values.isEmpty) return;
 
     final points = List<Offset>.generate(values.length, (i) {
       final x = size.width * (i / (values.length - 1));
       final y = size.height * (1 - values[i].clamp(0, 100) / 100);
       return Offset(x, y);
     });
+
     final linePath = _smoothPath(points);
     final areaPath = Path.from(linePath)
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height)
       ..close();
 
-    canvas.drawPath(areaPath, areaPaint);
-    canvas.drawPath(linePath, linePaint);
+    canvas.drawPath(areaPath, _areaPaint);
+    canvas.drawPath(linePath, _linePaint);
   }
 
   Path _smoothPath(List<Offset> points) {
@@ -1324,34 +1334,24 @@ class _ScoreTrendPainter extends CustomPainter {
     return path;
   }
 
-  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
-    const dash = 3.0;
-    const gap = 3.0;
-    final delta = end - start;
-    final distance = delta.distance;
-    if (distance == 0) return;
-    final direction = delta / distance;
-    var current = 0.0;
-    while (current < distance) {
-      final next = (current + dash).clamp(0, distance).toDouble();
-      canvas.drawLine(
-        start + direction * current,
-        start + direction * next,
-        paint,
-      );
-      current += dash + gap;
-    }
-  }
-
   @override
-  bool shouldRepaint(covariant _ScoreTrendPainter oldDelegate) =>
-      oldDelegate.values != values;
+  bool shouldRepaint(covariant _ScoreTrendPainter oldDelegate) {
+    if (oldDelegate.values.length != values.length) return true;
+    for (int i = 0; i < values.length; i++) {
+      if (oldDelegate.values[i] != values[i]) return true;
+    }
+    return false;
+  }
 }
 
 // ─── Heatmap Card ─────────────────────────────────────────────────────────────
 
 class _HeatmapCard extends StatelessWidget {
-  const _HeatmapCard();
+  final List<int> heatmapData;
+
+  const _HeatmapCard({
+    required this.heatmapData,
+  });
 
   static const _heatColors = [
     Color(0xFFF3F4F6), // 0 – none
@@ -1392,22 +1392,27 @@ class _HeatmapCard extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         // Grid — aspect ratio 1 keeps cells square
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 7,
-            crossAxisSpacing: 4,
-            mainAxisSpacing: 4,
-            childAspectRatio: 1,
-          ),
-          itemCount: _kHeatmap.length,
-          itemBuilder: (_, i) => Container(
-            decoration: BoxDecoration(
-              color: _cell(_kHeatmap[i]),
-              borderRadius: BorderRadius.circular(5),
-            ),
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cellSize = (constraints.maxWidth - 6 * 4) / 7;
+            return Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: List.generate(
+                heatmapData.length,
+                (i) => SizedBox(
+                  width: cellSize,
+                  height: cellSize,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: _cell(heatmapData[i]),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
         const SizedBox(height: 10),
         // Legend
@@ -1457,6 +1462,7 @@ class _HeatmapCard extends StatelessWidget {
 class _SessionItem extends StatelessWidget {
   final SessionData session;
   final VoidCallback onTap;
+
   const _SessionItem({required this.session, required this.onTap});
 
   @override
@@ -1616,6 +1622,7 @@ class _LiveTag extends StatelessWidget {
 
 class _MiniStat extends StatelessWidget {
   final String value, label;
+
   const _MiniStat({required this.value, required this.label});
 
   @override
@@ -1643,6 +1650,7 @@ class _MiniStat extends StatelessWidget {
 
 class SessionDetailScreen extends StatelessWidget {
   final SessionData session;
+
   const SessionDetailScreen({super.key, required this.session});
 
   @override
@@ -1878,48 +1886,85 @@ class _SessionDetailBody extends StatelessWidget {
 
           const SizedBox(height: 14),
           _label('Session details'),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 2.4,
+          Column(
             children: [
-              _DetailStat(value: session.duration, label: 'Duration'),
-              _DetailStat(
-                value: isPosture
-                    ? _formatDateTimeLong(session.startTs) ?? session.date
-                    : _formatDateLong(session.startTs) ?? session.date,
-                label: isPosture ? 'Started' : 'Date',
+              Row(
+                children: [
+                  Expanded(
+                    child: _DetailStat(
+                      value: session.duration,
+                      label: 'Duration',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DetailStat(
+                      value: isPosture
+                          ? _formatDateTimeLong(session.startTs) ?? session.date
+                          : _formatDateLong(session.startTs) ?? session.date,
+                      label: isPosture ? 'Started' : 'Date',
+                    ),
+                  ),
+                ],
               ),
-              if (isPosture) ...[
-                _DetailStat(
-                  value: '${session.alerts ?? 0}×',
-                  label: 'Vibration alerts',
-                ),
-                _DetailStat(
-                  value: _formatBadDuration(session),
-                  label: 'Bad posture',
-                ),
-              ] else ...[
-                _DetailStat(
-                  value: '${_therapyPatternCount(session)}',
-                  label: 'Patterns played',
-                ),
-                _DetailStat(
-                  value: _formatStartTime(session.startTs) ?? '—',
-                  label: 'Started',
-                ),
-              ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (isPosture) ...[
+                    Expanded(
+                      child: _DetailStat(
+                        value: '${session.alerts ?? 0}×',
+                        label: 'Vibration alerts',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _DetailStat(
+                        value: _formatBadDuration(session),
+                        label: 'Bad posture',
+                      ),
+                    ),
+                  ] else ...[
+                    Expanded(
+                      child: _DetailStat(
+                        value: '${_therapyPatternCount(session)}',
+                        label: 'Patterns played',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _DetailStat(
+                        value: _formatStartTime(session.startTs) ?? '—',
+                        label: 'Started',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
           ),
 
           if (isPosture) ...[
-            _label('Session timeline'),
-            _PostureTimelineCard(session: session),
-            _label('Slouch events'),
-            _PostureEventsList(session: session),
+            Builder(
+              builder: (context) {
+                final postureEvents = _postureEventsForSession(session);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Session timeline'),
+                    _PostureTimelineCard(
+                      session: session,
+                      precomputedEvents: postureEvents,
+                    ),
+                    _label('Slouch events'),
+                    _PostureEventsList(
+                      session: session,
+                      precomputedEvents: postureEvents,
+                    ),
+                  ],
+                );
+              },
+            ),
           ] else ...[
             _label('Patterns played'),
             _TherapyPatternsCard(session: session, accent: accent),
@@ -2033,11 +2078,16 @@ class _UnsyncedBanner extends StatelessWidget {
 
 class _PostureTimelineCard extends StatelessWidget {
   final SessionData session;
-  const _PostureTimelineCard({required this.session});
+  final List<PostureEvent> precomputedEvents;
+
+  const _PostureTimelineCard({
+    required this.session,
+    required this.precomputedEvents,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final events = _postureEventsForSession(session);
+    final events = precomputedEvents;
     final hasExactEvents = session.postureEvents?.isNotEmpty ?? false;
     final durationSec = session.durationSec.clamp(1, 1 << 30).toInt();
 
@@ -2140,12 +2190,21 @@ class _PostureStripePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PostureStripePainter old) =>
-      old.events != events || old.totalSec != totalSec;
+  bool shouldRepaint(covariant _PostureStripePainter old) {
+    if (old.totalSec != totalSec) return true;
+    if (old.events.length != events.length) return true;
+    for (int i = 0; i < events.length; i++) {
+      if (old.events[i].slouchSec != events[i].slouchSec ||
+          old.events[i].correctionSec != events[i].correctionSec)
+        return true;
+    }
+    return false;
+  }
 }
 
 class _LegendDot extends StatelessWidget {
   final Color color;
+
   const _LegendDot({required this.color});
 
   @override
@@ -2158,11 +2217,16 @@ class _LegendDot extends StatelessWidget {
 
 class _PostureEventsList extends StatelessWidget {
   final SessionData session;
-  const _PostureEventsList({required this.session});
+  final List<PostureEvent> precomputedEvents;
+
+  const _PostureEventsList({
+    required this.session,
+    required this.precomputedEvents,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final events = _postureEventsForSession(session);
+    final events = precomputedEvents;
     final hasExactEvents = session.postureEvents?.isNotEmpty ?? false;
 
     if (events.isEmpty) {
@@ -2239,6 +2303,7 @@ class _PostureEventRow extends StatelessWidget {
   final PostureEvent event;
   final bool isEstimated;
   final bool isLast;
+
   const _PostureEventRow({
     required this.index,
     required this.event,
@@ -2336,6 +2401,7 @@ class _PostureEventRow extends StatelessWidget {
 class _TherapyPatternsCard extends StatelessWidget {
   final SessionData session;
   final Color accent;
+
   const _TherapyPatternsCard({required this.session, required this.accent});
 
   @override
@@ -2534,6 +2600,7 @@ String _formatMinSec(int seconds) {
 
 class _DetailStat extends StatelessWidget {
   final String value, label;
+
   const _DetailStat({required this.value, required this.label});
 
   @override
