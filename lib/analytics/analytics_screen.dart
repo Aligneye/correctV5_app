@@ -191,6 +191,8 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
+  static const int _recentSessionPreviewCount = 5;
+
   int _period = 0;
   StreakStats? _streakStats;
   bool _isLoadingStreak = true;
@@ -212,6 +214,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   bool _isLoadingDaily = true;
   int _lastSyncTick = 0;
   bool _isReloading = false;
+  bool _showAllRecentSessions = false;
 
   @override
   void initState() {
@@ -257,12 +260,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       _isLoadingDaily = true;
       _isLoadingStreak = true;
       _isLoadingHeatmap = true;
+      _showAllRecentSessions = false;
     });
     final results = await Future.wait([
-      _repo.fetchByPeriod(
-        _periodKeys[_period],
-        liveSessionId: _deviceManager.activeSessionId.value,
-      ).catchError((_) => <SessionData>[]),
+      _repo
+          .fetchByPeriod(
+            _periodKeys[_period],
+            liveSessionId: _deviceManager.activeSessionId.value,
+          )
+          .catchError((_) => <SessionData>[]),
 
       _repo.fetchWeeklyStats().catchError((_) => null),
 
@@ -302,6 +308,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       setState(() {
         _sessions = rows;
         _isLoadingSessions = false;
+        if (rows.length <= _recentSessionPreviewCount) {
+          _showAllRecentSessions = false;
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -315,6 +324,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   Widget build(BuildContext context) {
     final sessions = _sessions ?? const <SessionData>[];
+    final visibleSessions = _showAllRecentSessions
+        ? sessions
+        : sessions.take(_recentSessionPreviewCount).toList(growable: false);
+    final hiddenSessionCount = sessions.length - visibleSessions.length;
     final isSyncing = _deviceManager.isSyncing.value;
 
     return Scaffold(
@@ -365,8 +378,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       )
                     else if (sessions.isEmpty)
                       _buildEmptyState()
-                    else
-                      ...sessions.map(
+                    else ...[
+                      ...visibleSessions.map(
                         (s) => RepaintBoundary(
                           child: _SessionItem(
                             session: s,
@@ -379,11 +392,59 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           ),
                         ),
                       ),
+                      if (sessions.length > _recentSessionPreviewCount)
+                        _buildRecentSessionsToggle(hiddenSessionCount),
+                    ],
                   ],
                 ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecentSessionsToggle(int hiddenSessionCount) {
+    final label = _showAllRecentSessions
+        ? 'Show less'
+        : 'View all $hiddenSessionCount more';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: () {
+            setState(() => _showAllRecentSessions = !_showAllRecentSessions);
+          },
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _kBlue,
+            side: BorderSide(color: _kBlue.withValues(alpha: 0.22)),
+            backgroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label),
+              const SizedBox(width: 6),
+              Icon(
+                _showAllRecentSessions
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 18,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1349,9 +1410,7 @@ class _ScoreTrendPainter extends CustomPainter {
 class _HeatmapCard extends StatelessWidget {
   final List<int> heatmapData;
 
-  const _HeatmapCard({
-    required this.heatmapData,
-  });
+  const _HeatmapCard({required this.heatmapData});
 
   static const _heatColors = [
     Color(0xFFF3F4F6), // 0 – none
