@@ -211,6 +211,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   bool _isLoadingStats = true;
   bool _isLoadingDaily = true;
   int _lastSyncTick = 0;
+  bool _isReloading = false;
 
   @override
   void initState() {
@@ -239,7 +240,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   void _onActiveSessionChanged() {
     if (!mounted) return;
-    _reloadAll();
+    _loadSessionsOnly();
   }
 
   void _onSyncingChanged() {
@@ -248,7 +249,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Future<void> _reloadAll() async {
-    if (!mounted) return;
+    if (!mounted || _isReloading) return;
+    _isReloading = true;
     setState(() {
       _isLoadingSessions = true;
       _isLoadingStats = true;
@@ -285,6 +287,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       _isLoadingStats = false;
       _isLoadingDaily = false;
     });
+    _isReloading = false;
   }
 
   Future<void> _loadSessionsOnly() async {

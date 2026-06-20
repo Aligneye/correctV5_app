@@ -183,14 +183,15 @@ class SessionRepository {
       cursor = cursor.subtract(const Duration(days: 1));
     }
 
-    final highest = await _syncStreakToSupabase(
+    // Fire-and-forget — Supabase upsert shouldn't block the UI
+    _syncStreakToSupabase(
       currentStreak: streak,
       todayStreakDay: todayStreakDay,
-    );
+    ).ignore();
 
     return StreakStats(
       currentStreak: streak,
-      highestStreak: highest,
+      highestStreak: streak,
       todayActive: todayActive,
       todayStreakDay: todayStreakDay,
     );
