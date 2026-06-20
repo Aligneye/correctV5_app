@@ -124,17 +124,31 @@ class ModesPage extends StatelessWidget {
     );
   }
 
+  // void _onModeTapped(BuildContext context, _ModeData mode) {
+  //   HapticFeedback.lightImpact();
+  //   if (mode.title == 'Training Mode') {
+  //     onOpenTraining?.call();
+  //     return;
+  //   }
+  //   if (mode.title == 'Therapy Mode') {
+  //     onOpenTherapy?.call();
+  //     return;
+  //   }
+  //   if (mode.title == 'Meditation Mode') {
+  //     onOpenMeditation?.call();
+  //   }
+  // }
   void _onModeTapped(BuildContext context, _ModeData mode) {
     HapticFeedback.lightImpact();
-    if (mode.title == 'Training Mode') {
+    if (mode.title == 'Posture training mode') {
       onOpenTraining?.call();
       return;
     }
-    if (mode.title == 'Therapy Mode') {
+    if (mode.title == 'Vibration therapy mode') {
       onOpenTherapy?.call();
       return;
     }
-    if (mode.title == 'Meditation Mode') {
+    if (mode.title == 'Meditation mode') {
       onOpenMeditation?.call();
     }
   }

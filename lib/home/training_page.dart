@@ -4,9 +4,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-class TrainingPage extends StatefulWidget {
-  const TrainingPage({super.key});
+import '../bluetooth/aligneye_device_service.dart';
 
+class TrainingPage extends StatefulWidget {
+
+  final AlignEyeDeviceService deviceService;
+  const TrainingPage({super.key,required this.deviceService,});
   @override
   State<TrainingPage> createState() => _TrainingPageState();
 }
@@ -15,6 +18,8 @@ class _TrainingPageState extends State<TrainingPage>
     with TickerProviderStateMixin {
   late final AnimationController _entryController;
   late final AnimationController _pulseController;
+  late StreamSubscription<PostureReading> _angleSub;
+  double _liveAngle = 0.0;
 
   String _level = 'Advanced';
   double _sensitivity = 10;
@@ -51,19 +56,55 @@ class _TrainingPageState extends State<TrainingPage>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+    _angleSub = widget.deviceService.readings.listen((r) {
+      if (mounted) setState(() => _liveAngle = r.angle);
+    });
   }
 
   @override
   void dispose() {
     _entryController.dispose();
     _pulseController.dispose();
+    _angleSub.cancel();
     super.dispose();
   }
 
   void _toggleTraining() {
     HapticFeedback.mediumImpact();
-    setState(() => _isRunning = !_isRunning);
+    final newState = !_isRunning;
+    setState(() => _isRunning = newState);
+
+    final service = widget.deviceService;
+    if (newState) {
+      // Training start — mode + timing + difficulty ek saath bhejo
+      final timingStr = switch (_timing) {
+        'Delayed'  => 'DELAYED',
+        'No alert' => 'AUTOMATIC',
+        _          => 'INSTANT',
+      };
+      final diffDeg = _levelToDegrees(_level);
+      unawaited(service.sendModeControl(
+        mode: 'TRAINING',
+        postureTiming: timingStr,
+        therapyDurationMinutes: 10,
+        difficultyDegrees: diffDeg,
+      ));
+    } else {
+      // Training stop — tracking mode pe wapas
+      unawaited(service.sendModeControl(
+        mode: 'TRACKING',
+        postureTiming: 'INSTANT',
+        therapyDurationMinutes: 10,
+        difficultyDegrees: _levelToDegrees(_level),
+      ));
+    }
   }
+
+  int _levelToDegrees(String level) => switch (level) {
+    'Basic'        => 45,
+    'Intermediate' => 30,
+    _              => 20, // Advanced
+  };
 
   Future<void> _showSensitivityWarning(double degrees) async {
     if (!mounted) return;
@@ -438,7 +479,7 @@ class _TrainingPageState extends State<TrainingPage>
                         ),
                       ),
                       const SizedBox(height: 16),
-                      _LiveGraph(pulseController: _pulseController),
+                      _LiveGraph(pulseController: _pulseController, liveAngle: _liveAngle,),
                       const SizedBox(height: 10),
                       const Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -832,8 +873,10 @@ class _DelayChip extends StatelessWidget {
 
 class _LiveGraph extends StatelessWidget {
   final AnimationController pulseController;
+  final double liveAngle;
 
-  const _LiveGraph({required this.pulseController});
+  const _LiveGraph({required this.pulseController,
+    required this.liveAngle,});
 
   @override
   Widget build(BuildContext context) {
@@ -853,7 +896,7 @@ class _LiveGraph extends StatelessWidget {
             animation: pulseController,
             builder: (context, _) {
               return CustomPaint(
-                painter: _LiveGraphPainter(progress: pulseController.value),
+                painter: _LiveGraphPainter(progress: pulseController.value,liveAngle: liveAngle, ),
                 child: Center(
                   child: Icon(
                     Icons.show_chart_rounded,
@@ -872,41 +915,75 @@ class _LiveGraph extends StatelessWidget {
 
 class _LiveGraphPainter extends CustomPainter {
   final double progress;
+  final double liveAngle;
 
-  const _LiveGraphPainter({required this.progress});
+  const _LiveGraphPainter({required this.progress,required this.liveAngle, });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Angle ko 0..1 range mein convert karo (-90 to +90 → 0 to 1)
+    final normalized = ((liveAngle + 90) / 180).clamp(0.0, 1.0);
+    // 0.3 = good posture zone, normalized se actual Y position
+    final y = size.height * (0.2 + normalized * 0.6);
+
     final path = Path();
-    const points = [0.70, 0.58, 0.62, 0.42, 0.54, 0.55, 0.73, 0.60];
-    for (var i = 0; i < points.length; i++) {
-      final x = size.width * (i / (points.length - 1));
-      final wave = math.sin((progress + i / points.length) * math.pi * 2) * 5;
-      final y = size.height * points[i] + wave;
+    path.moveTo(0, y);
+    path.lineTo(size.width, y);  // simple baseline pehle
+
+    // Animated wave effect real angle ke around
+    final wavePath = Path();
+    for (int i = 0; i <= 100; i++) {
+      final x = size.width * (i / 100);
+      final wave = math.sin((progress * math.pi * 2) + (i / 10)) * 4;
+      final pointY = y + wave;
       if (i == 0) {
-        path.moveTo(x, y);
+        wavePath.moveTo(x, pointY);
       } else {
-        path.lineTo(x, y);
+        wavePath.lineTo(x, pointY);
       }
     }
 
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+
+    // Bad posture zone — red background
+    if (liveAngle > 25) {
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = const Color(0xFFEF4444).withValues(alpha: 0.08),
+      );
+    }
+
+    // Threshold line — 25 degree pe
+    final thresholdY = size.height * (0.2 + ((25 + 90) / 180) * 0.6);
+    canvas.drawLine(
+      Offset(0, thresholdY),
+      Offset(size.width, thresholdY),
+      Paint()
+        ..color = const Color(0xFFEF4444).withValues(alpha: 0.3)
+        ..strokeWidth = 1
+        ..style = PaintingStyle.stroke,
+    );
+
+    // Main wave line
     final paint = Paint()
-      ..shader = const LinearGradient(
-        colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+      ..shader = LinearGradient(
+        colors: liveAngle > 25
+            ? [const Color(0xFFEF4444), const Color(0xFFE11D48)]
+            : [const Color(0xFFA855F7), const Color(0xFF22C55E)],
       ).createShader(rect)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
-    canvas.drawPath(path, paint);
+
+    canvas.drawPath(wavePath, paint);
   }
 
   @override
-  bool shouldRepaint(covariant _LiveGraphPainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
+  bool shouldRepaint(covariant _LiveGraphPainter old) =>
+      old.progress != progress || old.liveAngle != liveAngle;
 }
+
 
 class _StartButton extends StatelessWidget {
   final bool isRunning;
