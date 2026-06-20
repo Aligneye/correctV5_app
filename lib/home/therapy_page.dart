@@ -16,9 +16,6 @@ class TherapyPage extends StatefulWidget {
   State<TherapyPage> createState() => _TherapyPageState();
 }
 
-/// Keys for the last-used therapy selections. Persisted across app launches
-/// so the user doesn't have to repick their preferred intensity/duration/point
-/// every time they open the therapy page.
 const String _kPrefTherapyIntensity = 'therapy_last_intensity';
 const String _kPrefTherapyDurationMinutes = 'therapy_last_duration_min';
 const String _kPrefTherapyPointId = 'therapy_last_point_id';
@@ -28,8 +25,7 @@ class _TherapyPageState extends State<TherapyPage>
   late final AnimationController _entryController;
   late final AnimationController _pulseController;
 
-  final AlignEyeDeviceService _deviceService =
-      BluetoothServiceManager().deviceService;
+  final AlignEyeDeviceService _deviceService = BluetoothServiceManager().deviceService;
 
   double _intensity = 2;
   int _durationMinutes = 10;

@@ -6,6 +6,7 @@ import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:correctv1/auth/auth_service.dart';
+import 'package:correctv1/settings/firmware_update_page.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -560,28 +561,31 @@ class _FirmwareUpdateCard extends StatelessWidget {
           _GradientButton(
             label: 'Check for Updates',
             gradient: AppTheme.trackingGradient,
-            onTap: () {},
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Icon(
-                Icons.check_circle_outline_rounded,
-                color: AppTheme.successText,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  "You're running the latest firmware version",
-                  style: TextStyle(
-                    color: AppTheme.successText,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).push(
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 320),
+                  reverseTransitionDuration: const Duration(milliseconds: 260),
+                  pageBuilder: (_, animation, __) =>
+                      const FirmwareUpdatePage(),
+                  transitionsBuilder: (_, animation, __, child) =>
+                      FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0.04, 0),
+                        end: Offset.zero,
+                      ).animate(CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                      )),
+                      child: child,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              );
+            },
           ),
         ],
       ),

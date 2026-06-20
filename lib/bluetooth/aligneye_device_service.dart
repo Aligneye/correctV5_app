@@ -233,6 +233,42 @@ class PostureReading {
   }
 }
 
+// ── Device Info model (from GET_INFO response) ──────────────────────────────
+
+class DeviceInfo {
+  final String model;
+  final String hardwareRevision;
+  final String firmwareVersion;
+  final int batteryPercent;
+  final bool dfuReady;
+
+  const DeviceInfo({
+    required this.model,
+    required this.hardwareRevision,
+    required this.firmwareVersion,
+    required this.batteryPercent,
+    required this.dfuReady,
+  });
+
+  factory DeviceInfo.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? 0;
+    }
+
+    return DeviceInfo(
+      model: json['model']?.toString() ?? '',
+      hardwareRevision: json['hw']?.toString() ?? '',
+      firmwareVersion: json['fw']?.toString() ?? '',
+      batteryPercent: toInt(json['battery']),
+      dfuReady: json['dfu_ready'] == true,
+    );
+  }
+}
+
+enum EnterDfuResult { success, lowBattery, sessionActive, timeout, error }
+
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
     : _deviceNamePrefix = deviceNamePrefix;
@@ -482,6 +518,106 @@ class AlignEyeDeviceService {
     }
 
     return _writeTextCommand('CALIBRATION=CANCEL');
+  }
+
+  /// Sends a JSON command (e.g. {"cmd":"GET_INFO"}) and waits up to
+  /// [timeout] for a matching response on the notify characteristic.
+  /// Returns the parsed JSON map or null on timeout / error.
+  Future<Map<String, dynamic>?> sendJsonCommand(
+    Map<String, dynamic> command, {
+    Duration timeout = const Duration(seconds: 6),
+    bool Function(Map<String, dynamic>)? matcher,
+  }) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return null;
+    final characteristic = _notifyCharacteristic;
+    if (characteristic == null) return null;
+
+    final payload = jsonEncode(command);
+    final completer = Completer<Map<String, dynamic>?>();
+    StreamSubscription<PostureReading>? sub;
+
+    sub = readings.listen((r) {
+      // We can't easily intercept raw notify bytes here since they are parsed
+      // into PostureReading. Instead we rely on the raw notification stream
+      // captured below; this subscription is a no-op placeholder.
+    });
+
+    // Capture raw characteristic notifications directly while we wait.
+    StreamSubscription<List<int>>? rawSub;
+    final rawStream = characteristic.onValueReceived;
+    String rawBuffer = '';
+    rawSub = rawStream.listen((bytes) {
+      rawBuffer += utf8.decode(bytes, allowMalformed: true);
+      // Scan for complete JSON objects
+      int depth = 0;
+      int start = -1;
+      for (int i = 0; i < rawBuffer.length; i++) {
+        if (rawBuffer[i] == '{') {
+          if (depth == 0) start = i;
+          depth++;
+        } else if (rawBuffer[i] == '}') {
+          depth--;
+          if (depth == 0 && start >= 0) {
+            final chunk = rawBuffer.substring(start, i + 1);
+            rawBuffer = rawBuffer.substring(i + 1);
+            try {
+              final parsed = jsonDecode(chunk) as Map<String, dynamic>;
+              if (matcher == null || matcher(parsed)) {
+                if (!completer.isCompleted) completer.complete(parsed);
+              }
+            } catch (_) {}
+            break;
+          }
+        }
+      }
+    });
+
+    try {
+      await characteristic.write(
+        utf8.encode(payload),
+        withoutResponse: characteristic.properties.writeWithoutResponse,
+      );
+      debugPrint('JSON command sent: $payload');
+    } catch (e) {
+      debugPrint('Failed to send JSON command: $e');
+      await rawSub.cancel();
+      await sub.cancel();
+      return null;
+    }
+
+    final result = await completer.future.timeout(timeout, onTimeout: () {
+      debugPrint('JSON command timed out: $payload');
+      return null;
+    });
+
+    await rawSub.cancel();
+    await sub.cancel();
+    return result;
+  }
+
+  /// Sends {"cmd":"GET_INFO"} and returns a DeviceInfo on success.
+  Future<DeviceInfo?> getDeviceInfo() async {
+    final resp = await sendJsonCommand(
+      {'cmd': 'GET_INFO'},
+      matcher: (m) => m['t'] == 'INFO',
+    );
+    if (resp == null) return null;
+    return DeviceInfo.fromJson(resp);
+  }
+
+  /// Sends {"cmd":"ENTER_DFU"} and returns true when firmware acknowledges.
+  Future<EnterDfuResult> sendEnterDfu() async {
+    final resp = await sendJsonCommand(
+      {'cmd': 'ENTER_DFU'},
+      matcher: (m) => m['status'] != null,
+      timeout: const Duration(seconds: 8),
+    );
+    if (resp == null) return EnterDfuResult.timeout;
+    if (resp['status'] == 'ok') return EnterDfuResult.success;
+    final reason = resp['reason']?.toString() ?? '';
+    if (reason == 'LOW_BATTERY') return EnterDfuResult.lowBattery;
+    if (reason == 'SESSION_ACTIVE') return EnterDfuResult.sessionActive;
+    return EnterDfuResult.error;
   }
 
   Future<bool> _writeTextCommand(String payload) async {
