@@ -19,7 +19,6 @@ import 'package:correctv1/analytics/analytics_screen.dart';
 import 'package:correctv1/sessions/sessions_history_page.dart';
 import 'package:correctv1/settings/settings_page.dart';
 import 'package:correctv1/components/nav_bar.dart';
-import 'package:correctv1/calibration/calibration_page.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
@@ -1373,12 +1372,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool get _isTherapyLive =>
       _selectedMode == _ModeControlType.therapy && _therapyRemainingSeconds.value > 0;
 
-  void _startTherapyCountdown(int minutes) {
-    _therapyCountdownTimer?.cancel();
-    _therapyRemainingSeconds.value = minutes * 60;
-    _ensureTherapyCountdownRunning();
-  }
-
   /// Idempotent: spin up the 1 Hz ticker if it isn't already alive. Called
   /// from the BLE reading handler on every frame so the countdown keeps
   /// advancing smoothly between frames instead of freezing until the next
@@ -1510,7 +1503,11 @@ class _HomeDashboardState extends State<HomeDashboard>
         profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
         onDisconnect: () async {
           Navigator.of(ctx).pop();
-          await _deviceService.disconnect(userInitiated: true);
+          await BluetoothServiceManager.instance.disconnectByUser();
+        },
+        onForget: () async {
+          Navigator.of(ctx).pop();
+          await BluetoothServiceManager.instance.forgetDevice();
           if (!mounted) return;
           await Navigator.of(context).push<bool>(
             MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
@@ -1723,31 +1720,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  /// Launch the immersive therapy screen using the device's current default
-  /// therapy configuration. Wired to the Therapy button inside the Default
-  /// Mode card — the `MODE=THERAPY` command is sent by the surrounding
-  /// handler before this fires, so firmware is already configured.
-  Future<void> _openOngoingTherapyWithDefaults() async {
-    if (_deviceService.connectionStatus.value !=
-        DeviceConnectionStatus.connected) {
-      return;
-    }
-    // Default intensity mirrors the therapy page's initial slider position so
-    // the ongoing UI and Supabase row carry consistent values when the user
-    // hasn't manually picked one.
-    const int defaultIntensityLevel = 2;
-    DeviceManager().primeTherapyContext(
-      targetPoint: null,
-      intensityLevel: defaultIntensityLevel,
-      plannedDurationMinutes: _therapyDurationMinutes,
-    );
-    await _deviceService.sendTherapyStart(
-      durationMinutes: _therapyDurationMinutes,
-      intensityLevel: defaultIntensityLevel,
-    );
-    if (!mounted) return;
-    _pushOngoingTherapyPage(intensity: defaultIntensityLevel);
-  }
 
   /// Variant for the mini card tap: therapy is already running on the pod,
   /// so we just navigate without re-issuing start/prime commands.
@@ -2014,26 +1986,19 @@ class _HomeDashboardState extends State<HomeDashboard>
                   valueListenable: _deviceService.connectionStatus,
                   builder: (context, connectionStatus, child) {
                     return ValueListenableBuilder<bool>(
-                      valueListenable: _deviceService.isAutoConnectionAttempt,
-                      builder: (context, isAutoConnectionAttempt, child) {
-                        return ValueListenableBuilder<bool>(
-                          valueListenable: _deviceManager.isSyncing,
-                          builder: (context, isSyncing, child) {
-                            return ValueListenableBuilder<String?>(
-                              valueListenable: _deviceManager.activeSessionId,
-                              builder: (context, activeSessionId, child) {
-                                return _TopHeaderBar(
-                                  status: connectionStatus,
-                                  isAutoConnectionAttempt:
-                                  isAutoConnectionAttempt,
-                                  isFindingDevice: _isFindingDevice,
-                                  isSyncing: isSyncing,
-                                  isLive: activeSessionId != null,
-                                  batteryLevel: _batteryLevel.value,
-                                  profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
-                                  onTap: _handleDeviceStatusTap,
-                                );
-                              },
+                      valueListenable: _deviceManager.isSyncing,
+                      builder: (context, isSyncing, child) {
+                        return ValueListenableBuilder<String?>(
+                          valueListenable: _deviceManager.activeSessionId,
+                          builder: (context, activeSessionId, child) {
+                            return _TopHeaderBar(
+                              status: connectionStatus,
+                              isFindingDevice: _isFindingDevice,
+                              isSyncing: isSyncing,
+                              isLive: activeSessionId != null,
+                              batteryLevel: _batteryLevel.value,
+                              profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
+                              onTap: _handleDeviceStatusTap,
                             );
                           },
                         );
@@ -2279,8 +2244,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     try {
       await _bluetoothManager.connect();
     } catch (e) {
-      // User denied or connection failed — stop auto-reconnect and hide banner.
-      await _bluetoothManager.setAutoReconnect(false);
       if (!mounted) return;
       setState(() => _syncBannerDismissed = true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2332,7 +2295,6 @@ class _StaggeredFadeSlide extends StatelessWidget {
 
 class _TopHeaderBar extends StatefulWidget {
   final DeviceConnectionStatus status;
-  final bool isAutoConnectionAttempt;
   final bool isFindingDevice;
   final bool isSyncing;
   final bool isLive;
@@ -2342,7 +2304,6 @@ class _TopHeaderBar extends StatefulWidget {
 
   const _TopHeaderBar({
     required this.status,
-    required this.isAutoConnectionAttempt,
     required this.isFindingDevice,
     required this.isSyncing,
     required this.isLive,
@@ -2534,9 +2495,7 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
     } else if (isConnecting) {
       accentColor = const Color(0xFFF59E0B);
       statusIcon = Icons.bluetooth_searching_rounded;
-      statusLabel = widget.isAutoConnectionAttempt
-          ? 'Auto-connecting'
-          : 'Connecting…';
+      statusLabel = 'Connecting…';
     } else if (widget.isSyncing) {
       accentColor = const Color(0xFF3B82F6);
       statusIcon = Icons.sync_rounded;
@@ -4140,12 +4099,14 @@ class _ConnectedDeviceSheet extends StatelessWidget {
   final int batteryLevel;
   final String profile;
   final VoidCallback onDisconnect;
+  final VoidCallback onForget;
   final VoidCallback onCancel;
 
   const _ConnectedDeviceSheet({
     required this.batteryLevel,
     required this.profile,
     required this.onDisconnect,
+    required this.onForget,
     required this.onCancel,
   });
 
@@ -4312,6 +4273,30 @@ class _ConnectedDeviceSheet extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: const Color(0xFF3B82F6).withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: const Text(
+                      'Disconnect Only',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFF1D4ED8),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: onForget,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    decoration: BoxDecoration(
                       color: const Color(0xFFFEF2F2),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
@@ -4319,7 +4304,7 @@ class _ConnectedDeviceSheet extends StatelessWidget {
                       ),
                     ),
                     child: const Text(
-                      'Disconnect & Find New Pod',
+                      'Forget Device & Find New Pod',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Color(0xFFEF4444),

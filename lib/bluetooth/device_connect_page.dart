@@ -212,13 +212,13 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     );
   }
 
-  Future<void> _connect() async {
+  Future<void> _connect({String? remoteId}) async {
     if (_connecting) return;
     setState(() => _connecting = true);
     await FlutterBluePlus.stopScan();
     _scanSub?.cancel();
     try {
-      await _btManager.connect();
+      await _btManager.connect(remoteId: remoteId);
     } catch (e) {
       if (!mounted) return;
       setState(() => _connecting = false);
@@ -544,7 +544,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
               return _DeviceCard(
                 name: name,
                 bars: _rssiToBars(r.rssi),
-                onConnect: _connect,
+                onConnect: () => _connect(remoteId: r.device.remoteId.toString()),
               );
             },
           ),

@@ -25,16 +25,12 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  final _btManager = BluetoothServiceManager();
-  bool _autoReconnect = true;
   bool _lowPowerMode = false;
   bool _vibrationAlerts = true;
 
   @override
   void initState() {
     super.initState();
-    _autoReconnect = _btManager.autoReconnectEnabled.value;
-    _btManager.autoReconnectEnabled.addListener(_onAutoReconnectChanged);
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
@@ -42,15 +38,8 @@ class _SettingsPageState extends State<SettingsPage>
     _controller.forward();
   }
 
-  void _onAutoReconnectChanged() {
-    if (mounted) {
-      setState(() => _autoReconnect = _btManager.autoReconnectEnabled.value);
-    }
-  }
-
   @override
   void dispose() {
-    _btManager.autoReconnectEnabled.removeListener(_onAutoReconnectChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -138,11 +127,8 @@ class _SettingsPageState extends State<SettingsPage>
                   controller: _controller,
                   delayMs: 500,
                   child: _ConnectionSettingsCard(
-                    autoReconnect: _autoReconnect,
                     lowPowerMode: _lowPowerMode,
                     vibrationAlerts: _vibrationAlerts,
-                    onAutoReconnectChanged: (v) =>
-                        _btManager.setAutoReconnect(v),
                     onLowPowerModeChanged: (v) =>
                         setState(() => _lowPowerMode = v),
                     onVibrationAlertsChanged: (v) {
@@ -878,18 +864,14 @@ class _BatteryTemperatureRow extends StatelessWidget {
 // ── Connection Settings Card ────────────────────────────────────────────────
 
 class _ConnectionSettingsCard extends StatelessWidget {
-  final bool autoReconnect;
   final bool lowPowerMode;
   final bool vibrationAlerts;
-  final ValueChanged<bool> onAutoReconnectChanged;
   final ValueChanged<bool> onLowPowerModeChanged;
   final ValueChanged<bool> onVibrationAlertsChanged;
 
   const _ConnectionSettingsCard({
-    required this.autoReconnect,
     required this.lowPowerMode,
     required this.vibrationAlerts,
-    required this.onAutoReconnectChanged,
     required this.onLowPowerModeChanged,
     required this.onVibrationAlertsChanged,
   });
@@ -910,19 +892,6 @@ class _ConnectionSettingsCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          _ToggleRow(
-            label: 'Auto-Reconnect',
-            value: autoReconnect,
-            onChanged: onAutoReconnectChanged,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: AppTheme.border,
-            ),
-          ),
           _ToggleRow(
             label: 'Low Power Mode',
             value: lowPowerMode,
