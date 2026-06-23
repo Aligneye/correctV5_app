@@ -216,10 +216,7 @@ class LiveSessionRecorder {
               ? reading.therapyIntensityLevel
               : therapyCtx?.intensityLevel)
         : null;
-    final initialPlanSequence =
-        type == 'therapy' && reading.therapyPatternSequence.isNotEmpty
-        ? List<int>.from(reading.therapyPatternSequence)
-        : null;
+    final initialPlanSequence = null;
     final initialPlannedDurationSec = type == 'therapy'
         ? therapyCtx?.plannedDurationSec
         : null;
@@ -369,11 +366,7 @@ class LiveSessionRecorder {
           reading.therapyIntensityLevel <= 3) {
         active.therapyIntensityLevel = reading.therapyIntensityLevel;
       }
-      if (reading.therapyPatternSequence.isNotEmpty) {
-        active.plannedPatternSequence = List<int>.from(
-          reading.therapyPatternSequence,
-        );
-      }
+      // therapyPatternSequence is deprecated in correctV5
       final pattern = _patternIndexFrom(reading.therapyPattern);
       if (pattern != null) {
         final elapsedSec = _durationFrom(
