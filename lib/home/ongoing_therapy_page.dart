@@ -63,6 +63,9 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   bool _deviceFrameReceived = false;
   int _startingDotCount = 1;
   Timer? _startingDotTimer;
+  // Fallback: auto-dismiss the overlay after a few seconds if firmware never
+  // sends the first frame (slow wake-up, or BLE not responding).
+  Timer? _overlayFallbackTimer;
 
   // Track the recorder's active session id so the moment it clears (session
   // ended) we can open the detail sheet for the just-finished row. We can't
@@ -101,6 +104,11 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
     super.initState();
     _totalDurationSeconds = widget.durationMinutes * 60;
     _intensityLevel = widget.intensity;
+
+    // Seed remaining so the local ticker starts counting down immediately,
+    // without waiting for the first BLE frame (which can take 2-5 s).
+    _totalRemainingSeconds = _totalDurationSeconds;
+    _frameRemainingSeconds = _totalDurationSeconds;
 
     _entryController = AnimationController(
       vsync: this,
@@ -171,6 +179,15 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
       setState(() => _startingDotCount = (_startingDotCount % 3) + 1);
     });
 
+    // Fallback: dismiss the overlay after 5 s even if no BLE THERAPY frame
+    // arrives — keeps the UI usable when firmware is slow or not connected.
+    _overlayFallbackTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted || _deviceFrameReceived) return;
+      setState(() => _deviceFrameReceived = true);
+      _startingDotTimer?.cancel();
+      _startingDotTimer = null;
+    });
+
     widget.deviceService.connectionStatus.addListener(_handleConnectionStatus);
     _syncLocalTickerWithConnection();
 
@@ -191,6 +208,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
     _deviceManager.activeSessionId.removeListener(_handleActiveSessionChanged);
     _browseResetTimer?.cancel();
     _startingDotTimer?.cancel();
+    _overlayFallbackTimer?.cancel();
     _patternPageController.dispose();
     _entryController.dispose();
     _breathController.dispose();
@@ -338,6 +356,8 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         _deviceFrameReceived = true;
         _startingDotTimer?.cancel();
         _startingDotTimer = null;
+        _overlayFallbackTimer?.cancel();
+        _overlayFallbackTimer = null;
       }
 
       // Snap the displayed values to firmware ground truth every time a

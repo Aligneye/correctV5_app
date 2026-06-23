@@ -88,8 +88,17 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     final hasBonded = await _btManager.deviceService.hasBondedTargetDevice();
     if (!mounted) return;
     if (hasBonded) {
-      // Skip the scan UI entirely — just try to connect to the paired pod.
-      unawaited(_connect());
+      // Try connecting to the paired pod. If it fails (out of range, BLE
+      // stack issue, etc.) fall through to scan so the user can see whether
+      // the pod is nearby and manually retry.
+      await _connect();
+      if (!mounted) return;
+      // If connect succeeded the status listener already popped this page.
+      // Only start scan if we're still here (i.e. connect failed/timed out).
+      if (_btManager.deviceService.connectionStatus.value !=
+          DeviceConnectionStatus.connected) {
+        _startScan();
+      }
     } else {
       _startScan();
     }

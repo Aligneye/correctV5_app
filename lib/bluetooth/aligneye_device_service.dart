@@ -147,9 +147,13 @@ class PostureReading {
       calY: toDouble(json['cal_y']),
       calZ: toDouble(json['cal_z']),
       isCalibrating:
+          json['isCalibrating'] == true ||
+          json['isCalibrating']?.toString() == 'true' ||
           json['is_calibrating'] == true ||
           json['is_calibrating']?.toString() == 'true',
-      calibrationResult: json['calibration_result']?.toString() ?? '',
+      calibrationResult:
+          json['calibrationResult']?.toString() ??
+          json['calibration_result']?.toString() ?? '',
       calibrationElapsedMs: toInt(
         json['c_elap'] ?? json['calibration_elapsed_ms'],
       ),
@@ -232,6 +236,42 @@ class PostureReading {
         'sessionId=$liveSessionId, sessionElapsed=$liveSessionElapsedSeconds';
   }
 }
+
+// ── Device Info model (from GET_INFO response) ──────────────────────────────
+
+class DeviceInfo {
+  final String model;
+  final String hardwareRevision;
+  final String firmwareVersion;
+  final int batteryPercent;
+  final bool dfuReady;
+
+  const DeviceInfo({
+    required this.model,
+    required this.hardwareRevision,
+    required this.firmwareVersion,
+    required this.batteryPercent,
+    required this.dfuReady,
+  });
+
+  factory DeviceInfo.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? 0;
+    }
+
+    return DeviceInfo(
+      model: json['model']?.toString() ?? '',
+      hardwareRevision: json['hw']?.toString() ?? '',
+      firmwareVersion: json['fw']?.toString() ?? '',
+      batteryPercent: toInt(json['battery']),
+      dfuReady: json['dfu_ready'] == true,
+    );
+  }
+}
+
+enum EnterDfuResult { success, lowBattery, sessionActive, timeout, error }
 
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
@@ -471,17 +511,191 @@ class AlignEyeDeviceService {
     if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
     }
-
-    // Single command - firmware handles CALIBRATE=START, CALIBRATION=START, ACTION=CALIBRATE
-    return _writeTextCommand('CALIBRATION=START');
+    return _writeTextCommand('ACTION=CALIBRATE');
   }
 
   Future<bool> sendCalibrationCancel() async {
     if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
     }
+    return _writeTextCommand('ACTION=CALIBRATE_CANCEL');
+  }
 
-    return _writeTextCommand('CALIBRATION=CANCEL');
+  Future<bool> _writeJsonCommand(Map<String, dynamic> payload) async {
+    return _writeTextCommand(jsonEncode(payload));
+  }
+
+  /// Sends a JSON command (e.g. {"cmd":"GET_INFO"}) and waits up to
+  /// [timeout] for a matching response on the notify characteristic.
+  /// Returns the parsed JSON map or null on timeout / error.
+  Future<Map<String, dynamic>?> sendJsonCommand(
+    Map<String, dynamic> command, {
+    Duration timeout = const Duration(seconds: 6),
+    bool Function(Map<String, dynamic>)? matcher,
+  }) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return null;
+    final characteristic = _notifyCharacteristic;
+    if (characteristic == null) return null;
+
+    final payload = jsonEncode(command);
+    final completer = Completer<Map<String, dynamic>?>();
+    StreamSubscription<PostureReading>? sub;
+
+    sub = readings.listen((r) {
+      // We can't easily intercept raw notify bytes here since they are parsed
+      // into PostureReading. Instead we rely on the raw notification stream
+      // captured below; this subscription is a no-op placeholder.
+    });
+
+    // Capture raw characteristic notifications directly while we wait.
+    StreamSubscription<List<int>>? rawSub;
+    final rawStream = characteristic.onValueReceived;
+    String rawBuffer = '';
+    rawSub = rawStream.listen((bytes) {
+      rawBuffer += utf8.decode(bytes, allowMalformed: true);
+      // Scan for complete JSON objects
+      int depth = 0;
+      int start = -1;
+      for (int i = 0; i < rawBuffer.length; i++) {
+        if (rawBuffer[i] == '{') {
+          if (depth == 0) start = i;
+          depth++;
+        } else if (rawBuffer[i] == '}') {
+          depth--;
+          if (depth == 0 && start >= 0) {
+            final chunk = rawBuffer.substring(start, i + 1);
+            rawBuffer = rawBuffer.substring(i + 1);
+            try {
+              final parsed = jsonDecode(chunk) as Map<String, dynamic>;
+              if (matcher == null || matcher(parsed)) {
+                if (!completer.isCompleted) completer.complete(parsed);
+              }
+            } catch (_) {}
+            break;
+          }
+        }
+      }
+    });
+
+    try {
+      await characteristic.write(
+        utf8.encode(payload),
+        withoutResponse: characteristic.properties.writeWithoutResponse,
+      );
+      debugPrint('JSON command sent: $payload');
+    } catch (e) {
+      debugPrint('Failed to send JSON command: $e');
+      await rawSub.cancel();
+      await sub.cancel();
+      return null;
+    }
+
+    final result = await completer.future.timeout(timeout, onTimeout: () {
+      debugPrint('JSON command timed out: $payload');
+      return null;
+    });
+
+    await rawSub.cancel();
+    await sub.cancel();
+    return result;
+  }
+
+  /// Sends {"cmd":"GET_INFO"} and returns a DeviceInfo on success.
+  Future<DeviceInfo?> getDeviceInfo() async {
+    final resp = await sendJsonCommand(
+      {'cmd': 'GET_INFO'},
+      matcher: (m) => m['t'] == 'INFO',
+    );
+    if (resp == null) return null;
+    return DeviceInfo.fromJson(resp);
+  }
+
+  /// Waits for an unsolicited notification matching [matcher] without sending
+  /// any command. Returns the parsed map or null on timeout.
+  Future<Map<String, dynamic>?> waitForNotification({
+    required bool Function(Map<String, dynamic>) matcher,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return null;
+    final characteristic = _notifyCharacteristic;
+    if (characteristic == null) return null;
+
+    final completer = Completer<Map<String, dynamic>?>();
+    final rawStream = characteristic.onValueReceived;
+    String rawBuffer = '';
+    StreamSubscription<List<int>>? rawSub;
+
+    rawSub = rawStream.listen((bytes) {
+      rawBuffer += utf8.decode(bytes, allowMalformed: true);
+      int depth = 0;
+      int start = -1;
+      for (int i = 0; i < rawBuffer.length; i++) {
+        if (rawBuffer[i] == '{') {
+          if (depth == 0) start = i;
+          depth++;
+        } else if (rawBuffer[i] == '}') {
+          depth--;
+          if (depth == 0 && start >= 0) {
+            final chunk = rawBuffer.substring(start, i + 1);
+            rawBuffer = rawBuffer.substring(i + 1);
+            try {
+              final parsed = jsonDecode(chunk) as Map<String, dynamic>;
+              if (matcher(parsed)) {
+                if (!completer.isCompleted) completer.complete(parsed);
+              }
+            } catch (_) {}
+            break;
+          }
+        }
+      }
+    });
+
+    final result = await completer.future.timeout(timeout, onTimeout: () {
+      debugPrint('waitForNotification timed out');
+      return null;
+    });
+
+    await rawSub.cancel();
+    return result;
+  }
+
+  /// Sends {"cmd":"ENTER_DFU"} and waits for a two-step ARMED→ENTERED ack.
+  Future<EnterDfuResult> sendEnterDfu() async {
+    // Step 1: Send command, wait for ARMED ack
+    final resp = await sendJsonCommand(
+      {'cmd': 'ENTER_DFU'},
+      matcher: (m) => m['status'] != null || m['dfu'] != null,
+      timeout: const Duration(seconds: 8),
+    );
+
+    if (resp == null) return EnterDfuResult.timeout;
+    if (resp['status'] == 'error') {
+      final reason = resp['reason']?.toString() ?? '';
+      if (reason == 'LOW_BATTERY') return EnterDfuResult.lowBattery;
+      if (reason == 'SESSION_ACTIVE') return EnterDfuResult.sessionActive;
+      return EnterDfuResult.error;
+    }
+
+    // Check for ARMED
+    if (resp['dfu'] != 'ARMED' && resp['status'] != 'ok') {
+      return EnterDfuResult.error;
+    }
+
+    debugPrint('DFU: ARMED received, waiting for ENTERED...');
+
+    // Step 2: Wait for DFU:"ENTERED" (device rebooting into bootloader)
+    final entered = await waitForNotification(
+      matcher: (m) => m['dfu'] == 'ENTERED',
+      timeout: const Duration(seconds: 15),
+    );
+
+    if (entered == null) {
+      debugPrint('DFU: ENTERED timeout — continuing anyway');
+      return EnterDfuResult.timeout;
+    }
+
+    debugPrint('DFU: ENTERED confirmed');
+    return EnterDfuResult.success;
   }
 
   Future<bool> _writeTextCommand(String payload) async {
@@ -796,8 +1010,15 @@ class AlignEyeDeviceService {
           if (Platform.isAndroid || Platform.isIOS) {
             debugPrint('Requesting MTU of 251...');
             try {
-              await _device!.requestMtu(251, timeout: 3);
-              debugPrint('MTU request completed');
+              final mtu = await _device!.requestMtu(251, timeout: 3);
+              debugPrint('MTU negotiated: $mtu');
+              if (mtu < 100) {
+                debugPrint('MTU too low ($mtu) — disconnecting');
+                _isConnecting = false;
+                _connectionTimeoutTimer?.cancel();
+                await disconnect();
+                return;
+              }
             } catch (e) {
               debugPrint('Failed to request MTU (non-fatal): $e');
             }
@@ -807,6 +1028,13 @@ class AlignEyeDeviceService {
           _userInitiatedDisconnect = false;
         } catch (e) {
           debugPrint('Connection failed: $e');
+
+          // MTU negotiation can fail if the device briefly drops the link right
+          // after GATT connect.  The physical connection was established (GATT
+          // connected), so treat this as a non-fatal hiccup and fall through to
+          // service discovery rather than aborting the whole connect attempt.
+          final isMtuError = e.toString().toLowerCase().contains('requestmtu') ||
+              e.toString().toLowerCase().contains('mtu');
           final deviceAfterError = _device;
           final stateAfterError = deviceAfterError == null
               ? BluetoothConnectionState.disconnected
@@ -816,20 +1044,29 @@ class AlignEyeDeviceService {
                 );
           debugPrint('Connection state after error: $stateAfterError');
 
-          // Retry if we haven't exceeded max retries
-          if (_connectionRetryCount < _maxRetries && !isAutoConnect) {
-            _connectionRetryCount++;
-            debugPrint(
-              'Retrying connection after failure (attempt $_connectionRetryCount/$_maxRetries)...',
-            );
-            await Future.delayed(Duration(seconds: _connectionRetryCount * 2));
-            _isConnecting = false;
-            _connectionTimeoutTimer?.cancel();
-            await connect(isAutoConnect: isAutoConnect);
-            return;
-          }
+          // If the MTU request itself failed but device is still connected,
+          // continue with service discovery (MTU failure is not fatal).
+          if (isMtuError &&
+              stateAfterError == BluetoothConnectionState.connected) {
+            debugPrint('MTU error but device still connected — continuing...');
+            // fall through to service discovery below
+          } else {
+            // Retry if we haven't exceeded max retries
+            if (_connectionRetryCount < _maxRetries && !isAutoConnect) {
+              _connectionRetryCount++;
+              debugPrint(
+                'Retrying connection after failure (attempt $_connectionRetryCount/$_maxRetries)...',
+              );
+              await Future.delayed(
+                  Duration(seconds: _connectionRetryCount * 2));
+              _isConnecting = false;
+              _connectionTimeoutTimer?.cancel();
+              await connect(isAutoConnect: isAutoConnect);
+              return;
+            }
 
-          rethrow;
+            rethrow;
+          }
         }
       }
 
@@ -910,6 +1147,7 @@ class AlignEyeDeviceService {
         }
         final last = _lastDataReceivedAt;
         if (last != null && DateTime.now().difference(last).inSeconds > 15) {
+          if (currentIsCalibrating) return;
           debugPrint('WATCHDOG: No data for 15s, forcing reconnect');
           disconnect().then((_) {
             if (!_userInitiatedDisconnect &&
@@ -976,7 +1214,6 @@ class AlignEyeDeviceService {
           msg.contains('not granted');
       if (!isDenied &&
           _connectionRetryCount < _maxRetries &&
-          !isAutoConnect &&
           !_userInitiatedDisconnect) {
         _connectionRetryCount++;
         debugPrint(
@@ -1471,9 +1708,13 @@ class AlignEyeDeviceService {
   }
 
   void _handleNotifyData(List<int> data) {
+
     if (data.isEmpty) return;
     final rawData = utf8.decode(data, allowMalformed: true);
-    debugPrint("BLE RAW: $rawData");
+    // debugPrint("BLE RAW: $rawData");
+    if (rawData.contains('"t":"C"') || rawData.contains('"t":"c"')) {
+      debugPrint("BLE RAW CALIB: $rawData");
+    }
     _lastDataReceivedAt = DateTime.now();
     // _buffer += utf8.decode(data, allowMalformed: true);
     _buffer += rawData;
@@ -1582,19 +1823,23 @@ class AlignEyeDeviceService {
             decoded['battery'] = _lastKnownBattery;
           }
         }
-        debugPrint("PACKET TYPE = ${decoded['t']}");
+        // debugPrint("PACKET TYPE = ${decoded['t']}");
+        final pktType = decoded['t']?.toString().toUpperCase() ?? '';
+        if (pktType == 'C') {
+          debugPrint("📦 CALIB PACKET => isCalibrating=${decoded['isCalibrating']} phase=${decoded['c_phase']} result=${decoded['calibrationResult']} elap=${decoded['c_elap']}/${decoded['c_tot']}");
+        }
         if (decoded is Map<String, dynamic>) {
           final reading = PostureReading.fromJson(decoded);
           // Store current reading
           currentReading.value = reading;
-          debugPrint(
-              "POSTURE=${reading.posture} "
-                  "BAD=${reading.isBadPosture} "
-                  "MODE=${reading.mode}"
-          );
-          debugPrint(
-              "MODE FRAME => mode=${reading.mode} sub=${reading.subMode}"
-          );
+          // debugPrint(
+          //     "POSTURE=${reading.posture} "
+          //         "BAD=${reading.isBadPosture} "
+          //         "MODE=${reading.mode}"
+          // );
+          // debugPrint(
+          //     "MODE FRAME => mode=${reading.mode} sub=${reading.subMode}"
+          // );
           // Sticky-cache therapy fields that firmware only publishes every
           // few frames. Only update when the frame actually carries new
           // info, so the cache survives across transitions / page rebuilds.

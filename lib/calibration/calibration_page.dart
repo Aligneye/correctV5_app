@@ -30,8 +30,9 @@ class CalibrationPage extends StatefulWidget {
 
 class _CalibrationPageState extends State<CalibrationPage>
     with TickerProviderStateMixin {
-  static const int _getReadyMs = 3000;
-  static const int _holdStillMs = 5000;
+  // Fallback durations — used when device hasn't sent c_tot yet
+  static const int _fallbackGetReadyMs = 2000;
+  static const int _fallbackHoldStillMs = 5000;
   static const Duration _startDetectTimeout = Duration(seconds: 10);
 
   late final AnimationController _pulseController;
@@ -47,11 +48,15 @@ class _CalibrationPageState extends State<CalibrationPage>
   bool _closing = false;
   bool _completionHandled = false;
 
-  // Device-driven progress (from BLE)
+  // BLE-reported values (may be sparse — firmware only sends on start/end)
   int _deviceElapsedMs = 0;
   String _devicePhase = 'IDLE';
   int _deviceHoldStartMs = 0;
   int _cancelMissCount = 0;
+
+  // Wall-clock anchor for smooth progress when BLE packets are sparse
+  DateTime? _getReadyStartedAt;
+  DateTime? _holdStillStartedAt;
   @override
   void initState() {
     super.initState();
@@ -115,6 +120,10 @@ class _CalibrationPageState extends State<CalibrationPage>
       _completionHandled = false;
       _deviceElapsedMs = 0;
       _devicePhase = 'IDLE';
+      _deviceHoldStartMs = 0;
+      _cancelMissCount = 0;
+      _getReadyStartedAt = null;
+      _holdStillStartedAt = null;
     });
 
     final sent = await widget.deviceService.sendCalibrationStart();
@@ -125,10 +134,15 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
   }
 
+
   void _onReading(PostureReading reading) {
     debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
     'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
     'elapsed=${reading.calibrationElapsedMs}');
+    if (reading.calibrationResult == 'cancelled') {
+      if (mounted) Navigator.of(context).pop(false);
+      return;
+    }
     if (_stage == _CalibrationStage.success || _completionHandled) return;
 
     if (!_isConnected && _stage != _CalibrationStage.intro) {
@@ -140,32 +154,39 @@ class _CalibrationPageState extends State<CalibrationPage>
     _deviceElapsedMs = reading.calibrationElapsedMs;
     _devicePhase = reading.calibrationPhase;
 
-    // ✅ FIX: Result sirf tab accept karo jab hum actually calibration mein hon
-    // aur startRequestedAt ke BAAD ka result ho (stale result ignore)
+
     if (reading.calibrationResult.isNotEmpty &&
         _stage != _CalibrationStage.starting &&
         _stage != _CalibrationStage.intro &&
         _startRequestedAt != null) {
-      // Ye result purana toh nahi? Device se aane mein thodi delay hoti hai
-      // isliye 2 second ka buffer — usse pehle aaya result = stale
+
       final elapsed = DateTime.now().difference(_startRequestedAt!);
       if (elapsed.inMilliseconds > 2000) {
         _handleCalibrationResult(reading.calibrationResult == 'complete');
         return;
       }
+      return;
     }
 
-    // Transition to getReady when device starts calibrating
+    if (reading.calibrationResult == 'cancelled') {
+      if (mounted) Navigator.of(context).pop(false);
+      return;
+    }
+
+    // Transition to getReady when device starts calibrating and phase is GET_READY
     if ((_stage == _CalibrationStage.starting || _stage == _CalibrationStage.intro) &&
-        reading.isCalibrating) {
+        reading.isCalibrating &&
+        (reading.calibrationPhase == 'GET_READY' || reading.calibrationPhase.isEmpty)) {
+      _getReadyStartedAt ??= DateTime.now();
       setState(() => _stage = _CalibrationStage.getReady);
       return;
     }
 
-    // Phase transitions from device
+    // Phase transitions from device (BLE-driven)
     if (_stage == _CalibrationStage.getReady &&
         _devicePhase == 'HOLD_STILL') {
       _deviceHoldStartMs = _deviceElapsedMs;
+      _holdStillStartedAt ??= DateTime.now();
       setState(() => _stage = _CalibrationStage.holdStill);
     }
 
@@ -250,24 +271,65 @@ class _CalibrationPageState extends State<CalibrationPage>
       }
     }
 
-    // Rebuild for progress updates
-    if (_stage == _CalibrationStage.getReady ||
-        _stage == _CalibrationStage.holdStill) {
+    // Wall-clock auto-advance: firmware sends packets only at start/end,
+    // so we drive phase transitions and progress locally.
+    if (_stage == _CalibrationStage.getReady) {
+      final anchor = _getReadyStartedAt;
+      if (anchor != null) {
+        final wallElapsed = DateTime.now().difference(anchor).inMilliseconds;
+        if (wallElapsed >= _getReadyMs) {
+          // GET_READY timer expired — advance to holdStill
+          _holdStillStartedAt = DateTime.now();
+          setState(() => _stage = _CalibrationStage.holdStill);
+          return;
+        }
+      }
+      setState(() {});
+    }
+
+    if (_stage == _CalibrationStage.holdStill) {
       setState(() {});
     }
   }
 
+  int get _getReadyMs => _fallbackGetReadyMs;
+  int get _holdStillMs => _fallbackHoldStillMs;
+
+  // Wall-clock elapsed for GET_READY phase
+  int get _getReadyWallElapsedMs {
+    final anchor = _getReadyStartedAt;
+    if (anchor == null) return 0;
+    return DateTime.now().difference(anchor).inMilliseconds.clamp(0, _getReadyMs);
+  }
+
+  // Wall-clock elapsed for HOLD_STILL phase
+  int get _holdStillWallElapsedMs {
+    final anchor = _holdStillStartedAt;
+    if (anchor == null) return 0;
+    return DateTime.now().difference(anchor).inMilliseconds.clamp(0, _holdStillMs);
+  }
+
   int _getReadyRemainingSeconds() {
-    if (_devicePhase != 'GET_READY') return 0;
-    final remainingMs = _getReadyMs - _deviceElapsedMs;
+    final elapsedMs = _devicePhase == 'GET_READY' && _deviceElapsedMs > 0
+        ? _deviceElapsedMs
+        : _getReadyWallElapsedMs;
+    final remainingMs = _getReadyMs - elapsedMs;
     if (remainingMs <= 0) return 0;
     return (remainingMs / 1000).ceil();
   }
 
+  double _getReadyProgress() {
+    final elapsedMs = _devicePhase == 'GET_READY' && _deviceElapsedMs > 0
+        ? _deviceElapsedMs
+        : _getReadyWallElapsedMs;
+    return (elapsedMs / _getReadyMs).clamp(0.0, 1.0);
+  }
+
   double _getHoldStillProgress() {
-    if (_devicePhase != 'HOLD_STILL') return 0;
-    final holdElapsed = _deviceElapsedMs - _getReadyMs;
-    return (holdElapsed / _holdStillMs).clamp(0.0, 1.0);
+    final elapsedMs = _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
+        ? _deviceElapsedMs - _deviceHoldStartMs
+        : _holdStillWallElapsedMs;
+    return (elapsedMs / _holdStillMs).clamp(0.0, 1.0);
   }
 
   @override
@@ -305,7 +367,7 @@ class _CalibrationPageState extends State<CalibrationPage>
         return _GetReadyScreen(
           key: const ValueKey('get_ready'),
           countdown: _getReadyRemainingSeconds(),
-          progress: (_deviceElapsedMs / _getReadyMs).clamp(0.0, 1.0),
+          progress: _getReadyProgress(),
           pulse: _pulseController,
         );
       case _CalibrationStage.holdStill:
@@ -388,7 +450,7 @@ class _IntroScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.65),
+              color: Colors.white.withValues(alpha: 0.65),
               height: 1.45,
             ),
           ),
@@ -396,21 +458,21 @@ class _IntroScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
+              color: Colors.white.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Column(
               children: [
                 Icon(Icons.airline_seat_recline_normal_rounded,
-                    size: 48, color: const Color(0xFF008090).withOpacity(0.9)),
+                    size: 48, color: const Color(0xFF008090).withValues(alpha: 0.9)),
                 const SizedBox(height: 16),
                 Text(
                   'Sit comfortably in your natural upright posture.\nKeep your back straight and shoulders relaxed.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 15,
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     height: 1.5,
                   ),
                 ),
@@ -455,7 +517,7 @@ class _IntroScreen extends StatelessWidget {
               'Cancel',
               style: TextStyle(
                 fontSize: 15,
-                color: Colors.white.withOpacity(0.6),
+                color: Colors.white.withValues(alpha: 0.6),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -493,7 +555,7 @@ class _StatusScreen extends StatelessWidget {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
             ),
             child: Icon(icon, color: color, size: 32),
           ),
@@ -512,7 +574,7 @@ class _StatusScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               height: 1.45,
             ),
           ),
@@ -557,7 +619,7 @@ class _GetReadyScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               height: 1.5,
             ),
           ),
@@ -570,9 +632,9 @@ class _GetReadyScreen extends StatelessWidget {
               height: 140,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFF59E0B).withOpacity(0.15),
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
                 border: Border.all(
-                  color: const Color(0xFFF59E0B).withOpacity(0.4),
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.4),
                   width: 3,
                 ),
               ),
@@ -586,7 +648,7 @@ class _GetReadyScreen extends StatelessWidget {
                       value: progress,
                       strokeWidth: 4,
                       color: const Color(0xFFF59E0B),
-                      backgroundColor: Colors.white.withOpacity(0.08),
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
                     ),
                   ),
                   Text(
@@ -607,7 +669,7 @@ class _GetReadyScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
-              color: Colors.white.withOpacity(0.5),
+              color: Colors.white.withValues(alpha: 0.5),
             ),
           ),
         ],
@@ -649,7 +711,7 @@ class _HoldStillScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               height: 1.5,
             ),
           ),
@@ -670,7 +732,7 @@ class _HoldStillScreen extends StatelessWidget {
                       value: progress,
                       strokeWidth: 8,
                       color: const Color(0xFF22C55E),
-                      backgroundColor: Colors.white.withOpacity(0.08),
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
                     ),
                   ),
                   Column(
@@ -679,7 +741,7 @@ class _HoldStillScreen extends StatelessWidget {
                       Icon(
                         Icons.accessibility_new_rounded,
                         size: 56,
-                        color: const Color(0xFF22C55E).withOpacity(0.9),
+                        color: const Color(0xFF22C55E).withValues(alpha: 0.9),
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -687,7 +749,7 @@ class _HoldStillScreen extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                         ),
                       ),
                     ],
@@ -745,7 +807,7 @@ class _ResultScreen extends StatelessWidget {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 32),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
+                    color: Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(2),
                   ),
                   child: LayoutBuilder(
@@ -779,7 +841,7 @@ class _ResultScreen extends StatelessWidget {
             height: 80,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
             ),
             child: Icon(icon, color: color, size: 44),
           ),
@@ -799,7 +861,7 @@ class _ResultScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.75),
+              color: Colors.white.withValues(alpha: 0.75),
               height: 1.5,
             ),
           ),
@@ -809,7 +871,7 @@ class _ResultScreen extends StatelessWidget {
               subText!,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.white.withOpacity(0.5),
+                color: Colors.white.withValues(alpha: 0.5),
               ),
             ),
           ],

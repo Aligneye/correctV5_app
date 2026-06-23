@@ -93,25 +93,12 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 
   static const int _maxSlots = 8;
 
-  // App theme colors
-  static const Color _bg = Color(0xFF0D1117);
-  static const Color _surface = Color(0xFF161B22);
-  static const Color _surfaceHigh = Color(0xFF1C2128);
-  static const Color _border = Color(0xFF30363D);
-  static const Color _textPrimary = Color(0xFFF0F6FC);
-  static const Color _textSecondary = Color(0xFF8B949E);
-  static const Color _accentTeal = Color(0xFF14B8A6);
-  static const Color _accentPurple = Color(0xFFA855F7);
-  static const Color _accentPink = Color(0xFFEC4899);
-  static const Color _accentRed = Color(0xFFEF4444);
-  static const Color _accentGold = Color(0xFFF59E0B);
-
   @override
   void initState() {
     super.initState();
     _fadeController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 400),
     );
     _loadCalibrations();
   }
@@ -127,7 +114,6 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
     if (!mounted) return;
 
     if (list.isEmpty) {
-      // Seed default calibration on first launch
       final defaultCal = SavedCalibration(
         id: 1,
         name: 'Calibration 1',
@@ -170,19 +156,14 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
     HapticFeedback.mediumImpact();
     setState(() {
       _calibrations.removeWhere((c) => c.id == cal.id);
-
-      // Re-number
       _calibrations = _calibrations.asMap().entries.map((e) {
         final newId = e.key + 1;
         final c = e.value;
-        // Auto-rename only if it still matches the default pattern
         final autoName = RegExp(r'^Calibration \d+$').hasMatch(c.name)
             ? 'Calibration $newId'
             : c.name;
         return c.copyWith(id: newId, name: autoName);
       }).toList();
-
-      // If deleted was default, make next (first) the default
       if (_calibrations.isNotEmpty && !_calibrations.any((c) => c.isDefault)) {
         _calibrations[0] = _calibrations[0].copyWith(isDefault: true);
       }
@@ -192,7 +173,16 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 
   Future<void> _addCalibration() async {
     if (_calibrations.length >= _maxSlots) {
-      _showMaxSlotsSnackbar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Maximum 8 calibrations reached. Delete one to add new.'),
+          backgroundColor: AppTheme.destructive,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+          duration: const Duration(seconds: 3),
+        ),
+      );
       return;
     }
 
@@ -211,12 +201,11 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
       id: newId,
       name: 'Calibration $newId',
       createdAt: DateTime.now(),
-      isDefault: true, // newest becomes default
+      isDefault: true,
     );
 
     HapticFeedback.lightImpact();
     setState(() {
-      // Remove default from others
       _calibrations = _calibrations.map((c) => c.copyWith(isDefault: false)).toList();
       _calibrations.add(newCal);
     });
@@ -247,70 +236,54 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
     }
   }
 
-  void _showMaxSlotsSnackbar() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text(
-          'Maximum 8 calibrations allowed. Delete one to add new.',
-          style: TextStyle(color: Colors.white),
-        ),
-        backgroundColor: const Color(0xFF1C2128),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: _loading
-                  ? const Center(
-                child: CircularProgressIndicator(color: _accentTeal),
-              )
-                  : FadeTransition(
-                opacity: _fadeController,
-                child: _buildBody(),
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: AppTheme.pageBackgroundGradientFor(context),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: _loading
+                    ? Center(
+                        child: CircularProgressIndicator(
+                          color: AppTheme.brandPrimary,
+                          strokeWidth: 2.5,
+                        ),
+                      )
+                    : FadeTransition(
+                        opacity: _fadeController,
+                        child: _buildBody(),
+                      ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      decoration: BoxDecoration(
-        color: _surface,
-        border: Border(bottom: BorderSide(color: _border)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 10, 16, 4),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: () => Navigator.of(context).pop(false),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: _surfaceHigh,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _border),
-              ),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: _textSecondary, size: 16),
-            ),
+          IconButton(
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              Navigator.of(context).pop(false);
+            },
+            icon: const Icon(Icons.arrow_back_rounded),
+            color: AppTheme.textPrimary,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -318,59 +291,34 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
                 const Text(
                   'Calibrations',
                   style: TextStyle(
-                    color: _textPrimary,
+                    color: AppTheme.textPrimary,
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                     letterSpacing: -0.3,
                   ),
                 ),
-                Text(
-                  '${_calibrations.length} / $_maxSlots slots used',
-                  style: const TextStyle(
-                    color: _textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
               ],
             ),
           ),
-          if (_calibrations.length < _maxSlots)
-            GestureDetector(
-              onTap: _addCalibration,
-              child: Container(
-                height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [_accentPurple, _accentPink],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _accentPurple.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.add_rounded, color: Colors.white, size: 18),
-                    SizedBox(width: 6),
-                    Text(
-                      'New',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+          // Slot counter pill
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppTheme.brandPrimary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: AppTheme.brandPrimary.withValues(alpha: 0.25),
               ),
             ),
+            child: Text(
+              '${_calibrations.length} / $_maxSlots',
+              style: const TextStyle(
+                color: AppTheme.brandPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -378,53 +326,18 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 
   Widget _buildBody() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Info banner
-          _InfoBanner(),
-          const SizedBox(height: 20),
-
-          // Slots header
-          Row(
-            children: [
-              const Text(
-                'Saved Calibrations',
-                style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _surfaceHigh,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _border),
-                ),
-                child: Text(
-                  '${_calibrations.length}/$_maxSlots',
-                  style: const TextStyle(
-                    color: _textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Calibration cards
+          // Only saved calibrations — no empty slots
           ...List.generate(_calibrations.length, (index) {
             final cal = _calibrations[index];
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: _CalibrationSlotCard(
                 calibration: cal,
+                totalSlots: _maxSlots,
                 onSelect: () => _startWithCalibration(cal),
                 onSetDefault: () => _setDefault(cal),
                 onDelete: () => _deleteCalibration(cal),
@@ -432,26 +345,15 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
             );
           }),
 
-          // Empty slots
+          // Add button below the last calibration
           if (_calibrations.length < _maxSlots) ...[
             const SizedBox(height: 4),
-            ...List.generate(_maxSlots - _calibrations.length, (i) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _EmptySlotCard(
-                  slotNumber: _calibrations.length + i + 1,
-                  onTap: _addCalibration,
-                ),
-              );
-            }),
+            _AddCalibrationButton(onTap: _addCalibration),
           ],
 
           const SizedBox(height: 24),
-
-          // Slot usage indicator
           _SlotUsageBar(used: _calibrations.length, total: _maxSlots),
-
-          const SizedBox(height: 32),
+          const SizedBox(height: 8),
         ],
       ),
     );
@@ -459,62 +361,23 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sub-widgets
+// Calibration card
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _InfoBanner extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF14B8A6).withOpacity(0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF14B8A6).withOpacity(0.2)),
-      ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline_rounded, color: Color(0xFF14B8A6), size: 18),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Select a calibration to use it. The default calibration is applied automatically on startup. Tap + New to run a fresh calibration.',
-              style: TextStyle(
-                color: Color(0xFFB2DFDB),
-                fontSize: 13,
-                height: 1.45,
-                fontWeight: FontWeight.w400,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _CalibrationSlotCard extends StatelessWidget {
   const _CalibrationSlotCard({
     required this.calibration,
+    required this.totalSlots,
     required this.onSelect,
     required this.onSetDefault,
     required this.onDelete,
   });
 
   final SavedCalibration calibration;
+  final int totalSlots;
   final VoidCallback onSelect;
   final VoidCallback onSetDefault;
   final VoidCallback onDelete;
-
-  static const Color _bg = Color(0xFF161B22);
-  static const Color _border = Color(0xFF30363D);
-  static const Color _textPrimary = Color(0xFFF0F6FC);
-  static const Color _textSecondary = Color(0xFF8B949E);
-  static const Color _accentTeal = Color(0xFF14B8A6);
-  static const Color _accentGold = Color(0xFFF59E0B);
-  static const Color _accentRed = Color(0xFFEF4444);
-  static const Color _surfaceHigh = Color(0xFF1C2128);
 
   @override
   Widget build(BuildContext context) {
@@ -523,54 +386,48 @@ class _CalibrationSlotCard extends StatelessWidget {
     return GestureDetector(
       onTap: onSelect,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
+        duration: const Duration(milliseconds: 220),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: isDefault
-              ? const Color(0xFF14B8A6).withOpacity(0.06)
-              : _bg,
-          borderRadius: BorderRadius.circular(16),
+              ? AppTheme.brandPrimary.withValues(alpha: 0.06)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
           border: Border.all(
             color: isDefault
-                ? _accentTeal.withOpacity(0.35)
-                : _border,
+                ? AppTheme.brandPrimary.withValues(alpha: 0.35)
+                : AppTheme.border,
             width: isDefault ? 1.5 : 1,
           ),
-          boxShadow: isDefault
-              ? [
+          boxShadow: [
             BoxShadow(
-              color: _accentTeal.withOpacity(0.08),
-              blurRadius: 12,
-              spreadRadius: 0,
-            )
-          ]
-              : null,
+              color: isDefault
+                  ? AppTheme.brandPrimary.withValues(alpha: 0.08)
+                  : const Color(0x0A000000),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
-            // Number badge
+            // Number badge with gradient if default
             Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                gradient: isDefault
-                    ? const LinearGradient(
-                  colors: [Color(0xFF14B8A6), Color(0xFF0D9488)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                )
-                    : null,
-                color: isDefault ? null : _surfaceHigh,
+                gradient: isDefault ? AppTheme.brandGradient : null,
+                color: isDefault ? null : AppTheme.brandPrimary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
                 border: isDefault
                     ? null
-                    : Border.all(color: _border),
+                    : Border.all(color: AppTheme.brandPrimary.withValues(alpha: 0.18)),
               ),
               child: Center(
                 child: Text(
                   '${calibration.id}',
                   style: TextStyle(
-                    color: isDefault ? Colors.white : _textSecondary,
+                    color: isDefault ? Colors.white : AppTheme.brandPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                   ),
@@ -579,7 +436,6 @@ class _CalibrationSlotCard extends StatelessWidget {
             ),
             const SizedBox(width: 14),
 
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -589,7 +445,7 @@ class _CalibrationSlotCard extends StatelessWidget {
                       Text(
                         calibration.name,
                         style: TextStyle(
-                          color: _textPrimary,
+                          color: AppTheme.textPrimary,
                           fontSize: 15,
                           fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
                         ),
@@ -599,13 +455,13 @@ class _CalibrationSlotCard extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: _accentTeal.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(20),
+                            gradient: AppTheme.brandGradient,
+                            borderRadius: BorderRadius.circular(999),
                           ),
                           child: const Text(
                             'DEFAULT',
                             style: TextStyle(
-                              color: _accentTeal,
+                              color: Colors.white,
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.5,
@@ -619,9 +475,8 @@ class _CalibrationSlotCard extends StatelessWidget {
                   Text(
                     _formatDate(calibration.createdAt),
                     style: const TextStyle(
-                      color: _textSecondary,
+                      color: AppTheme.textMuted,
                       fontSize: 12,
-                      fontWeight: FontWeight.w400,
                     ),
                   ),
                 ],
@@ -636,19 +491,19 @@ class _CalibrationSlotCard extends StatelessWidget {
                   _ActionIcon(
                     icon: Icons.star_border_rounded,
                     tooltip: 'Set Default',
-                    color: _accentGold,
+                    color: const Color(0xFFF59E0B),
                     onTap: onSetDefault,
                   ),
                 if (isDefault)
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(Icons.star_rounded, color: _accentGold, size: 22),
+                    child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
                   ),
                 const SizedBox(width: 4),
                 _ActionIcon(
                   icon: Icons.delete_outline_rounded,
                   tooltip: 'Delete',
-                  color: _accentRed,
+                  color: AppTheme.destructive,
                   onTap: onDelete,
                 ),
               ],
@@ -664,6 +519,68 @@ class _CalibrationSlotCard extends StatelessWidget {
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Add calibration button
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AddCalibrationButton extends StatelessWidget {
+  const _AddCalibrationButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: AppTheme.brandGradient,
+            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.brandPrimary.withValues(alpha: 0.28),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            alignment: Alignment.center,
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_rounded, color: Colors.white, size: 22),
+                SizedBox(width: 10),
+                Text(
+                  'Add Calibration',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Action icon button
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ActionIcon extends StatelessWidget {
   const _ActionIcon({
@@ -688,9 +605,9 @@ class _ActionIcon extends StatelessWidget {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.10),
+            color: color.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: color.withOpacity(0.2)),
+            border: Border.all(color: color.withValues(alpha: 0.20)),
           ),
           child: Icon(icon, color: color, size: 18),
         ),
@@ -699,65 +616,9 @@ class _ActionIcon extends StatelessWidget {
   }
 }
 
-class _EmptySlotCard extends StatelessWidget {
-  const _EmptySlotCard({required this.slotNumber, required this.onTap});
-
-  final int slotNumber;
-  final VoidCallback onTap;
-
-  static const Color _bg = Color(0xFF0D1117);
-  static const Color _border = Color(0xFF21262D);
-  static const Color _textMuted = Color(0xFF484F58);
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _bg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _border, style: BorderStyle.solid),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: const Color(0xFF161B22),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _border),
-              ),
-              child: Center(
-                child: Text(
-                  '$slotNumber',
-                  style: const TextStyle(
-                    color: _textMuted,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            const Text(
-              'Empty slot — tap to calibrate',
-              style: TextStyle(
-                color: _textMuted,
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-              ),
-            ),
-            const Spacer(),
-            Icon(Icons.add_circle_outline_rounded, color: _textMuted.withOpacity(0.6), size: 20),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Slot usage bar
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _SlotUsageBar extends StatelessWidget {
   const _SlotUsageBar({required this.used, required this.total});
@@ -769,24 +630,28 @@ class _SlotUsageBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final fraction = used / total;
     final color = fraction < 0.5
-        ? const Color(0xFF14B8A6)
+        ? AppTheme.brandPrimary
         : fraction < 0.875
-        ? const Color(0xFFF59E0B)
-        : const Color(0xFFEF4444);
+            ? const Color(0xFFF59E0B)
+            : AppTheme.destructive;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Text(
+            Text(
               'Slot usage',
-              style: TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
             ),
             const Spacer(),
             Text(
               '$used of $total used',
-              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -796,7 +661,7 @@ class _SlotUsageBar extends StatelessWidget {
           child: LinearProgressIndicator(
             value: fraction,
             minHeight: 6,
-            backgroundColor: const Color(0xFF21262D),
+            backgroundColor: AppTheme.brandPrimary.withValues(alpha: 0.10),
             valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
         ),
@@ -806,7 +671,7 @@ class _SlotUsageBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Delete dialog
+// Dialogs
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DeleteDialog extends StatelessWidget {
@@ -817,7 +682,7 @@ class _DeleteDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -828,17 +693,17 @@ class _DeleteDialog extends StatelessWidget {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: const Color(0xFFEF4444).withOpacity(0.12),
+                color: AppTheme.destructive.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.delete_outline_rounded,
-                  color: Color(0xFFEF4444), size: 28),
+              child: Icon(Icons.delete_outline_rounded,
+                  color: AppTheme.destructive, size: 28),
             ),
             const SizedBox(height: 16),
             const Text(
               'Delete Calibration?',
               style: TextStyle(
-                color: Color(0xFFF0F6FC),
+                color: AppTheme.textPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -846,10 +711,10 @@ class _DeleteDialog extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               'Are you sure you want to delete "${calibration.name}"?'
-                  '${calibration.isDefault ? '\n\nThe next calibration will become the default.' : ''}',
+              '${calibration.isDefault ? '\n\nThe next calibration will become the default.' : ''}',
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: Color(0xFF8B949E),
+                color: AppTheme.textSecondary,
                 fontSize: 14,
                 height: 1.5,
               ),
@@ -858,52 +723,33 @@ class _DeleteDialog extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(context).pop(false),
-                    child: Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1C2128),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF30363D)),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'Cancel',
-                          style: TextStyle(
-                            color: Color(0xFF8B949E),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.textSecondary,
+                      side: BorderSide(color: AppTheme.border),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
+                    child: const Text('Cancel',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(context).pop(true),
-                    child: Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444).withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: const Color(0xFFEF4444).withOpacity(0.3),
-                        ),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'Delete',
-                          style: TextStyle(
-                            color: Color(0xFFEF4444),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.destructive,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
+                    child: const Text('Delete',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
                   ),
                 ),
               ],
@@ -923,7 +769,7 @@ class _RecalibrateDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -934,17 +780,24 @@ class _RecalibrateDialog extends StatelessWidget {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: const Color(0xFF14B8A6).withOpacity(0.12),
+                gradient: AppTheme.brandGradient,
                 shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.brandPrimary.withValues(alpha: 0.25),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: const Icon(Icons.wifi_tethering_rounded,
-                  color: Color(0xFF14B8A6), size: 28),
+                  color: Colors.white, size: 28),
             ),
             const SizedBox(height: 16),
             const Text(
               'Recalibrate?',
               style: TextStyle(
-                color: Color(0xFFF0F6FC),
+                color: AppTheme.textPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -954,7 +807,7 @@ class _RecalibrateDialog extends StatelessWidget {
               'Do you want to recalibrate "${calibration.name}"?\n\nSit in your ideal posture before starting.',
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: Color(0xFF8B949E),
+                color: AppTheme.textSecondary,
                 fontSize: 14,
                 height: 1.5,
               ),
@@ -963,49 +816,40 @@ class _RecalibrateDialog extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(context).pop(false),
-                    child: Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1C2128),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF30363D)),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'Cancel',
-                          style: TextStyle(
-                            color: Color(0xFF8B949E),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.textSecondary,
+                      side: BorderSide(color: AppTheme.border),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
+                    child: const Text('Cancel',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(context).pop(true),
-                    child: Container(
-                      height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: EdgeInsets.zero,
+                    ),
+                    child: Ink(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF14B8A6), Color(0xFF0D9488)],
-                        ),
+                        gradient: AppTheme.brandGradient,
                         borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF14B8A6).withOpacity(0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
                       ),
-                      child: const Center(
-                        child: Text(
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: const Text(
                           'Recalibrate',
                           style: TextStyle(
                             color: Colors.white,
