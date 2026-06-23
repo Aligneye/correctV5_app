@@ -30,8 +30,9 @@ class CalibrationPage extends StatefulWidget {
 
 class _CalibrationPageState extends State<CalibrationPage>
     with TickerProviderStateMixin {
-  static const int _getReadyMs = 3000;
-  static const int _holdStillMs = 5000;
+  // Fallback durations — overridden by device c_tot once first frame arrives
+  static const int _fallbackGetReadyMs = 3000;
+  static const int _fallbackHoldStillMs = 5000;
   static const Duration _startDetectTimeout = Duration(seconds: 10);
 
   late final AnimationController _pulseController;
@@ -49,6 +50,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   // Device-driven progress (from BLE)
   int _deviceElapsedMs = 0;
+  int _deviceTotalMs = 0;   // c_tot from firmware (0 = unknown yet)
   String _devicePhase = 'IDLE';
   int _deviceHoldStartMs = 0;
   int _cancelMissCount = 0;
@@ -126,9 +128,9 @@ class _CalibrationPageState extends State<CalibrationPage>
   }
 
   void _onReading(PostureReading reading) {
-    debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
-    'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
-    'elapsed=${reading.calibrationElapsedMs}');
+    // debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
+    // 'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
+    // 'elapsed=${reading.calibrationElapsedMs}');
     if (_stage == _CalibrationStage.success || _completionHandled) return;
 
     if (!_isConnected && _stage != _CalibrationStage.intro) {
@@ -139,6 +141,10 @@ class _CalibrationPageState extends State<CalibrationPage>
     // Sync progress from device
     _deviceElapsedMs = reading.calibrationElapsedMs;
     _devicePhase = reading.calibrationPhase;
+    // Update total duration when firmware reports it (c_tot)
+    if (reading.calibrationTotalMs > 0) {
+      _deviceTotalMs = reading.calibrationTotalMs;
+    }
 
     // ✅ FIX: Result sirf tab accept karo jab hum actually calibration mein hon
     // aur startRequestedAt ke BAAD ka result ho (stale result ignore)
@@ -155,9 +161,10 @@ class _CalibrationPageState extends State<CalibrationPage>
       }
     }
 
-    // Transition to getReady when device starts calibrating
+    // Transition to getReady when device starts calibrating and phase is GET_READY
     if ((_stage == _CalibrationStage.starting || _stage == _CalibrationStage.intro) &&
-        reading.isCalibrating) {
+        reading.isCalibrating &&
+        (reading.calibrationPhase == 'GET_READY' || reading.calibrationPhase.isEmpty)) {
       setState(() => _stage = _CalibrationStage.getReady);
       return;
     }
@@ -257,6 +264,28 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
   }
 
+  // GET_READY phase duration — use device c_tot if available, else fallback
+  int get _getReadyMs {
+    if (_deviceTotalMs > 0) {
+      // c_tot is the full calibration duration; GET_READY is roughly the
+      // first half. If firmware splits evenly we use half, otherwise fallback.
+      // Firmware typically sends c_tot = getReady + holdStill combined.
+      // We derive getReady as total - holdStill fallback, clamped sensibly.
+      final derived = _deviceTotalMs - _fallbackHoldStillMs;
+      return derived > 500 ? derived : _fallbackGetReadyMs;
+    }
+    return _fallbackGetReadyMs;
+  }
+
+  // HOLD_STILL phase duration derived from c_tot
+  int get _holdStillMs {
+    if (_deviceTotalMs > 0) {
+      final holdMs = _deviceTotalMs - _getReadyMs;
+      return holdMs > 500 ? holdMs : _fallbackHoldStillMs;
+    }
+    return _fallbackHoldStillMs;
+  }
+
   int _getReadyRemainingSeconds() {
     if (_devicePhase != 'GET_READY') return 0;
     final remainingMs = _getReadyMs - _deviceElapsedMs;
@@ -264,10 +293,18 @@ class _CalibrationPageState extends State<CalibrationPage>
     return (remainingMs / 1000).ceil();
   }
 
+  double _getReadyProgress() {
+    final total = _getReadyMs;
+    if (total <= 0) return 0;
+    return (_deviceElapsedMs / total).clamp(0.0, 1.0);
+  }
+
   double _getHoldStillProgress() {
     if (_devicePhase != 'HOLD_STILL') return 0;
-    final holdElapsed = _deviceElapsedMs - _getReadyMs;
-    return (holdElapsed / _holdStillMs).clamp(0.0, 1.0);
+    final holdElapsed = _deviceElapsedMs - _deviceHoldStartMs;
+    final total = _holdStillMs;
+    if (total <= 0) return 0;
+    return (holdElapsed / total).clamp(0.0, 1.0);
   }
 
   @override
@@ -305,7 +342,7 @@ class _CalibrationPageState extends State<CalibrationPage>
         return _GetReadyScreen(
           key: const ValueKey('get_ready'),
           countdown: _getReadyRemainingSeconds(),
-          progress: (_deviceElapsedMs / _getReadyMs).clamp(0.0, 1.0),
+          progress: _getReadyProgress(),
           pulse: _pulseController,
         );
       case _CalibrationStage.holdStill:
@@ -388,7 +425,7 @@ class _IntroScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.65),
+              color: Colors.white.withValues(alpha: 0.65),
               height: 1.45,
             ),
           ),
@@ -396,21 +433,21 @@ class _IntroScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
+              color: Colors.white.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Column(
               children: [
                 Icon(Icons.airline_seat_recline_normal_rounded,
-                    size: 48, color: const Color(0xFF008090).withOpacity(0.9)),
+                    size: 48, color: const Color(0xFF008090).withValues(alpha: 0.9)),
                 const SizedBox(height: 16),
                 Text(
                   'Sit comfortably in your natural upright posture.\nKeep your back straight and shoulders relaxed.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 15,
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     height: 1.5,
                   ),
                 ),
@@ -455,7 +492,7 @@ class _IntroScreen extends StatelessWidget {
               'Cancel',
               style: TextStyle(
                 fontSize: 15,
-                color: Colors.white.withOpacity(0.6),
+                color: Colors.white.withValues(alpha: 0.6),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -493,7 +530,7 @@ class _StatusScreen extends StatelessWidget {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
             ),
             child: Icon(icon, color: color, size: 32),
           ),
@@ -512,7 +549,7 @@ class _StatusScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               height: 1.45,
             ),
           ),
@@ -557,7 +594,7 @@ class _GetReadyScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               height: 1.5,
             ),
           ),
@@ -570,9 +607,9 @@ class _GetReadyScreen extends StatelessWidget {
               height: 140,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFF59E0B).withOpacity(0.15),
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
                 border: Border.all(
-                  color: const Color(0xFFF59E0B).withOpacity(0.4),
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.4),
                   width: 3,
                 ),
               ),
@@ -586,7 +623,7 @@ class _GetReadyScreen extends StatelessWidget {
                       value: progress,
                       strokeWidth: 4,
                       color: const Color(0xFFF59E0B),
-                      backgroundColor: Colors.white.withOpacity(0.08),
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
                     ),
                   ),
                   Text(
@@ -607,7 +644,7 @@ class _GetReadyScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
-              color: Colors.white.withOpacity(0.5),
+              color: Colors.white.withValues(alpha: 0.5),
             ),
           ),
         ],
@@ -649,7 +686,7 @@ class _HoldStillScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               height: 1.5,
             ),
           ),
@@ -670,7 +707,7 @@ class _HoldStillScreen extends StatelessWidget {
                       value: progress,
                       strokeWidth: 8,
                       color: const Color(0xFF22C55E),
-                      backgroundColor: Colors.white.withOpacity(0.08),
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
                     ),
                   ),
                   Column(
@@ -679,7 +716,7 @@ class _HoldStillScreen extends StatelessWidget {
                       Icon(
                         Icons.accessibility_new_rounded,
                         size: 56,
-                        color: const Color(0xFF22C55E).withOpacity(0.9),
+                        color: const Color(0xFF22C55E).withValues(alpha: 0.9),
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -687,7 +724,7 @@ class _HoldStillScreen extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                         ),
                       ),
                     ],
@@ -745,7 +782,7 @@ class _ResultScreen extends StatelessWidget {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 32),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
+                    color: Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(2),
                   ),
                   child: LayoutBuilder(
@@ -779,7 +816,7 @@ class _ResultScreen extends StatelessWidget {
             height: 80,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
             ),
             child: Icon(icon, color: color, size: 44),
           ),
@@ -799,7 +836,7 @@ class _ResultScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
-              color: Colors.white.withOpacity(0.75),
+              color: Colors.white.withValues(alpha: 0.75),
               height: 1.5,
             ),
           ),
@@ -809,7 +846,7 @@ class _ResultScreen extends StatelessWidget {
               subText!,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.white.withOpacity(0.5),
+                color: Colors.white.withValues(alpha: 0.5),
               ),
             ),
           ],

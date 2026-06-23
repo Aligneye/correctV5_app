@@ -26,6 +26,8 @@ import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:correctv1/services/firmware_update_service.dart';
+import 'package:correctv1/settings/firmware_update_page.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -526,6 +528,8 @@ class _HomeDashboardState extends State<HomeDashboard>
       }
     });
 
+    FirmwareUpdateService.instance.state.addListener(_onFirmwareStateChanged);
+
     unawaited(_handleStartupDevicePrompt());
     _lastSyncTick = _deviceManager.syncCompletedTick.value;
     _deviceManager.syncCompletedTick.addListener(_handleSessionSyncFinished);
@@ -555,6 +559,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   @override
   void dispose() {
     _readingSubscription?.cancel();
+    FirmwareUpdateService.instance.state.removeListener(_onFirmwareStateChanged);
     _deviceManager.syncCompletedTick.removeListener(_handleSessionSyncFinished);
     _deviceManager.isSyncing.removeListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.removeListener(_handleActiveSessionChanged);
@@ -580,6 +585,97 @@ class _HomeDashboardState extends State<HomeDashboard>
     super.dispose();
   }
 
+  void _onFirmwareStateChanged() {
+    if (!mounted) return;
+    if (FirmwareUpdateService.instance.state.value ==
+        FirmwareUpdateState.ready) {
+      _showFirmwareUpdateBanner();
+    }
+  }
+
+  void _showFirmwareUpdateBanner() {
+    final manifest = FirmwareUpdateService.instance.manifest;
+    if (manifest == null) return;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                gradient: AppTheme.brandGradient,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.system_update_rounded, color: Colors.white, size: 28),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Firmware Update Ready',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Version ${manifest.latestVersion} is ready to install.',
+              style: const TextStyle(color: Colors.grey, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            if (manifest.releaseNotes.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ...manifest.releaseNotes.map((note) => Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('• ', style: TextStyle(color: Colors.grey)),
+                    Expanded(child: Text(note, style: const TextStyle(fontSize: 13, color: Colors.grey))),
+                  ],
+                ),
+              )),
+            ],
+            const SizedBox(height: 20),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Later', style: TextStyle(color: Colors.grey)),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).push(
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 320),
+                  reverseTransitionDuration: const Duration(milliseconds: 260),
+                  pageBuilder: (_, animation, __) => const FirmwareUpdatePage(),
+                  transitionsBuilder: (_, animation, __, child) => FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.06),
+                        end: Offset.zero,
+                      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+                      child: child,
+                    ),
+                  ),
+                ),
+              );
+            },
+            child: const Text('Install Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _handleSyncingChanged() {
     if (!mounted) return;
   }
@@ -600,10 +696,26 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _handleConnectionStatusChanged() {
     _syncLiveSessionTickerWithConnection();
 
-    // connect hone pe offline sessions reload karo
     if (_deviceService.connectionStatus.value ==
         DeviceConnectionStatus.connected) {
       unawaited(_loadOfflineSessions());
+
+      // If a firmware update is already downloaded and waiting, show the
+      // banner again — user reconnected without installing yet.
+      if (FirmwareUpdateService.instance.state.value ==
+          FirmwareUpdateState.ready) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showFirmwareUpdateBanner();
+        });
+      } else {
+        // Silent background firmware check + download
+        unawaited(
+          FirmwareUpdateService.instance.onDeviceConnected(_deviceService),
+        );
+      }
+    } else {
+      // Device disconnected — reset so next connection triggers fresh check
+      FirmwareUpdateService.instance.reset();
     }
   }
 

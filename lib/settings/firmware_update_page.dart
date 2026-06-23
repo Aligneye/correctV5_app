@@ -184,7 +184,9 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
       switch (result) {
         case EnterDfuResult.lowBattery:
-          _prefail('Device reported low battery. Charge and try again.');
+          _prefail(
+            'Please charge your Align Pod to at least ${manifest.minBatteryPercent}% before updating.',
+          );
           return;
         case EnterDfuResult.sessionActive:
           _prefail('Stop your active session before updating firmware.');
@@ -193,7 +195,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
           // Device may have already rebooted into DFU — continue anyway.
           break;
         case EnterDfuResult.error:
-          _fail('Device refused the update command. Try reconnecting.');
+          _fail('Failed to enter DFU mode. Please reconnect and try again.');
           return;
         case EnterDfuResult.success:
           break;
@@ -210,7 +212,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
     final deviceAddress = deviceService.device?.remoteId.str ?? '';
     if (deviceAddress.isEmpty) {
-      _fail('Device address not available. Reconnect and try again.');
+      _fail('Failed to enter DFU mode. Device address unavailable — reconnect and try again.');
       return;
     }
 
@@ -223,14 +225,33 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       onCompleted: () async {
         if (!mounted) return;
         _set(_UpdateStep.reconnecting);
-        // Give device time to boot normal firmware
         await Future<void>.delayed(const Duration(seconds: 4));
         if (!mounted) return;
-        _set(_UpdateStep.success);
-        HapticFeedback.heavyImpact();
+
+        // Verify the firmware version actually changed.
+        final postInfo = await deviceService.getDeviceInfo();
+        if (!mounted) return;
+
+        final expectedVersion = manifest.latestVersion;
+        final actualVersion = postInfo?.firmwareVersion ?? '';
+        if (actualVersion.isNotEmpty && actualVersion == expectedVersion) {
+          _set(_UpdateStep.success);
+          HapticFeedback.heavyImpact();
+        } else {
+          _fail('Update may have failed. Please reconnect and check firmware version.');
+        }
       },
       onError: (msg) {
-        if (mounted) _fail('DFU transfer failed: $msg');
+        // Distinguish between zip-send failure and general upgrade failure
+        final lower = msg.toLowerCase();
+        if (lower.contains('dfu') && lower.contains('start') ||
+            lower.contains('zip') ||
+            lower.contains('packet') ||
+            lower.contains('send')) {
+          if (mounted) _fail('Failed to send firmware file to device. Please try again.');
+        } else {
+          if (mounted) _fail('Failed to upgrade the device. Please try again.');
+        }
       },
     );
   }
@@ -342,7 +363,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
                         delay: 0.2,
                         child: _BatteryCard(
                           deviceInfo: _deviceInfo,
-                          minBattery: _manifest?.minBatteryPercent ?? 40,
+                          minBattery: _manifest?.minBatteryPercent ?? 70,
                         ),
                       ),
                       if (_step == _UpdateStep.updateAvailable) ...[

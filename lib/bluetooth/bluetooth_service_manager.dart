@@ -15,10 +15,12 @@ class BluetoothServiceManager {
   bool _isAutoReconnecting = false;
   bool _shouldMaintainConnection = false;
   bool _isMonitoring = false;
+  bool _hadBondedTarget = false;
 
   static const Duration _reconnectInterval = Duration(seconds: 3);
-  static const Duration _maxReconnectInterval = Duration(seconds: 60);
+  static const Duration _maxReconnectInterval = Duration(seconds: 30);
   static const int _reconnectJitterMs = 500;
+  static const int _maxAutoReconnectAttempts = 5;
   int _reconnectFailureCount = 0;
 
   static const String _keyAutoReconnect = 'settings_auto_reconnect';
@@ -81,6 +83,7 @@ class BluetoothServiceManager {
           );
           return;
         }
+        _hadBondedTarget = true;
         debugPrint(
           'BluetoothServiceManager: Status is disconnected, calling tryAutoConnect()...',
         );
@@ -175,13 +178,18 @@ class BluetoothServiceManager {
   }
 
   Future<void> _scheduleReconnectIfEligible() async {
-    final hasBondedTarget = await _deviceService.hasBondedTargetDevice();
-    if (!hasBondedTarget) {
-      debugPrint(
-        'Skipping auto-reconnect scheduling: no paired target device is available',
-      );
-      _reconnectFailureCount = 0;
-      return;
+    // Use cached flag first — avoids calling bondedDevices right after a GATT
+    // error when the BT stack may transiently return an empty list.
+    if (!_hadBondedTarget) {
+      final hasBondedTarget = await _deviceService.hasBondedTargetDevice();
+      if (!hasBondedTarget) {
+        debugPrint(
+          'Skipping auto-reconnect scheduling: no paired target device is available',
+        );
+        _reconnectFailureCount = 0;
+        return;
+      }
+      _hadBondedTarget = true;
     }
     _scheduleReconnect();
   }
@@ -264,8 +272,14 @@ class BluetoothServiceManager {
       if (_deviceService.connectionStatus.value !=
               DeviceConnectionStatus.connected &&
           _shouldMaintainConnection) {
-        if (_reconnectFailureCount < 20) {
-          _reconnectFailureCount++;
+        _reconnectFailureCount++;
+        if (_reconnectFailureCount >= _maxAutoReconnectAttempts) {
+          debugPrint(
+            'Auto-reconnect: gave up after $_reconnectFailureCount attempts. '
+            'Will retry when device is seen again.',
+          );
+          _reconnectFailureCount = 0;
+          return;
         }
         _scheduleReconnect();
       }

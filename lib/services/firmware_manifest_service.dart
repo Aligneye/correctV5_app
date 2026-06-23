@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class FirmwareManifest {
   final String deviceModel;
@@ -56,18 +57,34 @@ class FirmwareManifestService {
       'https://cdn.aligneye.com/firmware/manifest.json';
 
   Future<FirmwareManifest?> fetchManifest() async {
+    // 1. Try Supabase first
+    try {
+      final rows = await Supabase.instance.client
+          .from('firmware_releases')
+          .select()
+          .eq('active', true)
+          .order('build_number', ascending: false)
+          .limit(1);
+      if (rows.isNotEmpty) {
+        return FirmwareManifest.fromJson(rows.first);
+      }
+    } catch (e) {
+      debugPrint('Supabase manifest fetch error (falling back to CDN): $e');
+    }
+
+    // 2. Fall back to CDN
     try {
       final response = await http
           .get(Uri.parse(_manifestUrl))
           .timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) {
-        debugPrint('Manifest fetch failed: ${response.statusCode}');
+        debugPrint('CDN manifest fetch failed: ${response.statusCode}');
         return null;
       }
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       return FirmwareManifest.fromJson(json);
     } catch (e) {
-      debugPrint('Manifest fetch error: $e');
+      debugPrint('CDN manifest fetch error: $e');
       return null;
     }
   }
