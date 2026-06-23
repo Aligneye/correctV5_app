@@ -17,7 +17,7 @@ class BluetoothServiceManager {
   bool _isMonitoring = false;
   bool _hadBondedTarget = false;
 
-  static const Duration _reconnectInterval = Duration(seconds: 3);
+  static const Duration _reconnectInterval = Duration(seconds: 5);
   static const Duration _maxReconnectInterval = Duration(seconds: 30);
   static const int _reconnectJitterMs = 500;
   static const int _maxAutoReconnectAttempts = 5;

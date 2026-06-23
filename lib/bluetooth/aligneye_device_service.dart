@@ -1010,8 +1010,15 @@ class AlignEyeDeviceService {
           if (Platform.isAndroid || Platform.isIOS) {
             debugPrint('Requesting MTU of 251...');
             try {
-              await _device!.requestMtu(251, timeout: 3);
-              debugPrint('MTU request completed');
+              final mtu = await _device!.requestMtu(251, timeout: 3);
+              debugPrint('MTU negotiated: $mtu');
+              if (mtu < 100) {
+                debugPrint('MTU too low ($mtu) — disconnecting');
+                _isConnecting = false;
+                _connectionTimeoutTimer?.cancel();
+                await disconnect();
+                return;
+              }
             } catch (e) {
               debugPrint('Failed to request MTU (non-fatal): $e');
             }
@@ -1140,6 +1147,7 @@ class AlignEyeDeviceService {
         }
         final last = _lastDataReceivedAt;
         if (last != null && DateTime.now().difference(last).inSeconds > 15) {
+          if (currentIsCalibrating) return;
           debugPrint('WATCHDOG: No data for 15s, forcing reconnect');
           disconnect().then((_) {
             if (!_userInitiatedDisconnect &&
@@ -1700,9 +1708,13 @@ class AlignEyeDeviceService {
   }
 
   void _handleNotifyData(List<int> data) {
+
     if (data.isEmpty) return;
     final rawData = utf8.decode(data, allowMalformed: true);
     // debugPrint("BLE RAW: $rawData");
+    if (rawData.contains('"t":"C"') || rawData.contains('"t":"c"')) {
+      debugPrint("BLE RAW CALIB: $rawData");
+    }
     _lastDataReceivedAt = DateTime.now();
     // _buffer += utf8.decode(data, allowMalformed: true);
     _buffer += rawData;
