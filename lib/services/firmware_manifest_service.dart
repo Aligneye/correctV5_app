@@ -53,8 +53,10 @@ class FirmwareManifest {
 
 class FirmwareManifestService {
   // Replace with production CDN/Supabase URL when backend is ready.
-  static const String _manifestUrl =
-      'https://cdn.aligneye.com/firmware/manifest.json';
+  static const String _manifestUrl = String.fromEnvironment(
+    'FIRMWARE_MANIFEST_URL',
+    defaultValue: 'https://cdn.aligneye.com/firmware/manifest.json',
+  );
 
   Future<FirmwareManifest?> fetchManifest() async {
     // 1. Try Supabase first

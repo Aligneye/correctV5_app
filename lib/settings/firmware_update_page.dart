@@ -8,7 +8,9 @@ import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/services/dfu_update_service.dart';
 import 'package:correctv1/services/firmware_download_service.dart';
 import 'package:correctv1/services/firmware_manifest_service.dart';
+import 'package:correctv1/services/firmware_update_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
+import 'dart:io';
 
 // ── Update state machine ────────────────────────────────────────────────────
 
@@ -48,6 +50,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
   DeviceInfo? _deviceInfo;
   FirmwareManifest? _manifest;
+  String? _localZipPath;
 
   final _manifestService = FirmwareManifestService();
   final _downloadService = FirmwareDownloadService();
@@ -60,7 +63,21 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..forward();
-    _runCheckFlow();
+    final bgService = FirmwareUpdateService.instance;
+    final bgState = bgService.state.value;
+    if (bgState == FirmwareUpdateState.ready ||
+        bgState == FirmwareUpdateState.noUpdate) {
+      _manifest = bgService.manifest;
+      _deviceInfo = bgService.deviceInfo;
+      _localZipPath = bgService.localZipPath;
+      if (bgState == FirmwareUpdateState.ready) {
+        _set(_UpdateStep.updateAvailable);
+      } else {
+        _set(_UpdateStep.upToDate);
+      }
+    } else {
+      _runCheckFlow();
+    }
   }
 
   @override
@@ -146,23 +163,23 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       return;
     }
 
-    // Download
-    _set(_UpdateStep.downloading);
-    setState(() {
-      _downloadProgress = 0;
-    });
-
-    String zipPath;
-    try {
-      zipPath = await _downloadService.download(
-        manifest.firmwareUrl,
-        onProgress: (p) {
-          if (mounted) setState(() => _downloadProgress = p);
-        },
-      );
-    } catch (e) {
-      _fail('Download failed: $e');
-      return;
+    String? zipPath = _localZipPath;
+    if (zipPath == null || !await File(zipPath).exists()) {
+      _set(_UpdateStep.downloading);
+      setState(() => _downloadProgress = 0);
+      try {
+        zipPath = await _downloadService.download(
+          manifest.firmwareUrl,
+          onProgress: (p) {
+            if (mounted) setState(() => _downloadProgress = p);
+          },
+        );
+      } catch (e) {
+        _fail('Download failed: $e');
+        return;
+      }
+    } else {
+      debugPrint('FirmwareUpdatePage: reusing cached ZIP $zipPath');
     }
 
     // SHA256 verify

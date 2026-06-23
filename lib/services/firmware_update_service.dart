@@ -58,8 +58,8 @@ class FirmwareUpdateService {
       // Step 2: Fetch manifest from server
       final manifest = await _manifestService.fetchManifest();
       if (manifest == null) {
-        debugPrint('FirmwareUpdateService: manifest null → noUpdate');
-        _state.value = FirmwareUpdateState.noUpdate;
+        debugPrint('FirmwareUpdateService: manifest null → error');
+        _state.value = FirmwareUpdateState.error;
         return;
       }
       _manifest = manifest;

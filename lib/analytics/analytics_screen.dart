@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:correctv1/bluetooth/aligneye_device_service.dart';
+import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
+import 'package:correctv1/sessions/sessions_history_page.dart';
 import 'package:correctv1/theme/app_theme.dart';
 
 // ─── Data Models ─────────────────────────────────────────────────────────────
@@ -203,6 +206,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   final SessionRepository _repo = SessionRepository();
   final DeviceManager _deviceManager = DeviceManager();
+  final BluetoothServiceManager _btManager = BluetoothServiceManager();
 
   List<SessionData>? _sessions;
   Map<String, dynamic>? _weeklyStats;
@@ -213,6 +217,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   int _lastSyncTick = 0;
   bool _isReloading = false;
 
+  bool get _isDeviceDisconnected =>
+      _btManager.deviceService.connectionStatus.value ==
+      DeviceConnectionStatus.disconnected;
+  bool get _isDeviceConnecting =>
+      _btManager.deviceService.connectionStatus.value ==
+      DeviceConnectionStatus.connecting;
+
   @override
   void initState() {
     super.initState();
@@ -220,6 +231,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _deviceManager.syncCompletedTick.addListener(_onSyncFinished);
     _deviceManager.isSyncing.addListener(_onSyncingChanged);
     _deviceManager.activeSessionId.addListener(_onActiveSessionChanged);
+    _btManager.deviceService.connectionStatus.addListener(_onConnectionChanged);
     _reloadAll();
   }
 
@@ -228,6 +240,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _deviceManager.syncCompletedTick.removeListener(_onSyncFinished);
     _deviceManager.isSyncing.removeListener(_onSyncingChanged);
     _deviceManager.activeSessionId.removeListener(_onActiveSessionChanged);
+    _btManager.deviceService.connectionStatus.removeListener(_onConnectionChanged);
     super.dispose();
   }
 
@@ -244,6 +257,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   void _onSyncingChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _onConnectionChanged() {
     if (!mounted) return;
     setState(() {});
   }
@@ -352,33 +370,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         heatmapData: _heatmapData ?? _kHeatmap,
                       ),
                     ),
-                    _sectionLabel('Recent sessions'),
-                    if (_isLoadingSessions)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 32),
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.2,
-                            valueColor: AlwaysStoppedAnimation<Color>(_kBlue),
-                          ),
-                        ),
-                      )
-                    else if (sessions.isEmpty)
-                      _buildEmptyState()
-                    else
-                      ...sessions.map(
-                        (s) => RepaintBoundary(
-                          child: _SessionItem(
-                            session: s,
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => SessionDetailScreen(session: s),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                    const SizedBox(height: 8),
+                    _buildRecentSessionsSection(sessions),
                   ],
                 ),
               ),
@@ -420,30 +413,161 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   Widget _buildEmptyState() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
-      margin: const EdgeInsets.only(top: 4),
-      decoration: _cardDecoration(radius: 14),
-      child: Column(
-        children: const [
-          Icon(Icons.insights_rounded, size: 42, color: _kTextHint),
-          SizedBox(height: 12),
-          Text(
-            'No sessions yet.',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: _kText,
+      padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8FC),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: _kBlue.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Icon(
+              Icons.history_rounded,
+              size: 18,
+              color: _kBlue,
             ),
           ),
-          SizedBox(height: 4),
-          Text(
-            'Wear your Aligneye and start tracking.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: _kTextMuted, height: 1.4),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'No sessions yet',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Start a posture or therapy session and it shows up here.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: AppTheme.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  // ── Recent Sessions Section ──────────────────────────────────────────────────
+
+  Widget _buildRecentSessionsSection(List<SessionData> sessions) {
+    final liveSessions = sessions.where((s) => s.isLive).toList();
+    final finishedSessions = sessions.where((s) => !s.isLive).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Recent Sessions',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => const SessionsHistoryPage(),
+                ),
+              ),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 0),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: _kBlue,
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              child: const Row(
+                children: [
+                  Text('View All'),
+                  SizedBox(width: 4),
+                  Icon(Icons.chevron_right, size: 16),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        if (_isDeviceDisconnected) ...[
+          const SizedBox(height: 12),
+          _AnalyticsDisconnectedBanner(
+            isReconnecting: _isDeviceConnecting,
+            onSyncNow: () {
+              final device = _btManager.deviceService.device;
+              if (device != null) {
+                _deviceManager.isSyncing.value = true;
+              }
+            },
+          ),
+        ],
+
+        const SizedBox(height: 12),
+
+        if (_isLoadingSessions && sessions.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: LinearProgressIndicator(minHeight: 3),
+          )
+        else if (sessions.isEmpty)
+          _buildEmptyState()
+        else ...[
+          for (final live in liveSessions) ...[
+            RepaintBoundary(
+              child: _AnalyticsLiveSessionRow(
+                session: live,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SessionDetailScreen(session: live),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          for (
+            var i = 0;
+            i < finishedSessions.length && (liveSessions.length + i) < 5;
+            i++
+          ) ...[
+            RepaintBoundary(
+              child: _AnalyticsSessionItem(
+                session: finishedSessions[i],
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        SessionDetailScreen(session: finishedSessions[i]),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ],
     );
   }
 
@@ -694,7 +818,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(_kDays.length, (i) {
               final streak = _streakStats?.currentStreak ?? 0;
-              final isComplete = i >= (7 - streak);
+              final todayIndex = DateTime.now().weekday - 1; // Mon=0, Sun=6
+              final isComplete = i <= todayIndex && i > todayIndex - streak;
 
               return _StreakDayBadge(day: _kDays[i], isComplete: isComplete);
             }),
@@ -1457,26 +1582,273 @@ class _HeatmapCard extends StatelessWidget {
   );
 }
 
-// ─── Session Item ─────────────────────────────────────────────────────────────
+// ─── Analytics Disconnected Banner ─────────────────────────────────────────
 
-class _SessionItem extends StatelessWidget {
+class _AnalyticsDisconnectedBanner extends StatelessWidget {
+  final bool isReconnecting;
+  final VoidCallback onSyncNow;
+  const _AnalyticsDisconnectedBanner({
+    required this.isReconnecting,
+    required this.onSyncNow,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7E6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFE2A8)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.bluetooth_disabled_rounded,
+            size: 18,
+            color: Color(0xFFB45309),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Device disconnected',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Color(0xFF92400E),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: 1),
+                Text(
+                  'Sessions are still being saved on the pod. '
+                  'Sync to pull them in.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFFB45309),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: isReconnecting ? null : onSyncNow,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: isReconnecting
+                    ? const Color(0xFFFFE2A8)
+                    : const Color(0xFFB45309),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isReconnecting) ...[
+                    const SizedBox(
+                      width: 11,
+                      height: 11,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.6,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFFB45309),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ] else ...[
+                    const Icon(
+                      Icons.sync_rounded,
+                      size: 13,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 5),
+                  ],
+                  Text(
+                    isReconnecting ? 'Syncing' : 'Sync now',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: isReconnecting
+                          ? const Color(0xFFB45309)
+                          : Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Analytics Live Session Row ─────────────────────────────────────────
+
+class _AnalyticsLiveSessionRow extends StatelessWidget {
   final SessionData session;
   final VoidCallback onTap;
-
-  const _SessionItem({required this.session, required this.onTap});
+  const _AnalyticsLiveSessionRow({required this.session, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final isPosture = session.type == SessionType.posture;
+    final modeGradient = isPosture
+        ? AppTheme.goodPostureGradient
+        : AppTheme.vibrationTherapyGradient;
+    final accent = isPosture
+        ? AppTheme.goodPostureStart
+        : const Color(0xFF60A5FA);
     final patternName = session.pattern == null
         ? null
         : therapyPatternName(session.pattern!);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(13),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                accent.withValues(alpha: 0.10),
+                accent.withValues(alpha: 0.03),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: accent.withValues(alpha: 0.30)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: modeGradient.colors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isPosture
+                      ? Icons.accessibility_new_rounded
+                      : Icons.graphic_eq,
+                  size: 19,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            session.name,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const _AnalyticsLivePill(),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      session.duration == '0s'
+                          ? 'Just started · live now'
+                          : 'In progress · ${session.duration}',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isPosture && session.score != null)
+                Text(
+                  '${session.score}%',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: accent,
+                    letterSpacing: -0.4,
+                  ),
+                )
+              else if (!isPosture && patternName != null)
+                Text(
+                  patternName,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: accent,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Analytics Session Item ───────────────────────────────────────────────
+
+class _AnalyticsSessionItem extends StatelessWidget {
+  final SessionData session;
+  final VoidCallback onTap;
+  const _AnalyticsSessionItem({required this.session, required this.onTap});
+
+  static const _kItemText = Color(0xFF1A1A2E);
+  static const _kItemTextHint = Color(0xFFBBBBCC);
+  static const _kItemBlue = AppTheme.brandPrimary;
+
+  @override
+  Widget build(BuildContext context) {
+    final isPosture = session.type == SessionType.posture;
+    final postureEventCount = session.postureEvents?.length ?? session.alerts;
+    final correctionCount = session.postureEvents
+        ?.where((event) => event.wasCorrected)
+        .length;
+    final playedTherapyEvents = session.therapyPatternEvents
+        ?.where((event) => event.durationSec > 0)
+        .toList(growable: false);
+    final therapyPatternCount =
+        playedTherapyEvents?.length ??
+        session.therapyPatterns?.length ??
+        (session.pattern == null ? null : 1);
+    final lastPatternIndex =
+        playedTherapyEvents?.lastOrNull?.patternIndex ??
+        session.therapyPatternEvents?.lastOrNull?.patternIndex ??
+        session.therapyPatterns?.lastOrNull ??
+        session.pattern;
+    final lastPatternName = lastPatternIndex == null
+        ? null
+        : therapyPatternName(lastPatternIndex);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.fromLTRB(13, 13, 10, 13),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -1507,7 +1879,7 @@ class _SessionItem extends StatelessWidget {
                   end: Alignment.bottomRight,
                   colors: isPosture
                       ? AppTheme.goodPostureGradient.colors
-                      : const [Color(0xFF60A5FA), Color(0xFF06B6D4)],
+                      : AppTheme.vibrationTherapyGradient.colors,
                 ),
                 borderRadius: BorderRadius.circular(13),
               ),
@@ -1531,47 +1903,68 @@ class _SessionItem extends StatelessWidget {
                           style: const TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w600,
-                            color: _kText,
+                            color: _kItemText,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (session.isLive) ...[
                         const SizedBox(width: 6),
-                        const _LiveTag(),
+                        const _AnalyticsLivePill(),
                       ],
+                      if (!session.cloudSynced && !session.isLive)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 6),
+                          child: Icon(
+                            Icons.cloud_off_rounded,
+                            size: 13,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
                       const SizedBox(width: 8),
                       Text(
                         session.time,
-                        style: const TextStyle(fontSize: 10, color: _kTextHint),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: _kItemTextHint,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 7),
-                  Row(
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 6,
                     children: [
-                      _MiniStat(value: session.duration, label: 'Duration'),
-                      if (session.score != null) ...[
-                        const SizedBox(width: 14),
-                        _MiniStat(
-                          value: '${session.score}%',
-                          label: 'Good posture',
+                      _AnalyticsMiniStat(
+                        value: session.duration,
+                        label: 'Duration',
+                      ),
+                      if (isPosture && postureEventCount != null)
+                        _AnalyticsMiniStat(
+                          value: '${postureEventCount}',
+                          label: 'Slouches',
                         ),
-                      ],
-                      if (session.alerts != null) ...[
-                        const SizedBox(width: 14),
-                        _MiniStat(
-                          value: '${session.alerts}\u00d7',
-                          label: 'Alerts',
+                      if (isPosture && correctionCount != null)
+                        _AnalyticsMiniStat(
+                          value: '${correctionCount}',
+                          label: 'Corrected',
                         ),
-                      ],
-                      if (session.pattern != null) ...[
-                        const SizedBox(width: 14),
-                        _MiniStat(
-                          value: patternName ?? 'Unknown',
-                          label: 'Pattern',
+                      if (isPosture && (session.wrongDurSec ?? 0) > 0)
+                        _AnalyticsMiniStat(
+                          value: _formatCompactDuration(session.wrongDurSec!),
+                          label: 'Bad time',
                         ),
-                      ],
+                      if (!isPosture && therapyPatternCount != null)
+                        _AnalyticsMiniStat(
+                          value: '${therapyPatternCount}',
+                          label: 'Patterns',
+                        ),
+                      if (!isPosture && lastPatternName != null)
+                        _AnalyticsMiniStat(
+                          value: lastPatternName,
+                          label: 'Last pattern',
+                        ),
                     ],
                   ),
                   if (session.score != null) ...[
@@ -1581,7 +1974,9 @@ class _SessionItem extends StatelessWidget {
                       child: LinearProgressIndicator(
                         value: session.score! / 100,
                         backgroundColor: const Color(0xFFEEEEF8),
-                        valueColor: const AlwaysStoppedAnimation<Color>(_kBlue),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          _kItemBlue,
+                        ),
                         minHeight: 3.5,
                       ),
                     ),
@@ -1600,30 +1995,20 @@ class _SessionItem extends StatelessWidget {
       ),
     );
   }
+
+  static String _formatCompactDuration(int seconds) {
+    if (seconds < 60) return '${seconds}s';
+    final minutes = seconds ~/ 60;
+    final rem = seconds % 60;
+    return rem == 0 ? '${minutes}m' : '${minutes}m ${rem}s';
+  }
 }
 
-class _LiveTag extends StatelessWidget {
-  const _LiveTag();
+// ─── Analytics Mini Stat ─────────────────────────────────────────────────────
 
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(
-      color: _kRed.withValues(alpha: 0.10),
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: _kRed.withValues(alpha: 0.18)),
-    ),
-    child: const Text(
-      'Live',
-      style: TextStyle(color: _kRed, fontSize: 10, fontWeight: FontWeight.w700),
-    ),
-  );
-}
-
-class _MiniStat extends StatelessWidget {
+class _AnalyticsMiniStat extends StatelessWidget {
   final String value, label;
-
-  const _MiniStat({required this.value, required this.label});
+  const _AnalyticsMiniStat({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1634,16 +2019,87 @@ class _MiniStat extends StatelessWidget {
         style: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: _kText,
+          color: Color(0xFF1A1A2E),
           height: 1.2,
         ),
       ),
       Text(
         label,
-        style: const TextStyle(fontSize: 10, color: _kTextHint, height: 1.3),
+        style: const TextStyle(
+          fontSize: 10,
+          color: Color(0xFFBBBBCC),
+          height: 1.3,
+        ),
       ),
     ],
   );
+}
+
+// ─── Analytics Live Pill ─────────────────────────────────────────────────────
+
+class _AnalyticsLivePill extends StatefulWidget {
+  const _AnalyticsLivePill();
+
+  @override
+  State<_AnalyticsLivePill> createState() => _AnalyticsLivePillState();
+}
+
+class _AnalyticsLivePillState extends State<_AnalyticsLivePill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: _kRed.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _kRed.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedBuilder(
+            animation: _ctrl,
+            builder: (_, __) => Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: _kRed.withValues(alpha: 0.55 + 0.45 * _ctrl.value),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: 5),
+          const Text(
+            'LIVE',
+            style: TextStyle(
+              color: _kRed,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─── Session Detail Screen ────────────────────────────────────────────────────
