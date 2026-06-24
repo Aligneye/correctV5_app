@@ -22,7 +22,7 @@ class _TrainingPageState extends State<TrainingPage>
   double _liveAngle = 0.0;
 
   String _level = 'Advanced';
-  double _sensitivity = 10;
+  double _sensitivity = 20;
   String _timing = 'Instant';
   int _delaySeconds = 5;
   bool _isRunning = false;
@@ -56,6 +56,7 @@ class _TrainingPageState extends State<TrainingPage>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+    _applyDefaultsForLevel(_level);
     _angleSub = widget.deviceService.readings.listen((r) {
       if (mounted) setState(() => _liveAngle = r.angle);
     });
@@ -82,12 +83,12 @@ class _TrainingPageState extends State<TrainingPage>
         'No alert' => 'AUTOMATIC',
         _          => 'INSTANT',
       };
-      final diffDeg = _levelToDegrees(_level);
       unawaited(service.sendModeControl(
         mode: 'TRAINING',
         postureTiming: timingStr,
         therapyDurationMinutes: 10,
-        difficultyDegrees: diffDeg,
+        difficultyDegrees: _sensitivity.round(),
+        postureDelaySeconds: _timing == 'Delayed' ? _delaySeconds : 0,
       ));
     } else {
       // Training stop — tracking mode pe wapas
@@ -95,7 +96,7 @@ class _TrainingPageState extends State<TrainingPage>
         mode: 'TRACKING',
         postureTiming: 'INSTANT',
         therapyDurationMinutes: 10,
-        difficultyDegrees: _levelToDegrees(_level),
+        difficultyDegrees: _sensitivity.round(),
       ));
     }
   }
@@ -105,6 +106,22 @@ class _TrainingPageState extends State<TrainingPage>
     'Intermediate' => 30,
     _              => 20, // Advanced
   };
+
+  void _applyDefaultsForLevel(String level) {
+    switch (level) {
+      case 'Basic':
+        _sensitivity = 45;
+        _timing = 'Delayed';
+        _delaySeconds = 5;
+      case 'Intermediate':
+        _sensitivity = 30;
+        _timing = 'Delayed';
+        _delaySeconds = 3;
+      default: // Advanced
+        _sensitivity = 20;
+        _timing = 'Instant';
+    }
+  }
 
   Future<void> _showSensitivityWarning(double degrees) async {
     if (!mounted) return;
@@ -136,7 +153,6 @@ class _TrainingPageState extends State<TrainingPage>
   }
 
   Future<void> _showDelayPicker() async {
-    final controller = TextEditingController();
     final selected = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
@@ -145,92 +161,11 @@ class _TrainingPageState extends State<TrainingPage>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return SafeArea(
-              top: false,
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  22,
-                  4,
-                  22,
-                  22 + MediaQuery.of(context).viewInsets.bottom,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Choose alert delay',
-                      style: TextStyle(
-                        color: Color(0xFF111827),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Pick how long poor posture should continue before vibration starts.',
-                      style: TextStyle(
-                        color: Color(0xFF667085),
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: _delayOptions.map((seconds) {
-                        final isSelected = _delaySeconds == seconds;
-                        return _DelayChip(
-                          seconds: seconds,
-                          isSelected: isSelected,
-                          onTap: () => Navigator.of(context).pop(seconds),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 18),
-                    TextField(
-                      controller: controller,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
-                      decoration: InputDecoration(
-                        labelText: 'Custom seconds',
-                        hintText: 'Enter 1 to 300',
-                        errorText: errorText,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () {
-                          final value = int.tryParse(controller.text.trim());
-                          if (value == null || value < 1 || value > 300) {
-                            setSheetState(() {
-                              errorText = 'Enter a value from 1 to 300 seconds';
-                            });
-                            return;
-                          }
-                          Navigator.of(context).pop(value);
-                        },
-                        child: const Text('Use custom delay'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      builder: (context) => _DelayPickerSheet(
+        delayOptions: _delayOptions,
+        currentDelay: _delaySeconds,
+      ),
     );
-    controller.dispose();
     if (selected == null || !mounted) return;
     HapticFeedback.selectionClick();
     setState(() => _delaySeconds = selected);
@@ -282,7 +217,10 @@ class _TrainingPageState extends State<TrainingPage>
                             selectedGradient: level.gradient,
                             onTap: () {
                               HapticFeedback.selectionClick();
-                              setState(() => _level = level.name);
+                              setState(() {
+                                _level = level.name;
+                                _applyDefaultsForLevel(level.name);
+                              });
                             },
                           ),
                         ),
@@ -1122,4 +1060,115 @@ class _TrainingLevel {
   final List<Color> gradient;
 
   const _TrainingLevel({required this.name, required this.gradient});
+}
+
+// Proper StatefulWidget so TextEditingController is disposed with the widget,
+// not with the caller — avoids the _dependents.isEmpty crash.
+class _DelayPickerSheet extends StatefulWidget {
+  final List<int> delayOptions;
+  final int currentDelay;
+
+  const _DelayPickerSheet({
+    required this.delayOptions,
+    required this.currentDelay,
+  });
+
+  @override
+  State<_DelayPickerSheet> createState() => _DelayPickerSheetState();
+}
+
+class _DelayPickerSheetState extends State<_DelayPickerSheet> {
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          22,
+          4,
+          22,
+          22 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Choose alert delay',
+              style: TextStyle(
+                color: Color(0xFF111827),
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Pick how long poor posture should continue before vibration starts.',
+              style: TextStyle(
+                color: Color(0xFF667085),
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: widget.delayOptions.map((seconds) {
+                final isSelected = widget.currentDelay == seconds;
+                return _DelayChip(
+                  seconds: seconds,
+                  isSelected: isSelected,
+                  onTap: () => Navigator.of(context).pop(seconds),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: _controller,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: 'Custom seconds',
+                hintText: 'Enter 1 to 300',
+                errorText: _errorText,
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () {
+                  final value = int.tryParse(_controller.text.trim());
+                  if (value == null || value < 1 || value > 300) {
+                    setState(() {
+                      _errorText = 'Enter a value from 1 to 300 seconds';
+                    });
+                    return;
+                  }
+                  Navigator.of(context).pop(value);
+                },
+                child: const Text('Use custom delay'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

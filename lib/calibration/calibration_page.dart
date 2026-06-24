@@ -57,6 +57,9 @@ class _CalibrationPageState extends State<CalibrationPage>
   // Wall-clock anchor for smooth progress when BLE packets are sparse
   DateTime? _getReadyStartedAt;
   DateTime? _holdStillStartedAt;
+  // Bug 3 fix: set true when BLE drives the getReady→holdStill transition so
+  // the wall-clock fallback in _onTick() doesn't fire a second time.
+  bool _bleHoldStillReceived = false;
   @override
   void initState() {
     super.initState();
@@ -105,7 +108,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   bool get _isConnected =>
       widget.deviceService.connectionStatus.value ==
-      DeviceConnectionStatus.connected;
+          DeviceConnectionStatus.connected;
 
   Future<void> _startCalibration() async {
     if (!_isConnected) {
@@ -124,6 +127,7 @@ class _CalibrationPageState extends State<CalibrationPage>
       _cancelMissCount = 0;
       _getReadyStartedAt = null;
       _holdStillStartedAt = null;
+      _bleHoldStillReceived = false;
     });
 
     final sent = await widget.deviceService.sendCalibrationStart();
@@ -137,8 +141,8 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   void _onReading(PostureReading reading) {
     debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
-    'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
-    'elapsed=${reading.calibrationElapsedMs}');
+        'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
+        'elapsed=${reading.calibrationElapsedMs}');
     if (reading.calibrationResult == 'cancelled') {
       if (mounted) Navigator.of(context).pop(false);
       return;
@@ -155,23 +159,16 @@ class _CalibrationPageState extends State<CalibrationPage>
     _devicePhase = reading.calibrationPhase;
 
 
+    // Bug 1 fix: handle complete/failed immediately regardless of stage or elapsed
+    // time. The old guard (stage != starting && elapsed > 2000ms) caused the UI
+    // to stick on "Starting" forever when calibration failed in under 2 seconds.
     if (reading.calibrationResult.isNotEmpty &&
-        _stage != _CalibrationStage.starting &&
-        _stage != _CalibrationStage.intro &&
         _startRequestedAt != null) {
-
-      final elapsed = DateTime.now().difference(_startRequestedAt!);
-      if (elapsed.inMilliseconds > 2000) {
-        _handleCalibrationResult(reading.calibrationResult == 'complete');
-        return;
-      }
+      _handleCalibrationResult(reading.calibrationResult == 'complete');
       return;
     }
-
-    if (reading.calibrationResult == 'cancelled') {
-      if (mounted) Navigator.of(context).pop(false);
-      return;
-    }
+    // Bug 2 fix: duplicate 'cancelled' check removed (was dead code here;
+    // already handled at the top of _onReading before this block).
 
     // Transition to getReady when device starts calibrating and phase is GET_READY
     if ((_stage == _CalibrationStage.starting || _stage == _CalibrationStage.intro) &&
@@ -183,8 +180,11 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
 
     // Phase transitions from device (BLE-driven)
+    // Bug 3 fix: set _bleHoldStillReceived so _onTick() wall-clock fallback
+    // does not fire a second advance after BLE has already done it.
     if (_stage == _CalibrationStage.getReady &&
         _devicePhase == 'HOLD_STILL') {
+      _bleHoldStillReceived = true;
       _deviceHoldStartMs = _deviceElapsedMs;
       _holdStillStartedAt ??= DateTime.now();
       setState(() => _stage = _CalibrationStage.holdStill);
@@ -273,12 +273,17 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     // Wall-clock auto-advance: firmware sends packets only at start/end,
     // so we drive phase transitions and progress locally.
+    // Bug 3 fix: only advance via wall-clock when BLE has not already driven
+    // the getReady→holdStill transition. Additionally, give BLE a 3-second
+    // grace window after getReady started before the wall-clock fires, so a
+    // late BLE packet is always preferred over the wall-clock fallback.
     if (_stage == _CalibrationStage.getReady) {
       final anchor = _getReadyStartedAt;
       if (anchor != null) {
         final wallElapsed = DateTime.now().difference(anchor).inMilliseconds;
-        if (wallElapsed >= _getReadyMs) {
-          // GET_READY timer expired — advance to holdStill
+        // 3-second grace beyond the normal getReady window gives BLE priority.
+        if (!_bleHoldStillReceived && wallElapsed >= _getReadyMs + 3000) {
+          // GET_READY timer expired and BLE gave no signal — advance via wall-clock
           _holdStillStartedAt = DateTime.now();
           setState(() => _stage = _CalibrationStage.holdStill);
           return;
@@ -288,6 +293,16 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
 
     if (_stage == _CalibrationStage.holdStill) {
+      // If device stops sending packets and holdStill timer expires → fail
+      final anchor = _holdStillStartedAt;
+      if (anchor != null) {
+        final wallElapsed = DateTime.now().difference(anchor).inMilliseconds;
+        if (wallElapsed >= _holdStillMs + 3000) {
+          // 3 sec grace beyond expected holdStill duration — device likely silent/disconnected
+          _handleCalibrationResult(false);
+          return;
+        }
+      }
       setState(() {});
     }
   }

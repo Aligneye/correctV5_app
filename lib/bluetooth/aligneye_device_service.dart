@@ -415,6 +415,7 @@ class AlignEyeDeviceService {
     required String postureTiming,
     required int therapyDurationMinutes,
     required int difficultyDegrees,
+    int postureDelaySeconds = 5,
   }) async {
     if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return;
@@ -434,6 +435,7 @@ class AlignEyeDeviceService {
     final payload =
         'MODE=${mode.toUpperCase()};'
         'POSTURE_TIMING=${postureTiming.toUpperCase()};'
+        'POSTURE_DELAY_SEC=$postureDelaySeconds;'
         'THERAPY_DURATION_MIN=$therapyDurationMinutes;'
         'DIFFICULTY_DEG=$difficultyDegrees';
 
@@ -1088,7 +1090,7 @@ class AlignEyeDeviceService {
           return;
         }
         final last = _lastDataReceivedAt;
-        if (last != null && DateTime.now().difference(last).inSeconds > 15) {
+        if (last != null && DateTime.now().difference(last).inSeconds > 25) {
           if (currentIsCalibrating) return;
           debugPrint('WATCHDOG: No data for 15s, forcing disconnect');
           disconnect();

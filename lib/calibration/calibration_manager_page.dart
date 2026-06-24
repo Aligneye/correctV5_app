@@ -230,10 +230,7 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
         ),
       ),
     );
-    if (!mounted) return;
-    if (result == true) {
-      Navigator.of(context).pop(true);
-    }
+    // Calibration successful — stay on CalibrationManagerPage (1–8 list)
   }
 
   @override
@@ -251,15 +248,15 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
               Expanded(
                 child: _loading
                     ? Center(
-                        child: CircularProgressIndicator(
-                          color: AppTheme.brandPrimary,
-                          strokeWidth: 2.5,
-                        ),
-                      )
+                  child: CircularProgressIndicator(
+                    color: AppTheme.brandPrimary,
+                    strokeWidth: 2.5,
+                  ),
+                )
                     : FadeTransition(
-                        opacity: _fadeController,
-                        child: _buildBody(),
-                      ),
+                  opacity: _fadeController,
+                  child: _buildBody(),
+                ),
               ),
             ],
           ),
@@ -632,8 +629,8 @@ class _SlotUsageBar extends StatelessWidget {
     final color = fraction < 0.5
         ? AppTheme.brandPrimary
         : fraction < 0.875
-            ? const Color(0xFFF59E0B)
-            : AppTheme.destructive;
+        ? const Color(0xFFF59E0B)
+        : AppTheme.destructive;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,7 +708,7 @@ class _DeleteDialog extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               'Are you sure you want to delete "${calibration.name}"?'
-              '${calibration.isDefault ? '\n\nThe next calibration will become the default.' : ''}',
+                  '${calibration.isDefault ? '\n\nThe next calibration will become the default.' : ''}',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: AppTheme.textSecondary,
