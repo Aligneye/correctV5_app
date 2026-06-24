@@ -592,10 +592,19 @@ class _HomeDashboardState extends State<HomeDashboard>
     }
   }
 
-  void _showFirmwareUpdateBanner() {
+  Future<void> _showFirmwareUpdateBanner() async {
     final manifest = FirmwareUpdateService.instance.manifest;
     if (manifest == null) return;
 
+    // Check snooze: skip dialog until the snoozed date has passed.
+    final prefs = await SharedPreferences.getInstance();
+    final snoozeUntil = prefs.getInt('firmware_snooze_until_ms');
+    if (snoozeUntil != null &&
+        DateTime.now().millisecondsSinceEpoch < snoozeUntil) {
+      return;
+    }
+
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -644,8 +653,16 @@ class _HomeDashboardState extends State<HomeDashboard>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Later', style: TextStyle(color: Colors.grey)),
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final prefs = await SharedPreferences.getInstance();
+              final snoozeUntil = DateTime.now()
+                  .add(const Duration(days: 7))
+                  .millisecondsSinceEpoch;
+              await prefs.setInt('firmware_snooze_until_ms', snoozeUntil);
+            },
+            child: const Text('Remind me next week',
+                style: TextStyle(color: Colors.grey)),
           ),
           FilledButton(
             onPressed: () {
@@ -2105,6 +2122,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                   onModeSelected: (mode) {
                     if (mode == _ModeControlType.therapy) {
                       widget.onOpenTherapy();
+                      return;
+                    }
+                    if (mode == _ModeControlType.posture) {
+                      widget.onOpenTraining();
                       return;
                     }
                     setState(() => _selectedMode = mode);
@@ -4439,79 +4460,79 @@ class _ModeControlCard extends StatelessWidget {
               ),
             ],
           ),
-          if (selectedMode == _ModeControlType.posture) ...[
-            const SizedBox(height: 16),
-            const Row(
-              children: [
-                Icon(
-                  Icons.accessibility_new_rounded,
-                  size: 16,
-                  color: _kPrimaryBlue,
-                ),
-                SizedBox(width: 6),
-                Text(
-                  'Posture settings',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _LabeledControl(
-                    label: 'Timing',
-                    icon: Icons.av_timer_rounded,
-                    child: _DropdownModeButton<_PostureTimingType>(
-                      value: selectedPostureTiming,
-                      items: _PostureTimingType.values
-                          .map(
-                            (timing) => DropdownMenuItem<_PostureTimingType>(
-                          value: timing,
-                          child: Text(_postureTimingLabel(timing)),
-                        ),
-                      )
-                          .toList(),
-                      selectedLabelBuilder: _postureTimingCompactLabel,
-                      onChanged: (value) {
-                        if (value != null) onPostureTimingSelected(value);
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _LabeledControl(
-                    label: 'Difficulty',
-                    icon: Icons.speed_rounded,
-                    child: _DropdownModeButton<int>(
-                      value: selectedDifficulty,
-                      items: _kDifficultyOptions
-                          .map(
-                            (difficulty) => DropdownMenuItem<int>(
-                          value: difficulty,
-                          child: Text(
-                            difficulty == 25
-                                ? '$difficulty° (default)'
-                                : '$difficulty°',
-                          ),
-                        ),
-                      )
-                          .toList(),
-                      selectedLabelBuilder: (value) => '$value°',
-                      onChanged: (value) {
-                        if (value != null) onDifficultySelected(value);
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          // if (selectedMode == _ModeControlType.posture) ...[
+          //   const SizedBox(height: 16),
+          //   const Row(
+          //     children: [
+          //       Icon(
+          //         Icons.accessibility_new_rounded,
+          //         size: 16,
+          //         color: _kPrimaryBlue,
+          //       ),
+          //       SizedBox(width: 6),
+          //       Text(
+          //         'Posture settings',
+          //         style: TextStyle(
+          //           color: AppTheme.textPrimary,
+          //           fontSize: 13,
+          //           fontWeight: FontWeight.w600,
+          //         ),
+          //       ),
+          //     ],
+          //   ),
+          //   const SizedBox(height: 10),
+          //   Row(
+          //     children: [
+          //       Expanded(
+          //         child: _LabeledControl(
+          //           label: 'Timing',
+          //           icon: Icons.av_timer_rounded,
+          //           child: _DropdownModeButton<_PostureTimingType>(
+          //             value: selectedPostureTiming,
+          //             items: _PostureTimingType.values
+          //                 .map(
+          //                   (timing) => DropdownMenuItem<_PostureTimingType>(
+          //                 value: timing,
+          //                 child: Text(_postureTimingLabel(timing)),
+          //               ),
+          //             )
+          //                 .toList(),
+          //             selectedLabelBuilder: _postureTimingCompactLabel,
+          //             onChanged: (value) {
+          //               if (value != null) onPostureTimingSelected(value);
+          //             },
+          //           ),
+          //         ),
+          //       ),
+          //       const SizedBox(width: 10),
+          //       Expanded(
+          //         child: _LabeledControl(
+          //           label: 'Difficulty',
+          //           icon: Icons.speed_rounded,
+          //           child: _DropdownModeButton<int>(
+          //             value: selectedDifficulty,
+          //             items: _kDifficultyOptions
+          //                 .map(
+          //                   (difficulty) => DropdownMenuItem<int>(
+          //                 value: difficulty,
+          //                 child: Text(
+          //                   difficulty == 25
+          //                       ? '$difficulty° (default)'
+          //                       : '$difficulty°',
+          //                 ),
+          //               ),
+          //             )
+          //                 .toList(),
+          //             selectedLabelBuilder: (value) => '$value°',
+          //             onChanged: (value) {
+          //               if (value != null) onDifficultySelected(value);
+          //             },
+          //           ),
+          //         ),
+          //       ),
+          //     ],
+          //   ),
+          // ],
           // Therapy-specific controls intentionally omitted here. Tapping
           // the Therapy mode button now launches the immersive Ongoing
           // Therapy page with the device's current defaults, so the home
