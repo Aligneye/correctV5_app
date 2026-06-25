@@ -1953,9 +1953,24 @@ class AlignEyeDeviceService {
                     .map(FirmwareProfile.fromJson)
                     .toList()
               : <FirmwareProfile>[];
-          _lastKnownProfiles = profiles;
-          _profileListController.add(profiles); // always emit, even if empty
-          debugPrint('📋 PROFILE LIST => ${profiles.length} profiles');
+
+          final hasActiveCustom = profiles.any((p) => p.isActive);
+          final hasDefaultCustom = profiles.any((p) => p.isDefault);
+
+          final systemDefault = FirmwareProfile(
+            id: 0,
+            slot: 0,
+            name: 'System default',
+            isActive: !hasActiveCustom,
+            isDefault: !hasDefaultCustom,
+            createdEpoch: 0,
+            quality: 100,
+          );
+
+          final combined = [systemDefault, ...profiles];
+          _lastKnownProfiles = combined;
+          _profileListController.add(combined); // always emit, even if empty
+          debugPrint('📋 PROFILE LIST => ${combined.length} profiles');
           return;
         }
         // ───────────────────────────────────────────────────────────────────

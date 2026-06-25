@@ -51,6 +51,7 @@ class _CalibrationPageState extends State<CalibrationPage>
   DateTime? _startRequestedAt;
   bool _closing = false;
   bool _completionHandled = false;
+  late String _profileName;
 
   // BLE-reported values (may be sparse — firmware only sends on start/end)
   int _deviceElapsedMs = 0;
@@ -70,6 +71,7 @@ class _CalibrationPageState extends State<CalibrationPage>
   @override
   void initState() {
     super.initState();
+    _profileName = widget.profileName;
 
     _pulseController = AnimationController(
       vsync: this,
@@ -141,7 +143,7 @@ class _CalibrationPageState extends State<CalibrationPage>
     });
 
     final sent = await widget.deviceService.sendCalibrationStartJson(
-      name: widget.profileName,
+      name: _profileName,
     );
     if (!mounted) return;
     if (!sent) {
@@ -450,7 +452,13 @@ class _CalibrationPageState extends State<CalibrationPage>
       case _CalibrationStage.intro:
         return _IntroScreen(
           key: const ValueKey('intro'),
-          onStart: () => unawaited(_startCalibration()),
+          initialName: _profileName,
+          onStart: (name) {
+            setState(() {
+              _profileName = name;
+            });
+            unawaited(_startCalibration());
+          },
           onCancel: () => Navigator.of(context).pop(false),
         );
       case _CalibrationStage.starting:
@@ -517,117 +525,254 @@ class _CalibrationPageState extends State<CalibrationPage>
   }
 }
 
-class _IntroScreen extends StatelessWidget {
+class _IntroScreen extends StatefulWidget {
   const _IntroScreen({
     super.key,
+    required this.initialName,
     required this.onStart,
     required this.onCancel,
   });
 
-  final VoidCallback onStart;
+  final String initialName;
+  final ValueChanged<String> onStart;
   final VoidCallback onCancel;
 
   @override
+  State<_IntroScreen> createState() => _IntroScreenState();
+}
+
+class _IntroScreenState extends State<_IntroScreen> {
+  late final TextEditingController _nameController;
+  final List<String> _defaults = const ['Office', 'Home', 'Car', 'Gym'];
+  String _selectedDefault = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    if (_defaults.contains(widget.initialName)) {
+      _selectedDefault = widget.initialName;
+    }
+    _nameController.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    final text = _nameController.text.trim();
+    if (_defaults.contains(text)) {
+      if (_selectedDefault != text) {
+        setState(() {
+          _selectedDefault = text;
+        });
+      }
+    } else {
+      if (_selectedDefault.isNotEmpty) {
+        setState(() {
+          _selectedDefault = '';
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      key: key,
-      padding: const EdgeInsets.fromLTRB(28, 32, 28, 36),
-      child: Column(
-        children: [
-          const Spacer(),
-          Text(
-            'Calibrate Posture',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              letterSpacing: -0.5,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight - 60,
             ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Set your ideal sitting posture for accurate tracking.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              color: Colors.white.withValues(alpha: 0.65),
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 40),
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.airline_seat_recline_normal_rounded,
-                  size: 48,
-                  color: const Color(0xFF008090).withValues(alpha: 0.9),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Sit comfortably in your natural upright posture.\nKeep your back straight and shoulders relaxed.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.white.withValues(alpha: 0.8),
-                    height: 1.5,
+            child: IntrinsicHeight(
+              child: Column(
+                children: [
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Calibrate Posture',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: -0.5,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-                child: InkWell(
-                  onTap: onStart,
-                  borderRadius: BorderRadius.circular(16),
-                  child: const Center(
+                  const SizedBox(height: 12),
+                  Text(
+                    'Set your ideal sitting posture for accurate tracking.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.white.withValues(alpha: 0.65),
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.airline_seat_recline_normal_rounded,
+                          size: 44,
+                          color: const Color(0xFF008090).withValues(alpha: 0.9),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Sit comfortably in your natural upright posture.\nKeep your back straight and shoulders relaxed.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white.withValues(alpha: 0.8),
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  const Align(
+                    alignment: Alignment.centerLeft,
                     child: Text(
-                      'Start Calibration',
+                      'Calibration Name',
                       style: TextStyle(
-                        fontSize: 17,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                        color: Colors.white70,
                       ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _nameController,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    maxLength: 23,
+                    buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                    decoration: InputDecoration(
+                      hintText: 'Enter name (e.g. Office)',
+                      hintStyle: const TextStyle(color: Colors.white30),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.05),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF008090), width: 1.5),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _defaults.map((name) {
+                        final isSelected = _selectedDefault == name;
+                        return GestureDetector(
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            _nameController.text = name;
+                            _nameController.selection = TextSelection.fromPosition(
+                              TextPosition(offset: name.length),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              gradient: isSelected
+                                  ? const LinearGradient(
+                                      colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                                    )
+                                  : null,
+                              color: isSelected ? null : Colors.white.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: isSelected
+                                    ? Colors.transparent
+                                    : Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Text(
+                              name,
+                              style: TextStyle(
+                                color: isSelected ? Colors.white : Colors.white70,
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const Spacer(),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                        child: InkWell(
+                          onTap: () {
+                            final name = _nameController.text.trim();
+                            widget.onStart(name.isEmpty ? 'Profile' : name);
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: const Center(
+                            child: Text(
+                              'Start Calibration',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: onCancel,
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.white.withValues(alpha: 0.6),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

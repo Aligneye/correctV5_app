@@ -157,15 +157,20 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
     await widget.deviceService.getProfiles();
   }
 
-  Future<void> _recalibrateProfile(FirmwareProfile profile) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => _RecalibrateDialog(profileName: profile.name),
-    );
-    if (confirmed != true || !mounted) return;
+  Future<void> _selectOrRecalibrateProfile(FirmwareProfile profile) async {
+    if (profile.id == 0) {
+      if (_actionInProgress) return;
+      HapticFeedback.selectionClick();
+      setState(() => _actionInProgress = true);
+      await widget.deviceService.selectProfile(0);
+      await widget.deviceService.getProfiles();
+      return;
+    }
 
     // Select this profile as active before recalibrating
     await widget.deviceService.selectProfile(profile.id);
+
+    if (!mounted) return;
 
     final result = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
@@ -180,6 +185,14 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
     if (result == true) {
       await widget.deviceService.getProfiles();
     }
+  }
+
+  Future<void> _renameProfile(FirmwareProfile profile, String newName) async {
+    if (newName.trim().isEmpty || _actionInProgress) return;
+    HapticFeedback.selectionClick();
+    setState(() => _actionInProgress = true);
+    await widget.deviceService.renameProfile(profile.id, newName.trim());
+    await widget.deviceService.getProfiles();
   }
 
   @override
@@ -271,7 +284,7 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
               ),
             ),
             child: Text(
-              '${_profiles.length} / $_maxSlots',
+              '${_profiles.where((p) => p.id != 0).length} / $_maxSlots',
               style: const TextStyle(
                 color: AppTheme.brandPrimary,
                 fontSize: 13,
@@ -329,20 +342,21 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
               child: _CalibrationSlotCard(
                 profile: profile,
                 totalSlots: _maxSlots,
-                onSelect: () => _recalibrateProfile(profile),
+                onSelect: () => _selectOrRecalibrateProfile(profile),
                 onSetDefault: () => _setDefault(profile),
                 onDelete: () => _deleteProfile(profile),
+                onRename: (newName) => _renameProfile(profile, newName),
               ),
             );
           }),
 
-          if (_profiles.length < _maxSlots) ...[
+          if (_profiles.where((p) => p.id != 0).length < _maxSlots) ...[
             const SizedBox(height: 4),
             _AddCalibrationButton(onTap: _addCalibration),
           ],
 
           const SizedBox(height: 24),
-          _SlotUsageBar(used: _profiles.length, total: _maxSlots),
+          _SlotUsageBar(used: _profiles.where((p) => p.id != 0).length, total: _maxSlots),
           const SizedBox(height: 8),
         ],
       ),
@@ -354,13 +368,14 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 // Calibration card
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _CalibrationSlotCard extends StatelessWidget {
+class _CalibrationSlotCard extends StatefulWidget {
   const _CalibrationSlotCard({
     required this.profile,
     required this.totalSlots,
     required this.onSelect,
     required this.onSetDefault,
     required this.onDelete,
+    required this.onRename,
   });
 
   final FirmwareProfile profile;
@@ -368,14 +383,66 @@ class _CalibrationSlotCard extends StatelessWidget {
   final VoidCallback onSelect;
   final VoidCallback onSetDefault;
   final VoidCallback onDelete;
+  final ValueChanged<String> onRename;
+
+  @override
+  State<_CalibrationSlotCard> createState() => _CalibrationSlotCardState();
+}
+
+class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
+  bool _isEditing = false;
+  late final TextEditingController _nameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.profile.name);
+  }
+
+  @override
+  void didUpdateWidget(covariant _CalibrationSlotCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.profile.name != oldWidget.profile.name ||
+        widget.profile.id != oldWidget.profile.id) {
+      _nameController.text = widget.profile.name;
+      _isEditing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Color _qualityColor(int quality) {
+    if (quality >= 85) return const Color(0xFF22C55E);
+    if (quality >= 70) return const Color(0xFF3B82F6);
+    if (quality >= 50) return const Color(0xFFF59E0B);
+    return AppTheme.destructive;
+  }
+
+  String _formatDate(DateTime? dt) {
+    if (dt == null) return '';
+    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDefault = profile.isDefault;
-    final isActive = profile.isActive;
+    final isDefault = widget.profile.isDefault;
+    final isActive = widget.profile.isActive;
 
     return GestureDetector(
-      onTap: onSelect,
+      onTap: () {
+        if (widget.profile.id == 0) {
+          widget.onSelect();
+        } else {
+          setState(() {
+            _isEditing = true;
+          });
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         padding: const EdgeInsets.all(16),
@@ -416,7 +483,7 @@ class _CalibrationSlotCard extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  '${profile.slot}',
+                  widget.profile.id == 0 ? 'S' : '${widget.profile.slot}',
                   style: TextStyle(
                     color: isDefault ? Colors.white : AppTheme.brandPrimary,
                     fontSize: 18,
@@ -428,134 +495,188 @@ class _CalibrationSlotCard extends StatelessWidget {
             const SizedBox(width: 14),
 
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          profile.name,
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 15,
-                            fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+              child: _isEditing
+                  ? TextField(
+                      controller: _nameController,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 6),
+                        border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppTheme.brandPrimary),
+                        ),
+                        focusedBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppTheme.brandPrimary, width: 2),
                         ),
                       ),
-                      if (isDefault) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            gradient: AppTheme.brandGradient,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Text(
-                            'DEFAULT',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
+                      autofocus: true,
+                      maxLength: 23,
+                      buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.profile.name,
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 15,
+                                  fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
+                            if (isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  gradient: AppTheme.brandGradient,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: const Text(
+                                  'DEFAULT',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (isActive && !isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'ACTIVE',
+                                  style: TextStyle(
+                                    color: Color(0xFF22C55E),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Text(
+                              _formatDate(widget.profile.createdAt),
+                              style: const TextStyle(
+                                color: AppTheme.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                            if (widget.profile.quality > 0) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '· ${widget.profile.qualityLabel}',
+                                style: TextStyle(
+                                  color: _qualityColor(widget.profile.quality),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
-                      if (isActive && !isDefault) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF22C55E).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: const Color(0xFF22C55E).withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: const Text(
-                            'ACTIVE',
-                            style: TextStyle(
-                              color: Color(0xFF22C55E),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      Text(
-                        _formatDate(profile.createdAt),
-                        style: const TextStyle(
-                          color: AppTheme.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                      if (profile.quality > 0) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '· ${profile.qualityLabel}',
-                          style: TextStyle(
-                            color: _qualityColor(profile.quality),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
+                    ),
             ),
+
+            const SizedBox(width: 8),
 
             // Actions
             Row(
               mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isDefault)
-                  _ActionIcon(
-                    icon: Icons.star_border_rounded,
-                    tooltip: 'Set Default',
-                    color: const Color(0xFFF59E0B),
-                    onTap: onSetDefault,
-                  ),
-                if (isDefault)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
-                  ),
-                const SizedBox(width: 4),
-                _ActionIcon(
-                  icon: Icons.delete_outline_rounded,
-                  tooltip: 'Delete',
-                  color: AppTheme.destructive,
-                  onTap: onDelete,
-                ),
-              ],
+              children: _isEditing
+                  ? [
+                      _ActionIcon(
+                        icon: Icons.wifi_tethering_rounded,
+                        tooltip: 'Recalibrate',
+                        color: AppTheme.brandPrimary,
+                        onTap: () {
+                          setState(() {
+                            _isEditing = false;
+                          });
+                          widget.onSelect();
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _ActionIcon(
+                        icon: Icons.check_rounded,
+                        tooltip: 'Save',
+                        color: const Color(0xFF22C55E),
+                        onTap: () {
+                          final trimmed = _nameController.text.trim();
+                          if (trimmed.isNotEmpty && trimmed != widget.profile.name) {
+                            widget.onRename(trimmed);
+                          }
+                          setState(() {
+                            _isEditing = false;
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _ActionIcon(
+                        icon: Icons.close_rounded,
+                        tooltip: 'Cancel',
+                        color: AppTheme.textMuted,
+                        onTap: () {
+                          setState(() {
+                            _isEditing = false;
+                            _nameController.text = widget.profile.name;
+                          });
+                        },
+                      ),
+                    ]
+                  : [
+                      if (!isDefault)
+                        _ActionIcon(
+                          icon: Icons.star_border_rounded,
+                          tooltip: 'Set Default',
+                          color: const Color(0xFFF59E0B),
+                          onTap: widget.onSetDefault,
+                        ),
+                      if (isDefault)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8),
+                          child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
+                        ),
+                      if (!isDefault && widget.profile.id != 0) ...[
+                        const SizedBox(width: 4),
+                        _ActionIcon(
+                          icon: Icons.delete_outline_rounded,
+                          tooltip: 'Delete',
+                          color: AppTheme.destructive,
+                          onTap: widget.onDelete,
+                        ),
+                      ],
+                    ],
             ),
           ],
         ),
       ),
     );
-  }
-
-  Color _qualityColor(int quality) {
-    if (quality >= 85) return const Color(0xFF22C55E);
-    if (quality >= 70) return const Color(0xFF3B82F6);
-    if (quality >= 50) return const Color(0xFFF59E0B);
-    return AppTheme.destructive;
-  }
-
-  String _formatDate(DateTime? dt) {
-    if (dt == null) return '';
-    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }
 
@@ -800,112 +921,4 @@ class _DeleteDialog extends StatelessWidget {
     );
   }
 }
-
-class _RecalibrateDialog extends StatelessWidget {
-  const _RecalibrateDialog({required this.profileName});
-
-  final String profileName;
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                gradient: AppTheme.brandGradient,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.brandPrimary.withValues(alpha: 0.25),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.wifi_tethering_rounded,
-                  color: Colors.white, size: 28),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Recalibrate?',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Do you want to recalibrate "$profileName"?\n\nSit in your ideal posture before starting.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 14,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      side: BorderSide(color: AppTheme.border),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: const Text('Cancel',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: AppTheme.brandGradient,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Container(
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: const Text(
-                          'Recalibrate',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+
