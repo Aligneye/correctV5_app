@@ -15,10 +15,14 @@ enum _CalibrationStage {
 }
 
 class CalibrationPage extends StatefulWidget {
+  // Profile name to assign on calibration success
+  final String profileName;
+
   const CalibrationPage({
     super.key,
     required this.deviceService,
     this.autoStart = false,
+    this.profileName = 'Profile',
   });
 
   final AlignEyeDeviceService deviceService;
@@ -53,6 +57,9 @@ class _CalibrationPageState extends State<CalibrationPage>
   String _devicePhase = 'IDLE';
   int _deviceHoldStartMs = 0;
   int _cancelMissCount = 0;
+  // Result details from DONE packet
+  int _calibrationQuality = 0;
+  String _failReason = '';
 
   // Wall-clock anchor for smooth progress when BLE packets are sparse
   DateTime? _getReadyStartedAt;
@@ -130,7 +137,9 @@ class _CalibrationPageState extends State<CalibrationPage>
       _bleHoldStillReceived = false;
     });
 
-    final sent = await widget.deviceService.sendCalibrationStart();
+    final sent = await widget.deviceService.sendCalibrationStartJson(
+      name: widget.profileName,
+    );
     if (!mounted) return;
     if (!sent) {
       setState(() => _stage = _CalibrationStage.failed);
@@ -140,9 +149,11 @@ class _CalibrationPageState extends State<CalibrationPage>
 
 
   void _onReading(PostureReading reading) {
-    debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
-        'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
-        'elapsed=${reading.calibrationElapsedMs}');
+    if (reading.isCalibrating || reading.calibrationResult.isNotEmpty || reading.calibrationPhase != 'IDLE') {
+      debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
+          'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
+          'elapsed=${reading.calibrationElapsedMs}');
+    }
     if (reading.calibrationResult == 'cancelled') {
       if (mounted) Navigator.of(context).pop(false);
       return;
@@ -164,6 +175,9 @@ class _CalibrationPageState extends State<CalibrationPage>
     // to stick on "Starting" forever when calibration failed in under 2 seconds.
     if (reading.calibrationResult.isNotEmpty &&
         _startRequestedAt != null) {
+      // Capture quality score and fail reason before transitioning
+      _calibrationQuality = reading.calibrationQuality;
+      _failReason = reading.calibrationFailReason;
       _handleCalibrationResult(reading.calibrationResult == 'complete');
       return;
     }
@@ -264,6 +278,11 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
 
     if (_stage == _CalibrationStage.starting) {
+      // Real-time disconnect check
+      if (!_isConnected) {
+        setState(() => _stage = _CalibrationStage.disconnected);
+        return;
+      }
       final elapsed = DateTime.now().difference(_startRequestedAt ?? DateTime.now());
       if (elapsed >= _startDetectTimeout) {
         setState(() => _stage = _CalibrationStage.failed);
@@ -309,6 +328,38 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   int get _getReadyMs => _fallbackGetReadyMs;
   int get _holdStillMs => _fallbackHoldStillMs;
+
+  String _buildFailMessage(String reason) {
+    switch (reason) {
+      case 'MOVEMENT_TOO_HIGH':
+      case 'Too much movement':
+      case 'Bad movement':
+        return 'Movement detected during calibration.\nSit still and try again.';
+      case 'LOW_BATTERY':
+        return 'Battery too low.\nPlease charge your device first.';
+      case 'SENSOR_NOT_INITIALIZED':
+        return 'Sensor not ready.\nPlease restart the device.';
+      case 'MOTOR_ACTIVE':
+        return 'Therapy is running.\nStop therapy before calibrating.';
+      case 'DEVICE_MOVING':
+        return 'Device is moving.\nSit still before starting calibration.';
+      case 'LOW_QUALITY':
+        return 'Calibration quality too low.\nSit still and retry.';
+      case 'CALIBRATION_UNSTABLE':
+        return 'Calibration was unstable.\nSit upright and retry.';
+      case 'Timeout':
+        return 'Calibration timed out.\nPlease try again.';
+      default:
+        return 'Calibration failed.\nPlease try again.';
+    }
+  }
+
+  String _qualityLabel(int quality) {
+    if (quality >= 85) return 'Excellent';
+    if (quality >= 70) return 'Good';
+    if (quality >= 50) return 'Acceptable';
+    return 'Low';
+  }
 
   // Wall-clock elapsed for GET_READY phase
   int get _getReadyWallElapsedMs {
@@ -397,7 +448,7 @@ class _CalibrationPageState extends State<CalibrationPage>
           icon: Icons.error_outline_rounded,
           color: const Color(0xFFEF4444),
           title: 'Calibration Failed',
-          message: 'Movement detected.\nPlease try again.',
+          message: _buildFailMessage(_failReason),
           showFailedBar: true,
           barProgress: _failedBarController,
           primaryLabel: 'Retry Calibration',
@@ -413,7 +464,9 @@ class _CalibrationPageState extends State<CalibrationPage>
           color: const Color(0xFF14B8A6),
           title: 'Calibration Complete',
           message: 'Your ideal posture has been saved.\nPosture tracking started.',
-          subText: 'Auto return → Training Screen',
+          subText: _calibrationQuality > 0
+              ? 'Quality: ${_qualityLabel(_calibrationQuality)} ($_calibrationQuality%)'
+              : 'Auto return → Training Screen',
           showSuccessBar: true,
           barProgress: _successBarController,
         );
