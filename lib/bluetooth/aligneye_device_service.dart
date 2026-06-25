@@ -52,6 +52,12 @@ class PostureReading {
   final int calibrationElapsedMs;
   final int calibrationTotalMs;
   final String calibrationPhase;
+  final int calibrationQuality;
+  final String calibrationFailReason;
+  final int calibrationPassedSamples;
+  final double calibrationRefX;
+  final double calibrationRefY;
+  final double calibrationRefZ;
   final String posture;
   final bool isBadPosture;
   final double batteryVoltage;
@@ -100,6 +106,12 @@ class PostureReading {
     required this.calibrationElapsedMs,
     required this.calibrationTotalMs,
     required this.calibrationPhase,
+    this.calibrationQuality = 0,
+    this.calibrationFailReason = '',
+    this.calibrationPassedSamples = 0,
+    this.calibrationRefX = 0.0,
+    this.calibrationRefY = 0.0,
+    this.calibrationRefZ = 0.0,
     required this.posture,
     required this.isBadPosture,
     required this.batteryVoltage,
@@ -151,14 +163,30 @@ class PostureReading {
           json['isCalibrating']?.toString() == 'true' ||
           json['is_calibrating'] == true ||
           json['is_calibrating']?.toString() == 'true',
-      calibrationResult:
-          json['calibrationResult']?.toString() ??
-          json['calibration_result']?.toString() ?? '',
+      // Firmware sends different field names depending on packet type:
+      // - notifyCalibrationStatus() sends "calibResult"
+      // - sendCalibrationDone()     sends "result" with values "success"/"failed"
+      // Normalize "success" → "complete" so CalibrationPage works uniformly.
+      calibrationResult: () {
+        final v = json['calibrationResult']?.toString() ??
+            json['calibration_result']?.toString() ??
+            json['calibResult']?.toString() ??
+            json['result']?.toString() ?? '';
+        if (v == 'success') return 'complete';
+        return v;
+      }(),
       calibrationElapsedMs: toInt(
         json['c_elap'] ?? json['calibration_elapsed_ms'],
       ),
       calibrationTotalMs: toInt(json['c_tot'] ?? json['calibration_total_ms']),
       calibrationPhase: (json['c_phase']?.toString() ?? 'IDLE').toUpperCase(),
+      // DONE packet fields: quality (0-100) and failure reason
+      calibrationQuality: toInt(json['quality']),
+      calibrationFailReason: json['reason']?.toString() ?? '',
+      calibrationPassedSamples: toInt(json['passed_samples']),
+      calibrationRefX: toDouble(json['x']),
+      calibrationRefY: toDouble(json['y']),
+      calibrationRefZ: toDouble(json['z']),
       posture: json['posture']?.toString() ?? 'UNKNOWN',
       isBadPosture:
       json['is_bad_posture'] == true ||
@@ -271,6 +299,57 @@ class DeviceInfo {
   }
 }
 
+// ── Firmware Profile Model ────────────────────────────────────────────────────
+// Mirrors the {"t":"P"} JSON packet from firmware.
+// Firmware is the single source of truth — app never stores its own list.
+class FirmwareProfile {
+  final int id;
+  final int slot;
+  final String name;
+  final bool isActive;
+  final bool isDefault;
+  final int createdEpoch;
+  final int quality;
+
+  const FirmwareProfile({
+    required this.id,
+    required this.slot,
+    required this.name,
+    required this.isActive,
+    required this.isDefault,
+    required this.createdEpoch,
+    required this.quality,
+  });
+
+  factory FirmwareProfile.fromJson(Map<String, dynamic> json) {
+    return FirmwareProfile(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      slot: (json['slot'] as num?)?.toInt() ?? 0,
+      name: json['name']?.toString() ?? 'Profile',
+      isActive: json['active'] == true,
+      isDefault: json['default'] == true,
+      createdEpoch: (json['created'] as num?)?.toInt() ?? 0,
+      quality: (json['quality'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  String get qualityLabel {
+    if (quality >= 85) return 'Excellent';
+    if (quality >= 70) return 'Good';
+    if (quality >= 50) return 'Acceptable';
+    return 'Low';
+  }
+
+  DateTime? get createdAt => createdEpoch > 0
+      ? DateTime.fromMillisecondsSinceEpoch(createdEpoch * 1000)
+      : null;
+
+  @override
+  String toString() =>
+      'FirmwareProfile(id=$id, slot=$slot, name=$name, active=$isActive, default=$isDefault)';
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 enum EnterDfuResult { success, lowBattery, sessionActive, timeout, error }
 
 class AlignEyeDeviceService {
@@ -279,6 +358,20 @@ class AlignEyeDeviceService {
 
   final String _deviceNamePrefix;
   final _readingController = StreamController<PostureReading>.broadcast();
+
+  // ── Profile list stream ────────────────────────────────────────────────────
+  // Firmware is the single source of truth for calibration profiles.
+  // Whenever a {"t":"P",...} packet arrives (or after any profile command),
+  // this stream emits the latest list so CalibrationManagerPage can rebuild.
+  final _profileListController =
+      StreamController<List<FirmwareProfile>>.broadcast();
+  Stream<List<FirmwareProfile>> get profileListStream =>
+      _profileListController.stream;
+  List<FirmwareProfile> _lastKnownProfiles = [];
+  List<FirmwareProfile> get lastKnownProfiles =>
+      List.unmodifiable(_lastKnownProfiles);
+  // ──────────────────────────────────────────────────────────────────────────
+
   final connectionStatus = ValueNotifier<DeviceConnectionStatus>(
     DeviceConnectionStatus.disconnected,
   );
@@ -520,6 +613,83 @@ class AlignEyeDeviceService {
     }
     return _writeTextCommand('ACTION=CALIBRATE_CANCEL');
   }
+
+  // ── Profile management commands (firmware = source of truth) ──────────────
+
+  /// Request full profile list from firmware.
+  /// Firmware responds with {"t":"P","profiles":[...]} → profileListStream emits.
+  Future<bool> getProfiles() async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({'cmd': 'GET_PROFILES'});
+  }
+
+  /// Start a new calibration that auto-assigns to the next available slot.
+  /// Use this instead of the old ACTION=CALIBRATE text command.
+  Future<bool> sendCalibrationStartJson({String name = 'Profile'}) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({
+      'cmd': 'CALIBRATE_START',
+      'slot': 'auto',
+      'name': name,
+    });
+  }
+
+  /// Set a profile as the default on firmware.
+  Future<bool> setDefaultProfile(int profileId) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({'cmd': 'PROFILE_SET_DEFAULT', 'id': profileId});
+  }
+
+  /// Select (activate) a profile for posture tracking.
+  Future<bool> selectProfile(int profileId) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({'cmd': 'PROFILE_SELECT', 'id': profileId});
+  }
+
+  /// Rename a profile on firmware.
+  Future<bool> renameProfile(int profileId, String name) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({
+      'cmd': 'PROFILE_RENAME',
+      'id': profileId,
+      'name': name,
+    });
+  }
+
+  /// Delete a profile from firmware storage.
+  Future<bool> deleteProfile(int profileId) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({'cmd': 'PROFILE_DELETE', 'id': profileId});
+  }
+
+  /// Erase all calibration profiles from firmware.
+  Future<bool> clearAllProfiles() async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+    return _writeJsonCommand({'cmd': 'PROFILE_CLEAR_ALL'});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Sends a JSON-encoded command without waiting for a response.
+  Future<bool> _writeJsonCommand(Map<String, dynamic> command) async {
+    return _writeTextCommand(jsonEncode(command));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Sends a JSON command (e.g. {"cmd":"GET_INFO"}) and waits up to
   /// [timeout] for a matching response on the notify characteristic.
@@ -1116,6 +1286,15 @@ class AlignEyeDeviceService {
         debugPrint(sent ? 'DateTime synced to device' : 'DateTime sync failed');
       });
 
+      // Fetch calibration profiles from firmware immediately on connect
+      // so CalibrationManagerPage always shows real firmware state.
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (connectionStatus.value == DeviceConnectionStatus.connected) {
+          getProfiles().then((_) =>
+              debugPrint('GET_PROFILES sent on connect'));
+        }
+      });
+
       // Save connection state: user has connected
       await _saveConnectionState(
         hasEverConnected: true,
@@ -1232,6 +1411,7 @@ class AlignEyeDeviceService {
     _reconnectTimer?.cancel();
     await disconnect();
     await _readingController.close();
+    await _profileListController.close();
     await _cleanupScan();
     connectionStatus.dispose();
     currentReading.dispose();
@@ -1749,8 +1929,29 @@ class AlignEyeDeviceService {
         }
         // debugPrint("PACKET TYPE = ${decoded['t']}");
         final pktType = decoded['t']?.toString().toUpperCase() ?? '';
+
+        // ── Profile list packet ─────────────────────────────────────────────
+        // Firmware sends {"t":"P","profiles":[...],"count":N,"max":8}
+        // after GET_PROFILES or any profile mutation command.
+        if (pktType == 'P') {
+          final rawList = decoded['profiles'];
+          final profiles = (rawList is List)
+              ? rawList
+              .whereType<Map<String, dynamic>>()
+              .map(FirmwareProfile.fromJson)
+              .toList()
+              : <FirmwareProfile>[];
+          _lastKnownProfiles = profiles;
+          _profileListController.add(profiles);  // always emit, even if empty
+          debugPrint('📋 PROFILE LIST => ${profiles.length} profiles');
+          return;
+        }
+        // ───────────────────────────────────────────────────────────────────
+
         if (pktType == 'C') {
-          debugPrint("📦 CALIB PACKET => isCalibrating=${decoded['isCalibrating']} phase=${decoded['c_phase']} result=${decoded['calibrationResult']} elap=${decoded['c_elap']}/${decoded['c_tot']}");
+          debugPrint("📦 CALIB PACKET => isCalibrating=${decoded['isCalibrating']} phase=${decoded['c_phase']} "
+              "result=${decoded['result'] ?? decoded['calibResult'] ?? decoded['calibrationResult']} "
+              "elap=${decoded['c_elap']}/${decoded['c_tot']}");
         }
         if (decoded is Map<String, dynamic>) {
           final reading = PostureReading.fromJson(decoded);
