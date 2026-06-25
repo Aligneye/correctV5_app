@@ -168,10 +168,12 @@ class PostureReading {
       // - sendCalibrationDone()     sends "result" with values "success"/"failed"
       // Normalize "success" → "complete" so CalibrationPage works uniformly.
       calibrationResult: () {
-        final v = json['calibrationResult']?.toString() ??
+        final v =
+            json['calibrationResult']?.toString() ??
             json['calibration_result']?.toString() ??
             json['calibResult']?.toString() ??
-            json['result']?.toString() ?? '';
+            json['result']?.toString() ??
+            '';
         if (v == 'success') return 'complete';
         return v;
       }(),
@@ -189,15 +191,13 @@ class PostureReading {
       calibrationRefZ: toDouble(json['z']),
       posture: json['posture']?.toString() ?? 'UNKNOWN',
       isBadPosture:
-      json['is_bad_posture'] == true ||
+          json['is_bad_posture'] == true ||
           json['is_bad_posture']?.toString() == 'true' ||
           (json['posture']?.toString().toUpperCase().contains('BAD') ?? false),
 
       batteryVoltage: toDouble(json['battery_voltage']),
       // batteryPercentage: toInt(json['battery_percentage']),
-      batteryPercentage: toInt(
-        json['battery_percentage'] ?? json['battery'],
-      ),
+      batteryPercentage: toInt(json['battery_percentage'] ?? json['battery']),
       profile: json['profile']?.toString() ?? '',
       difficultyDeg: toInt(json['difficulty_deg']),
       // Device sends shortened field names: t_patt, t_next, t_elap, t_rem
@@ -322,14 +322,31 @@ class FirmwareProfile {
   });
 
   factory FirmwareProfile.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic val) {
+      if (val is num) return val.toInt();
+      if (val is String) return int.tryParse(val) ?? 0;
+      return 0;
+    }
+
+    bool toBool(dynamic val) {
+      if (val == null) return false;
+      if (val is bool) return val;
+      if (val is num) return val != 0;
+      if (val is String) {
+        final lowered = val.toLowerCase();
+        return lowered == 'true' || lowered == '1';
+      }
+      return false;
+    }
+
     return FirmwareProfile(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      slot: (json['slot'] as num?)?.toInt() ?? 0,
-      name: json['name']?.toString() ?? 'Profile',
-      isActive: json['active'] == true,
-      isDefault: json['default'] == true,
-      createdEpoch: (json['created'] as num?)?.toInt() ?? 0,
-      quality: (json['quality'] as num?)?.toInt() ?? 0,
+      id: toInt(json['id']),
+      slot: toInt(json['slot'] ?? json['s']),
+      name: (json['name'] ?? json['n'])?.toString() ?? 'Profile',
+      isActive: toBool(json['active'] ?? json['a']),
+      isDefault: toBool(json['default'] ?? json['d']),
+      createdEpoch: toInt(json['created'] ?? json['c']),
+      quality: toInt(json['quality'] ?? json['q']),
     );
   }
 
@@ -611,7 +628,7 @@ class AlignEyeDeviceService {
     if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
     }
-    return _writeTextCommand('ACTION=CALIBRATE_CANCEL');
+    return _writeJsonCommand({'cmd': 'CALIBRATE_CANCEL'});
   }
 
   // ── Profile management commands (firmware = source of truth) ──────────────
@@ -756,10 +773,13 @@ class AlignEyeDeviceService {
       return null;
     }
 
-    final result = await completer.future.timeout(timeout, onTimeout: () {
-      debugPrint('JSON command timed out: $payload');
-      return null;
-    });
+    final result = await completer.future.timeout(
+      timeout,
+      onTimeout: () {
+        debugPrint('JSON command timed out: $payload');
+        return null;
+      },
+    );
 
     await rawSub.cancel();
     await sub.cancel();
@@ -768,10 +788,9 @@ class AlignEyeDeviceService {
 
   /// Sends {"cmd":"GET_INFO"} and returns a DeviceInfo on success.
   Future<DeviceInfo?> getDeviceInfo() async {
-    final resp = await sendJsonCommand(
-      {'cmd': 'GET_INFO'},
-      matcher: (m) => m['t'] == 'INFO',
-    );
+    final resp = await sendJsonCommand({
+      'cmd': 'GET_INFO',
+    }, matcher: (m) => m['t'] == 'INFO');
     if (resp == null) return null;
     return DeviceInfo.fromJson(resp);
   }
@@ -816,10 +835,13 @@ class AlignEyeDeviceService {
       }
     });
 
-    final result = await completer.future.timeout(timeout, onTimeout: () {
-      debugPrint('waitForNotification timed out');
-      return null;
-    });
+    final result = await completer.future.timeout(
+      timeout,
+      onTimeout: () {
+        debugPrint('waitForNotification timed out');
+        return null;
+      },
+    );
 
     await rawSub.cancel();
     return result;
@@ -1048,7 +1070,6 @@ class AlignEyeDeviceService {
         _connectionTimeoutTimer?.cancel();
         connectionStatus.value = DeviceConnectionStatus.disconnected;
 
-
         throw Exception(
           'Device "align pod" not found. Please ensure the device is powered on and within range.',
         );
@@ -1153,7 +1174,6 @@ class AlignEyeDeviceService {
               debugPrint('Failed to request MTU (non-fatal): $e');
             }
           }
-
         } catch (e) {
           debugPrint('Connection failed: $e');
 
@@ -1161,7 +1181,8 @@ class AlignEyeDeviceService {
           // after GATT connect.  The physical connection was established (GATT
           // connected), so treat this as a non-fatal hiccup and fall through to
           // service discovery rather than aborting the whole connect attempt.
-          final isMtuError = e.toString().toLowerCase().contains('requestmtu') ||
+          final isMtuError =
+              e.toString().toLowerCase().contains('requestmtu') ||
               e.toString().toLowerCase().contains('mtu');
           final deviceAfterError = _device;
           final stateAfterError = deviceAfterError == null
@@ -1290,8 +1311,7 @@ class AlignEyeDeviceService {
       // so CalibrationManagerPage always shows real firmware state.
       Future.delayed(const Duration(milliseconds: 500), () {
         if (connectionStatus.value == DeviceConnectionStatus.connected) {
-          getProfiles().then((_) =>
-              debugPrint('GET_PROFILES sent on connect'));
+          getProfiles().then((_) => debugPrint('GET_PROFILES sent on connect'));
         }
       });
 
@@ -1300,9 +1320,7 @@ class AlignEyeDeviceService {
         hasEverConnected: true,
         lastConnectedDeviceId: _device?.remoteId.toString(),
       );
-      debugPrint(
-        'Saved connection state: hasEverConnected=true',
-      );
+      debugPrint('Saved connection state: hasEverConnected=true');
 
       debugPrint('Connection established successfully');
     } catch (e) {
@@ -1311,7 +1329,6 @@ class AlignEyeDeviceService {
       _connectionTimeoutTimer?.cancel();
       await disconnect();
       connectionStatus.value = DeviceConnectionStatus.disconnected;
-
     }
   }
 
@@ -1389,7 +1406,9 @@ class AlignEyeDeviceService {
       final bonded = await FlutterBluePlus.bondedDevices;
       for (final dev in bonded) {
         if (_matchesTargetDeviceName(dev.platformName)) {
-          debugPrint('Unpairing bonded target device: ${dev.platformName} (${dev.remoteId})');
+          debugPrint(
+            'Unpairing bonded target device: ${dev.platformName} (${dev.remoteId})',
+          );
           await _unpairDevice(dev);
         }
       }
@@ -1471,7 +1490,9 @@ class AlignEyeDeviceService {
       }
       final bondedDevices = await FlutterBluePlus.bondedDevices;
       return bondedDevices.any(
-        (device) => device.remoteId.toString().toLowerCase() == preferredId.toLowerCase(),
+        (device) =>
+            device.remoteId.toString().toLowerCase() ==
+            preferredId.toLowerCase(),
       );
     } catch (e) {
       debugPrint('Error checking bonded target devices: $e');
@@ -1626,7 +1647,9 @@ class AlignEyeDeviceService {
       final deviceId = device.remoteId.toString().toLowerCase();
       if (normalizedPreferredId != null) {
         if (deviceId == normalizedPreferredId) {
-          debugPrint('Found preferred connected device: ${device.platformName}');
+          debugPrint(
+            'Found preferred connected device: ${device.platformName}',
+          );
           return device;
         }
       } else {
@@ -1812,7 +1835,6 @@ class AlignEyeDeviceService {
   }
 
   void _handleNotifyData(List<int> data) {
-
     if (data.isEmpty) return;
     final rawData = utf8.decode(data, allowMalformed: true);
     // debugPrint("BLE RAW: $rawData");
@@ -1844,7 +1866,6 @@ class AlignEyeDeviceService {
       int end = -1;
       bool inString = false;
       bool escape = false;
-      bool restartFromNestedStart = false;
       for (int i = 0; i < _buffer.length; i++) {
         final ch = _buffer[i];
         if (escape) {
@@ -1861,11 +1882,6 @@ class AlignEyeDeviceService {
         }
         if (inString) continue;
         if (ch == '{') {
-          if (depth > 0) {
-            _buffer = _buffer.substring(i);
-            restartFromNestedStart = true;
-            break;
-          }
           depth++;
         }
         if (ch == '}') {
@@ -1875,10 +1891,6 @@ class AlignEyeDeviceService {
             break;
           }
         }
-      }
-
-      if (restartFromNestedStart) {
-        continue;
       }
 
       if (end == -1) {
@@ -1895,9 +1907,7 @@ class AlignEyeDeviceService {
       _buffer = _buffer.substring(end + 1);
       try {
         final decoded = jsonDecode(chunk);
-        final packetType =
-
-        (decoded['t']?.toString() ?? '').toUpperCase();
+        final packetType = (decoded['t']?.toString() ?? '').toUpperCase();
 
         if (packetType == 'T') {
           if (decoded['mode'] != null) {
@@ -1910,7 +1920,9 @@ class AlignEyeDeviceService {
             _lastKnownProfile = decoded['profile'].toString();
           }
           if (decoded['battery'] != null) {
-            _lastKnownBattery = int.tryParse(decoded['battery'].toString()) ?? _lastKnownBattery;
+            _lastKnownBattery =
+                int.tryParse(decoded['battery'].toString()) ??
+                _lastKnownBattery;
           }
           return;
         }
@@ -1937,21 +1949,23 @@ class AlignEyeDeviceService {
           final rawList = decoded['profiles'];
           final profiles = (rawList is List)
               ? rawList
-              .whereType<Map<String, dynamic>>()
-              .map(FirmwareProfile.fromJson)
-              .toList()
+                    .whereType<Map<String, dynamic>>()
+                    .map(FirmwareProfile.fromJson)
+                    .toList()
               : <FirmwareProfile>[];
           _lastKnownProfiles = profiles;
-          _profileListController.add(profiles);  // always emit, even if empty
+          _profileListController.add(profiles); // always emit, even if empty
           debugPrint('📋 PROFILE LIST => ${profiles.length} profiles');
           return;
         }
         // ───────────────────────────────────────────────────────────────────
 
         if (pktType == 'C') {
-          debugPrint("📦 CALIB PACKET => isCalibrating=${decoded['isCalibrating']} phase=${decoded['c_phase']} "
-              "result=${decoded['result'] ?? decoded['calibResult'] ?? decoded['calibrationResult']} "
-              "elap=${decoded['c_elap']}/${decoded['c_tot']}");
+          debugPrint(
+            "📦 CALIB PACKET => isCalibrating=${decoded['isCalibrating']} phase=${decoded['c_phase']} "
+            "result=${decoded['result'] ?? decoded['calibResult'] ?? decoded['calibrationResult']} "
+            "elap=${decoded['c_elap']}/${decoded['c_tot']}",
+          );
         }
         if (decoded is Map<String, dynamic>) {
           final reading = PostureReading.fromJson(decoded);
@@ -2051,9 +2065,7 @@ class AlignEyeDeviceService {
       _connectionRetryCount = 0;
 
       // Save state: user has connected again
-      _saveConnectionState(
-        lastConnectedDeviceId: _device?.remoteId.toString(),
-      );
+      _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
 
       // Verify connection is actually working
       _verifyConnection().then((isValid) {

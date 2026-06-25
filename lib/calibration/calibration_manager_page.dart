@@ -89,6 +89,14 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 
     // Always fetch fresh from firmware
     await widget.deviceService.getProfiles();
+
+    // Fallback: stop loading if firmware doesn't respond or completes in 3 seconds
+    Timer(const Duration(seconds: 3), () {
+      if (mounted && _loading) {
+        setState(() => _loading = false);
+        _fadeController.forward();
+      }
+    });
   }
 
   Future<void> _refreshProfiles() async {

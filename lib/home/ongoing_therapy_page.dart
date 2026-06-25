@@ -45,6 +45,8 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   String _lastPatternName = '';
   bool _sessionEndedByDevice = false;
   bool _stopping = false;
+  bool _hasSeenValidTherapyFrame = false;
+  late final DateTime _pageOpenedAt;
   int? _lastKnownPatternDurationSeconds;
 
   // Local 1 Hz tick keeps the countdown buttery-smooth between BLE frames
@@ -101,6 +103,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
 
   @override
   void initState() {
+    _pageOpenedAt = DateTime.now();
     super.initState();
     _totalDurationSeconds = widget.durationMinutes * 60;
     _intensityLevel = widget.intensity;
@@ -157,7 +160,12 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
 
     // Prime state from the current reading if available (e.g. if the user
     // reopens this page after a late reconnect while therapy is running).
-    _consumeReading(widget.deviceService.currentReading.value);
+    final cached = widget.deviceService.currentReading.value;
+    if (cached != null &&
+        cached.mode.toUpperCase() == 'THERAPY' &&
+        cached.therapyRemainingSeconds > 0) {
+      _consumeReading(cached);
+    }
 
     // If the current reading already shows THERAPY mode (e.g. re-entry to
     // this page mid-session), skip the "Starting..." overlay immediately.
@@ -338,9 +346,16 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
 
     setState(() {
       if (!isTherapy) {
-        // Device is no longer in therapy mode. Either the session finished
-        // naturally on-device or we were stopped. Snap the UI to complete.
-        if (_totalRemainingSeconds == 0 || _totalElapsedSeconds > 0) {
+        final startupWindowPassed =
+            DateTime.now().difference(_pageOpenedAt) > const Duration(seconds: 5);
+
+        final sessionActuallyNearEnd =
+            _totalDurationSeconds > 0 &&
+            _totalElapsedSeconds >= (_totalDurationSeconds - 2);
+
+        if (_hasSeenValidTherapyFrame &&
+            startupWindowPassed &&
+            sessionActuallyNearEnd) {
           _sessionEndedByDevice = true;
           _totalRemainingSeconds = 0;
           _breathController.stop();
@@ -348,6 +363,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
           _localTicker?.cancel();
           _localTicker = null;
         }
+
         return;
       }
 
@@ -434,7 +450,17 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         });
       }
 
-      if (remaining <= 0 && elapsed > 0) {
+      if (remaining > 0) {
+        _hasSeenValidTherapyFrame = true;
+      }
+
+      final sessionActuallyCompleted =
+          _hasSeenValidTherapyFrame &&
+          remaining <= 0 &&
+          _totalDurationSeconds > 0 &&
+          elapsed >= (_totalDurationSeconds - 2);
+
+      if (sessionActuallyCompleted) {
         _sessionEndedByDevice = true;
       }
     });

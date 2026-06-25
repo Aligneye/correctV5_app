@@ -92,7 +92,10 @@ class _CalibrationPageState extends State<CalibrationPage>
     );
 
     _readingSubscription = widget.deviceService.readings.listen(_onReading);
-    _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) => _onTick());
+    _ticker = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) => _onTick(),
+    );
 
     if (widget.autoStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -115,7 +118,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   bool get _isConnected =>
       widget.deviceService.connectionStatus.value ==
-          DeviceConnectionStatus.connected;
+      DeviceConnectionStatus.connected;
 
   Future<void> _startCalibration() async {
     if (!_isConnected) {
@@ -147,13 +150,16 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
   }
 
-
   void _onReading(PostureReading reading) {
-    if (reading.isCalibrating || reading.calibrationResult.isNotEmpty || reading.calibrationPhase != 'IDLE') {
-      debugPrint('CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
-          'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
-          'elapsed=${reading.calibrationElapsedMs}');
-    }
+    // if (reading.isCalibrating ||
+    //     reading.calibrationResult.isNotEmpty ||
+    //     reading.calibrationPhase != 'IDLE') {
+    //   debugPrint(
+    //     'CAL_DEBUG: stage=$_stage, isCalibrating=${reading.isCalibrating}, '
+    //     'result="${reading.calibrationResult}", phase=${reading.calibrationPhase}, '
+    //     'elapsed=${reading.calibrationElapsedMs}',
+    //   );
+    // }
     if (reading.calibrationResult == 'cancelled') {
       if (mounted) Navigator.of(context).pop(false);
       return;
@@ -169,12 +175,10 @@ class _CalibrationPageState extends State<CalibrationPage>
     _deviceElapsedMs = reading.calibrationElapsedMs;
     _devicePhase = reading.calibrationPhase;
 
-
     // Bug 1 fix: handle complete/failed immediately regardless of stage or elapsed
     // time. The old guard (stage != starting && elapsed > 2000ms) caused the UI
     // to stick on "Starting" forever when calibration failed in under 2 seconds.
-    if (reading.calibrationResult.isNotEmpty &&
-        _startRequestedAt != null) {
+    if (reading.calibrationResult.isNotEmpty && _startRequestedAt != null) {
       // Capture quality score and fail reason before transitioning
       _calibrationQuality = reading.calibrationQuality;
       _failReason = reading.calibrationFailReason;
@@ -185,9 +189,11 @@ class _CalibrationPageState extends State<CalibrationPage>
     // already handled at the top of _onReading before this block).
 
     // Transition to getReady when device starts calibrating and phase is GET_READY
-    if ((_stage == _CalibrationStage.starting || _stage == _CalibrationStage.intro) &&
+    if ((_stage == _CalibrationStage.starting ||
+            _stage == _CalibrationStage.intro) &&
         reading.isCalibrating &&
-        (reading.calibrationPhase == 'GET_READY' || reading.calibrationPhase.isEmpty)) {
+        (reading.calibrationPhase == 'GET_READY' ||
+            reading.calibrationPhase.isEmpty)) {
       _getReadyStartedAt ??= DateTime.now();
       setState(() => _stage = _CalibrationStage.getReady);
       return;
@@ -196,8 +202,7 @@ class _CalibrationPageState extends State<CalibrationPage>
     // Phase transitions from device (BLE-driven)
     // Bug 3 fix: set _bleHoldStillReceived so _onTick() wall-clock fallback
     // does not fire a second advance after BLE has already done it.
-    if (_stage == _CalibrationStage.getReady &&
-        _devicePhase == 'HOLD_STILL') {
+    if (_stage == _CalibrationStage.getReady && _devicePhase == 'HOLD_STILL') {
       _bleHoldStillReceived = true;
       _deviceHoldStartMs = _deviceElapsedMs;
       _holdStillStartedAt ??= DateTime.now();
@@ -206,7 +211,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     // Calibration cancelled from device
     if ((_stage == _CalibrationStage.getReady ||
-        _stage == _CalibrationStage.holdStill) &&
+            _stage == _CalibrationStage.holdStill) &&
         !reading.isCalibrating &&
         reading.calibrationResult.isEmpty) {
       _cancelMissCount++;
@@ -253,6 +258,7 @@ class _CalibrationPageState extends State<CalibrationPage>
           } catch (_) {}
         }
       }
+
       unawaited(syncMode());
 
       _successAutoCloseTimer?.cancel();
@@ -283,7 +289,9 @@ class _CalibrationPageState extends State<CalibrationPage>
         setState(() => _stage = _CalibrationStage.disconnected);
         return;
       }
-      final elapsed = DateTime.now().difference(_startRequestedAt ?? DateTime.now());
+      final elapsed = DateTime.now().difference(
+        _startRequestedAt ?? DateTime.now(),
+      );
       if (elapsed >= _startDetectTimeout) {
         setState(() => _stage = _CalibrationStage.failed);
         _failedBarController.forward();
@@ -316,13 +324,22 @@ class _CalibrationPageState extends State<CalibrationPage>
       final anchor = _holdStillStartedAt;
       if (anchor != null) {
         final wallElapsed = DateTime.now().difference(anchor).inMilliseconds;
-        if (wallElapsed >= _holdStillMs + 3000) {
-          // 3 sec grace beyond expected holdStill duration — device likely silent/disconnected
+        if (wallElapsed >= _holdStillMs + 15000) {
+          // 15 sec grace beyond expected holdStill duration — device likely silent/disconnected
           _handleCalibrationResult(false);
           return;
         }
       }
       setState(() {});
+    }
+  }
+
+  void _cancelCalibrationOnExit() {
+    final inProgress = _stage == _CalibrationStage.starting ||
+        _stage == _CalibrationStage.getReady ||
+        _stage == _CalibrationStage.holdStill;
+    if (inProgress && _isConnected) {
+      widget.deviceService.sendCalibrationCancel();
     }
   }
 
@@ -365,14 +382,20 @@ class _CalibrationPageState extends State<CalibrationPage>
   int get _getReadyWallElapsedMs {
     final anchor = _getReadyStartedAt;
     if (anchor == null) return 0;
-    return DateTime.now().difference(anchor).inMilliseconds.clamp(0, _getReadyMs);
+    return DateTime.now()
+        .difference(anchor)
+        .inMilliseconds
+        .clamp(0, _getReadyMs);
   }
 
   // Wall-clock elapsed for HOLD_STILL phase
   int get _holdStillWallElapsedMs {
     final anchor = _holdStillStartedAt;
     if (anchor == null) return 0;
-    return DateTime.now().difference(anchor).inMilliseconds.clamp(0, _holdStillMs);
+    return DateTime.now()
+        .difference(anchor)
+        .inMilliseconds
+        .clamp(0, _holdStillMs);
   }
 
   int _getReadyRemainingSeconds() {
@@ -392,7 +415,8 @@ class _CalibrationPageState extends State<CalibrationPage>
   }
 
   double _getHoldStillProgress() {
-    final elapsedMs = _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
+    final elapsedMs =
+        _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
         ? _deviceElapsedMs - _deviceHoldStartMs
         : _holdStillWallElapsedMs;
     return (elapsedMs / _holdStillMs).clamp(0.0, 1.0);
@@ -400,14 +424,22 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D1A1D),
-      body: SafeArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 400),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          child: _buildStage(context),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _cancelCalibrationOnExit();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0D1A1D),
+        body: SafeArea(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 400),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: _buildStage(context),
+          ),
         ),
       ),
     );
@@ -463,7 +495,8 @@ class _CalibrationPageState extends State<CalibrationPage>
           icon: Icons.check_circle_rounded,
           color: const Color(0xFF14B8A6),
           title: 'Calibration Complete',
-          message: 'Your ideal posture has been saved.\nPosture tracking started.',
+          message:
+              'Your ideal posture has been saved.\nPosture tracking started.',
           subText: _calibrationQuality > 0
               ? 'Quality: ${_qualityLabel(_calibrationQuality)} ($_calibrationQuality%)'
               : 'Auto return → Training Screen',
@@ -532,8 +565,11 @@ class _IntroScreen extends StatelessWidget {
             ),
             child: Column(
               children: [
-                Icon(Icons.airline_seat_recline_normal_rounded,
-                    size: 48, color: const Color(0xFF008090).withValues(alpha: 0.9)),
+                Icon(
+                  Icons.airline_seat_recline_normal_rounded,
+                  size: 48,
+                  color: const Color(0xFF008090).withValues(alpha: 0.9),
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'Sit comfortably in your natural upright posture.\nKeep your back straight and shoulders relaxed.',
@@ -666,7 +702,6 @@ class _GetReadyScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scale = 0.97 + (pulse.value * 0.06);
     return Container(
       key: key,
       padding: const EdgeInsets.fromLTRB(28, 48, 28, 36),
@@ -692,9 +727,10 @@ class _GetReadyScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 36),
-          AnimatedScale(
-            scale: scale,
-            duration: const Duration(milliseconds: 150),
+          ScaleTransition(
+            scale: Tween<double>(begin: 0.97, end: 1.03).animate(
+              CurvedAnimation(parent: pulse, curve: Curves.easeInOut),
+            ),
             child: Container(
               width: 140,
               height: 140,
@@ -733,7 +769,13 @@ class _GetReadyScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            countdown == 3 ? '(3…2…1)' : countdown == 2 ? '(2…1)' : countdown == 1 ? '(1)' : '',
+            countdown == 3
+                ? '(3…2…1)'
+                : countdown == 2
+                ? '(2…1)'
+                : countdown == 1
+                ? '(1)'
+                : '',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -758,7 +800,6 @@ class _HoldStillScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scale = 0.98 + (pulse.value * 0.04);
     return Container(
       key: key,
       padding: const EdgeInsets.fromLTRB(28, 48, 28, 36),
@@ -784,9 +825,10 @@ class _HoldStillScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 40),
-          AnimatedScale(
-            scale: scale,
-            duration: const Duration(milliseconds: 150),
+          ScaleTransition(
+            scale: Tween<double>(begin: 0.98, end: 1.02).animate(
+              CurvedAnimation(parent: pulse, curve: Curves.easeInOut),
+            ),
             child: SizedBox(
               width: 220,
               height: 220,
@@ -813,7 +855,7 @@ class _HoldStillScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Calibrating...',
+                        progress >= 1.0 ? 'Saving...' : 'Calibrating...',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
