@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
+import 'package:correctv1/services/angle_history_service.dart';
 import 'package:correctv1/services/ble_session_sync.dart';
 import 'package:correctv1/services/live_session_recorder.dart';
 
@@ -29,7 +30,7 @@ class DeviceManager {
 
   /// Latest progress snapshot, or null if no sync has started yet.
   final ValueNotifier<SyncProgress?> lastProgress =
-      ValueNotifier<SyncProgress?>(null);
+  ValueNotifier<SyncProgress?>(null);
 
   /// Bumps on every sync completion or live-session change; pages can watch
   /// this to trigger a reload of the session list.
@@ -68,6 +69,12 @@ class DeviceManager {
     if (_wired) return;
     _wired = true;
     _btManager.deviceService.connectionStatus.addListener(_onStatusChanged);
+
+    // Wire AngleHistoryService - captures live angle from every BLE reading.
+    AngleHistoryService().init(
+      _btManager.deviceService.readings.map((r) => r.angle),
+    );
+
     _liveSessionRecorder = LiveSessionRecorder(
       deviceService: _btManager.deviceService,
       activeSessionId: activeSessionId,
@@ -155,7 +162,7 @@ class DeviceManager {
         _syncDeferredForLiveSession = true;
         debugPrint(
           'DeviceManager: live session already active on reconnect, '
-          'deferring BLE sync until it ends',
+              'deferring BLE sync until it ends',
         );
       } else {
         unawaited(_startSync());
@@ -192,7 +199,7 @@ class DeviceManager {
     isSyncing.value = true;
 
     _progressSub = sync.progress.listen(
-      (p) {
+          (p) {
         lastProgress.value = p;
         if (p.complete) {
           debugPrint('DeviceManager: sync complete');

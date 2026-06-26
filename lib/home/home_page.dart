@@ -20,6 +20,7 @@ import 'package:correctv1/sessions/sessions_history_page.dart';
 import 'package:correctv1/settings/settings_page.dart';
 import 'package:correctv1/components/nav_bar.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
+import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
@@ -2184,6 +2185,11 @@ class _HomeDashboardState extends State<HomeDashboard>
                 delayMs: 400,
                 child: _CalibrationCard(
                   onCalibratePressed: () async {
+                    if (_deviceService.connectionStatus.value !=
+                        DeviceConnectionStatus.connected) {
+                      await showPodDisconnectedDialog(context);
+                      return;
+                    }
                     final result = await Navigator.of(context).push<bool>(
                       MaterialPageRoute<bool>(
                         builder: (_) => CalibrationManagerPage(

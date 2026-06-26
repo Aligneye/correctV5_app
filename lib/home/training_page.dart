@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../bluetooth/aligneye_device_service.dart';
+import '../bluetooth/pod_disconnected_dialog.dart';
 
 class TrainingPage extends StatefulWidget {
 
@@ -70,7 +71,18 @@ class _TrainingPageState extends State<TrainingPage>
     super.dispose();
   }
 
-  void _toggleTraining() {
+  Future<void> _toggleTraining() async {
+    // Only show disconnect dialog when trying to START (not stop)
+    if (!_isRunning &&
+        widget.deviceService.connectionStatus.value !=
+            DeviceConnectionStatus.connected) {
+      await showPodDisconnectedDialog(
+        context,
+        subtitle:
+            'Connect your AlignEye Pod to start a training session.',
+      );
+      return;
+    }
     HapticFeedback.mediumImpact();
     final newState = !_isRunning;
     setState(() => _isRunning = newState);
