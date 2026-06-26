@@ -1,26 +1,94 @@
+import 'package:correctv1/bluetooth/aligneye_device_service.dart';
+import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/bluetooth/device_connect_page.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
-/// Shows a themed dialog when the Pod is disconnected and the user tries to
-/// perform a device-dependent action.
-///
-/// [subtitle] overrides the default description text so each call site can
-/// explain what requires a connection (calibration, training, therapy, etc.).
-///
-/// "Tap to Connect" navigates to [DeviceConnectPage] — identical behaviour to
-/// the header pill on the home page. "Cancel" simply closes the dialog.
+/// Shows the "AlignEye Pod is Disconnected" dialog.
+/// If the user taps "Tap to Connect", checks BLE readiness using the
+/// caller's [context] (which stays mounted after the dialog closes),
+/// then navigates to [DeviceConnectPage].
 Future<void> showPodDisconnectedDialog(
   BuildContext context, {
-  String subtitle =
-      'Connect your AlignEye Pod to start calibration.',
+  String subtitle = 'Connect your AlignEye Pod to start calibration.',
 }) async {
-  await showDialog<void>(
+  final shouldConnect = await showDialog<bool>(
     context: context,
     barrierDismissible: true,
     builder: (ctx) => _PodDisconnectedDialog(subtitle: subtitle),
   );
+
+  if (shouldConnect != true) return;
+  if (!context.mounted) return;
+
+  // BLE readiness check runs in caller's context — still alive after dialog close.
+  final ready = await _ensureBleReady(context);
+  if (!ready || !context.mounted) return;
+
+  await Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
+  );
+}
+
+Future<bool> _ensureBleReady(BuildContext context) async {
+  final deviceService = BluetoothServiceManager().deviceService;
+  final readiness = await deviceService.checkReadiness();
+  if (!context.mounted) return false;
+
+  switch (readiness) {
+    case BleReadiness.ready:
+      return true;
+
+    case BleReadiness.bluetoothUnsupported:
+      _showSnack(context, 'Bluetooth is not supported on this device.');
+      return false;
+
+    case BleReadiness.bluetoothOff:
+      try {
+        await FlutterBluePlus.turnOn();
+        final on = await FlutterBluePlus.adapterState
+            .where((s) => s == BluetoothAdapterState.on)
+            .first
+            .timeout(const Duration(seconds: 8));
+        if (on == BluetoothAdapterState.on) return true;
+      } catch (_) {}
+      if (!context.mounted) return false;
+      _showSnack(
+        context,
+        'Bluetooth is required to connect. Please enable it and try again.',
+      );
+      return false;
+
+    case BleReadiness.permissionDenied:
+      _showSnack(
+        context,
+        'Bluetooth permissions are required. Please grant them and try again.',
+      );
+      return false;
+
+    case BleReadiness.permissionPermanentlyDenied:
+      if (!context.mounted) return false;
+      _showSnack(context, 'Bluetooth permissions were denied. Opening settings…');
+      await openAppSettings();
+      return false;
+  }
+}
+
+void _showSnack(BuildContext context, String message) {
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 3),
+      ),
+    );
 }
 
 class _PodDisconnectedDialog extends StatelessWidget {
@@ -57,7 +125,7 @@ class _PodDisconnectedDialog extends StatelessWidget {
 
             // Title
             const Text(
-              'Your Pod is Disconnected',
+              'AlignEye Pod is Disconnected',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textPrimary,
@@ -72,7 +140,7 @@ class _PodDisconnectedDialog extends StatelessWidget {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 14,
                 height: 1.45,
@@ -103,12 +171,8 @@ class _PodDisconnectedDialog extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      Navigator.of(context).pop(); // close dialog
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const DeviceConnectPage(),
-                        ),
-                      );
+                      // Return true — caller handles BLE check + navigation
+                      Navigator.of(context).pop(true);
                     },
                     child: const Center(
                       child: Text(
@@ -136,14 +200,12 @@ class _PodDisconnectedDialog extends StatelessWidget {
                   foregroundColor: AppTheme.textSecondary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(
-                      color: AppTheme.border,
-                    ),
+                    side: const BorderSide(color: AppTheme.border),
                   ),
                 ),
                 onPressed: () {
                   HapticFeedback.selectionClick();
-                  Navigator.of(context).pop();
+                  Navigator.of(context).pop(false);
                 },
                 child: const Text(
                   'Cancel',
