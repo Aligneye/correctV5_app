@@ -13,7 +13,7 @@ Future<void> initBackgroundService() async {
 
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
     _kNotificationChannelId,
-    'AlignEye Tracking',
+    'Align Tracking',
     description: 'Posture and therapy background tracking',
     importance: Importance.low,
   );
@@ -31,7 +31,7 @@ Future<void> initBackgroundService() async {
       autoStart: false,
       isForegroundMode: true,
       notificationChannelId: _kNotificationChannelId,
-      initialNotificationTitle: 'AlignEye',
+      initialNotificationTitle: 'Align',
       initialNotificationContent: 'Tracking your posture...',
       foregroundServiceNotificationId: _kNotificationId,
     ),
@@ -85,7 +85,7 @@ void onBgStart(ServiceInstance service) async {
     // Foreground notification update
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
-        title: 'AlignEye',
+        title: 'Align',
         content: content,
       );
     }
@@ -94,12 +94,12 @@ void onBgStart(ServiceInstance service) async {
     if (isBad) {
       await notifications.show(
         _kNotificationId + 1,
-        'AlignEye Alert',
+        'Align Alert',
         '⚠️ Bad posture detected! Please correct your posture.',
         NotificationDetails(
           android: AndroidNotificationDetails(
             _kNotificationChannelId,
-            'AlignEye Tracking',
+            'Align Tracking',
             importance: Importance.high,
             priority: Priority.high,
             enableVibration: true,

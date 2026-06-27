@@ -79,7 +79,7 @@ class _TrainingPageState extends State<TrainingPage>
       await showPodDisconnectedDialog(
         context,
         subtitle:
-            'Connect your AlignEye Pod to start a training session.',
+            'Connect your Align Pod to start a training session.',
       );
       return;
     }

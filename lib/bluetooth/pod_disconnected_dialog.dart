@@ -7,13 +7,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-/// Shows the "AlignEye Pod is Disconnected" dialog.
+/// Shows the "Align Pod is Disconnected" dialog.
 /// If the user taps "Tap to Connect", checks BLE readiness using the
 /// caller's [context] (which stays mounted after the dialog closes),
 /// then navigates to [DeviceConnectPage].
 Future<void> showPodDisconnectedDialog(
   BuildContext context, {
-  String subtitle = 'Connect your AlignEye Pod to start calibration.',
+  String subtitle = 'Connect your Align Pod to start calibration.',
 }) async {
   final shouldConnect = await showDialog<bool>(
     context: context,
@@ -125,7 +125,7 @@ class _PodDisconnectedDialog extends StatelessWidget {
 
             // Title
             const Text(
-              'AlignEye Pod is Disconnected',
+              'Align Pod is Disconnected',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textPrimary,

@@ -132,7 +132,7 @@ class _TherapyPageState extends State<TherapyPage>
       await showPodDisconnectedDialog(
         context,
         subtitle:
-            'Connect your AlignEye Pod to start a therapy session.',
+            'Connect your Align Pod to start a therapy session.',
       );
       return;
     }
@@ -196,7 +196,7 @@ class _TherapyPageState extends State<TherapyPage>
         behavior: SnackBarBehavior.floating,
         backgroundColor: const Color(0xFF1F2937),
         content: Text(
-          message ?? 'Connect your Aligneye pod to start therapy.',
+          message ?? 'Connect your Align Pod to start therapy.',
           style: const TextStyle(color: Colors.white),
         ),
         duration: const Duration(seconds: 2),

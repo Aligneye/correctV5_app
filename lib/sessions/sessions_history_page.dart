@@ -314,7 +314,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
               ),
               SizedBox(height: 6),
               Text(
-                'Wear your Aligneye Pod and start a posture or therapy '
+                'Wear your Align Pod and start a posture or therapy '
                 'session — it’ll show up here automatically.',
                 textAlign: TextAlign.center,
                 style: TextStyle(

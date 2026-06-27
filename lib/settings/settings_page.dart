@@ -363,7 +363,7 @@ class _DeviceInfoCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'AlignEye Pro',
+                      'Align Pro',
                       style: TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 16,
