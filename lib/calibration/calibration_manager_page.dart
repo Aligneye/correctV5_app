@@ -1,73 +1,10 @@
-import 'dart:convert';
+import 'dart:async';
 
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/calibration/calibration_page.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Model
-// ─────────────────────────────────────────────────────────────────────────────
-
-class SavedCalibration {
-  final int id;
-  final String name;
-  final DateTime createdAt;
-  final bool isDefault;
-
-  const SavedCalibration({
-    required this.id,
-    required this.name,
-    required this.createdAt,
-    required this.isDefault,
-  });
-
-  SavedCalibration copyWith({int? id, String? name, DateTime? createdAt, bool? isDefault}) {
-    return SavedCalibration(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      createdAt: createdAt ?? this.createdAt,
-      isDefault: isDefault ?? this.isDefault,
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'createdAt': createdAt.toIso8601String(),
-    'isDefault': isDefault,
-  };
-
-  factory SavedCalibration.fromJson(Map<String, dynamic> json) => SavedCalibration(
-    id: json['id'] as int,
-    name: json['name'] as String,
-    createdAt: DateTime.parse(json['createdAt'] as String),
-    isDefault: json['isDefault'] as bool,
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Storage helper
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _CalibrationStorage {
-  static const String _key = 'saved_calibrations';
-
-  static Future<List<SavedCalibration>> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    if (raw == null) return [];
-    final List<dynamic> list = jsonDecode(raw) as List<dynamic>;
-    return list.map((e) => SavedCalibration.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  static Future<void> save(List<SavedCalibration> items) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(items.map((e) => e.toJson()).toList()));
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Page
@@ -87,9 +24,11 @@ class CalibrationManagerPage extends StatefulWidget {
 
 class _CalibrationManagerPageState extends State<CalibrationManagerPage>
     with SingleTickerProviderStateMixin {
-  List<SavedCalibration> _calibrations = [];
+  List<FirmwareProfile> _profiles = [];
   bool _loading = true;
+  bool _actionInProgress = false;
   late final AnimationController _fadeController;
+  StreamSubscription<List<FirmwareProfile>>? _profileListSub;
 
   static const int _maxSlots = 8;
 
@@ -100,79 +39,93 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _loadCalibrations();
+    _initProfiles();
   }
 
   @override
   void dispose() {
+    _profileListSub?.cancel();
     _fadeController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadCalibrations() async {
-    final list = await _CalibrationStorage.load();
-    if (!mounted) return;
-
-    if (list.isEmpty) {
-      final defaultCal = SavedCalibration(
-        id: 1,
-        name: 'Calibration 1',
-        createdAt: DateTime.now(),
-        isDefault: true,
-      );
-      await _CalibrationStorage.save([defaultCal]);
+  Future<void> _initProfiles() async {
+    // Subscribe to live firmware profile updates
+    _profileListSub = widget.deviceService.profileListStream.listen((profiles) {
+      if (!mounted) return;
       setState(() {
-        _calibrations = [defaultCal];
+        _profiles = profiles;
         _loading = false;
+        debugPrint('📋 Manager got ${profiles.length} profiles');
+        _actionInProgress = false;
       });
-    } else {
-      setState(() {
-        _calibrations = list;
-        _loading = false;
-      });
-    }
-    _fadeController.forward();
-  }
-
-  Future<void> _saveCalibrations() async {
-    await _CalibrationStorage.save(_calibrations);
-  }
-
-  void _setDefault(SavedCalibration cal) {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _calibrations = _calibrations.map((c) => c.copyWith(isDefault: c.id == cal.id)).toList();
+      if (!_fadeController.isAnimating && _fadeController.value < 1.0) {
+        _fadeController.forward();
+      }
     });
-    _saveCalibrations();
+
+    // Seed UI immediately from cache if available
+    final cached = widget.deviceService.lastKnownProfiles;
+    if (cached.isNotEmpty && mounted) {
+      setState(() {
+        _profiles = cached;
+        _loading = false;
+      });
+      _fadeController.forward();
+    }
+
+    // If device is not connected, getProfiles() returns false immediately
+    // and profileListStream never emits — causing infinite loading spinner.
+    // Stop loading right away when disconnected.
+    final isConnected = widget.deviceService.connectionStatus.value ==
+        DeviceConnectionStatus.connected;
+    if (!isConnected) {
+      if (mounted && _loading) {
+        setState(() => _loading = false);
+        _fadeController.forward();
+      }
+      return;
+    }
+
+    // Always fetch fresh from firmware
+    await widget.deviceService.getProfiles();
+
+    // Fallback: stop loading if firmware doesn't respond or completes in 3 seconds
+    Timer(const Duration(seconds: 3), () {
+      if (mounted && _loading) {
+        setState(() => _loading = false);
+        _fadeController.forward();
+      }
+    });
   }
 
-  Future<void> _deleteCalibration(SavedCalibration cal) async {
+  Future<void> _refreshProfiles() async {
+    await widget.deviceService.getProfiles();
+  }
+
+  Future<void> _setDefault(FirmwareProfile profile) async {
+    if (_actionInProgress) return;
+    HapticFeedback.selectionClick();
+    setState(() => _actionInProgress = true);
+    await widget.deviceService.setDefaultProfile(profile.id);
+    await widget.deviceService.getProfiles();
+  }
+
+  Future<void> _deleteProfile(FirmwareProfile profile) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => _DeleteDialog(calibration: cal),
+      builder: (ctx) => _DeleteDialog(profileName: profile.name, isDefault: profile.isDefault),
     );
     if (confirmed != true || !mounted) return;
 
     HapticFeedback.mediumImpact();
-    setState(() {
-      _calibrations.removeWhere((c) => c.id == cal.id);
-      _calibrations = _calibrations.asMap().entries.map((e) {
-        final newId = e.key + 1;
-        final c = e.value;
-        final autoName = RegExp(r'^Calibration \d+$').hasMatch(c.name)
-            ? 'Calibration $newId'
-            : c.name;
-        return c.copyWith(id: newId, name: autoName);
-      }).toList();
-      if (_calibrations.isNotEmpty && !_calibrations.any((c) => c.isDefault)) {
-        _calibrations[0] = _calibrations[0].copyWith(isDefault: true);
-      }
-    });
-    _saveCalibrations();
+    setState(() => _actionInProgress = true);
+    await widget.deviceService.deleteProfile(profile.id);
+    await widget.deviceService.getProfiles();
   }
 
   Future<void> _addCalibration() async {
-    if (_calibrations.length >= _maxSlots) {
+    if (_profiles.length >= _maxSlots) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Maximum 8 calibrations reached. Delete one to add new.'),
@@ -186,40 +139,37 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
       return;
     }
 
+    final newSlot = _profiles.length + 1;
     final result = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => CalibrationPage(
           deviceService: widget.deviceService,
           autoStart: false,
+          profileName: 'Profile $newSlot',
         ),
       ),
     );
     if (!mounted || result != true) return;
 
-    final newId = _calibrations.length + 1;
-    final newCal = SavedCalibration(
-      id: newId,
-      name: 'Calibration $newId',
-      createdAt: DateTime.now(),
-      isDefault: true,
-    );
-
     HapticFeedback.lightImpact();
-    setState(() {
-      _calibrations = _calibrations.map((c) => c.copyWith(isDefault: false)).toList();
-      _calibrations.add(newCal);
-    });
-    _saveCalibrations();
+    // Firmware already saved the profile during calibration success.
+    // Just refresh the list.
+    await widget.deviceService.getProfiles();
   }
 
-  Future<void> _startWithCalibration(SavedCalibration cal) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => _RecalibrateDialog(calibration: cal),
-    );
-    if (confirmed != true || !mounted) return;
+  Future<void> _selectOrRecalibrateProfile(FirmwareProfile profile) async {
+    if (profile.id == 0) {
+      if (_actionInProgress) return;
+      HapticFeedback.selectionClick();
+      setState(() => _actionInProgress = true);
+      await widget.deviceService.selectProfile(0);
+      await widget.deviceService.getProfiles();
+      return;
+    }
 
-    _setDefault(cal);
+    // Select this profile as active before recalibrating
+    await widget.deviceService.selectProfile(profile.id);
+
     if (!mounted) return;
 
     final result = await Navigator.of(context).push<bool>(
@@ -227,10 +177,22 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
         builder: (_) => CalibrationPage(
           deviceService: widget.deviceService,
           autoStart: false,
+          profileName: profile.name,
         ),
       ),
     );
-    // Calibration successful — stay on CalibrationManagerPage (1–8 list)
+    if (!mounted) return;
+    if (result == true) {
+      await widget.deviceService.getProfiles();
+    }
+  }
+
+  Future<void> _renameProfile(FirmwareProfile profile, String newName) async {
+    if (newName.trim().isEmpty || _actionInProgress) return;
+    HapticFeedback.selectionClick();
+    setState(() => _actionInProgress = true);
+    await widget.deviceService.renameProfile(profile.id, newName.trim());
+    await widget.deviceService.getProfiles();
   }
 
   @override
@@ -253,9 +215,13 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
                     strokeWidth: 2.5,
                   ),
                 )
-                    : FadeTransition(
-                  opacity: _fadeController,
-                  child: _buildBody(),
+                    : RefreshIndicator(
+                  onRefresh: _refreshProfiles,
+                  color: AppTheme.brandPrimary,
+                  child: FadeTransition(
+                    opacity: _fadeController,
+                    child: _buildBody(),
+                  ),
                 ),
               ),
             ],
@@ -297,6 +263,16 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
               ],
             ),
           ),
+          if (_actionInProgress)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppTheme.brandPrimary,
+              ),
+            ),
+          const SizedBox(width: 8),
           // Slot counter pill
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -308,7 +284,7 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
               ),
             ),
             child: Text(
-              '${_calibrations.length} / $_maxSlots',
+              '${_profiles.where((p) => p.id != 0).length} / $_maxSlots',
               style: const TextStyle(
                 color: AppTheme.brandPrimary,
                 fontSize: 13,
@@ -322,34 +298,65 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
   }
 
   Widget _buildBody() {
+    if (_profiles.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.wifi_tethering_off_rounded,
+                  size: 48, color: AppTheme.textMuted.withValues(alpha: 0.4)),
+              const SizedBox(height: 16),
+              const Text(
+                'No calibrations yet',
+                style: TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Tap + Add Calibration to start',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 32),
+              _AddCalibrationButton(onTap: _addCalibration),
+            ],
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Only saved calibrations — no empty slots
-          ...List.generate(_calibrations.length, (index) {
-            final cal = _calibrations[index];
+          ...List.generate(_profiles.length, (index) {
+            final profile = _profiles[index];
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: _CalibrationSlotCard(
-                calibration: cal,
+                profile: profile,
                 totalSlots: _maxSlots,
-                onSelect: () => _startWithCalibration(cal),
-                onSetDefault: () => _setDefault(cal),
-                onDelete: () => _deleteCalibration(cal),
+                onSelect: () => _selectOrRecalibrateProfile(profile),
+                onSetDefault: () => _setDefault(profile),
+                onDelete: () => _deleteProfile(profile),
+                onRename: (newName) => _renameProfile(profile, newName),
               ),
             );
           }),
 
-          // Add button below the last calibration
-          if (_calibrations.length < _maxSlots) ...[
+          if (_profiles.where((p) => p.id != 0).length < _maxSlots) ...[
             const SizedBox(height: 4),
             _AddCalibrationButton(onTap: _addCalibration),
           ],
 
           const SizedBox(height: 24),
-          _SlotUsageBar(used: _calibrations.length, total: _maxSlots),
+          _SlotUsageBar(used: _profiles.where((p) => p.id != 0).length, total: _maxSlots),
           const SizedBox(height: 8),
         ],
       ),
@@ -361,27 +368,81 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
 // Calibration card
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _CalibrationSlotCard extends StatelessWidget {
+class _CalibrationSlotCard extends StatefulWidget {
   const _CalibrationSlotCard({
-    required this.calibration,
+    required this.profile,
     required this.totalSlots,
     required this.onSelect,
     required this.onSetDefault,
     required this.onDelete,
+    required this.onRename,
   });
 
-  final SavedCalibration calibration;
+  final FirmwareProfile profile;
   final int totalSlots;
   final VoidCallback onSelect;
   final VoidCallback onSetDefault;
   final VoidCallback onDelete;
+  final ValueChanged<String> onRename;
+
+  @override
+  State<_CalibrationSlotCard> createState() => _CalibrationSlotCardState();
+}
+
+class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
+  bool _isEditing = false;
+  late final TextEditingController _nameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.profile.name);
+  }
+
+  @override
+  void didUpdateWidget(covariant _CalibrationSlotCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.profile.name != oldWidget.profile.name ||
+        widget.profile.id != oldWidget.profile.id) {
+      _nameController.text = widget.profile.name;
+      _isEditing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Color _qualityColor(int quality) {
+    if (quality >= 85) return const Color(0xFF22C55E);
+    if (quality >= 70) return const Color(0xFF3B82F6);
+    if (quality >= 50) return const Color(0xFFF59E0B);
+    return AppTheme.destructive;
+  }
+
+  String _formatDate(DateTime? dt) {
+    if (dt == null) return '';
+    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDefault = calibration.isDefault;
+    final isDefault = widget.profile.isDefault;
+    final isActive = widget.profile.isActive;
 
     return GestureDetector(
-      onTap: onSelect,
+      onTap: () {
+        if (widget.profile.id == 0) {
+          widget.onSelect();
+        } else {
+          setState(() {
+            _isEditing = true;
+          });
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         padding: const EdgeInsets.all(16),
@@ -408,7 +469,7 @@ class _CalibrationSlotCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Number badge with gradient if default
+            // Slot number badge
             Container(
               width: 44,
               height: 44,
@@ -422,7 +483,7 @@ class _CalibrationSlotCard extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  '${calibration.id}',
+                  widget.profile.id == 0 ? 'S' : '${widget.profile.slot}',
                   style: TextStyle(
                     color: isDefault ? Colors.white : AppTheme.brandPrimary,
                     fontSize: 18,
@@ -434,86 +495,188 @@ class _CalibrationSlotCard extends StatelessWidget {
             const SizedBox(width: 14),
 
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        calibration.name,
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 15,
-                          fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
+              child: _isEditing
+                  ? TextField(
+                      controller: _nameController,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 6),
+                        border: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppTheme.brandPrimary),
+                        ),
+                        focusedBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: AppTheme.brandPrimary, width: 2),
                         ),
                       ),
-                      if (isDefault) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            gradient: AppTheme.brandGradient,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Text(
-                            'DEFAULT',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
+                      autofocus: true,
+                      maxLength: 23,
+                      buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.profile.name,
+                                style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 15,
+                                  fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
+                            if (isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  gradient: AppTheme.brandGradient,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: const Text(
+                                  'DEFAULT',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (isActive && !isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'ACTIVE',
+                                  style: TextStyle(
+                                    color: Color(0xFF22C55E),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Text(
+                              _formatDate(widget.profile.createdAt),
+                              style: const TextStyle(
+                                color: AppTheme.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                            if (widget.profile.quality > 0) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '· ${widget.profile.qualityLabel}',
+                                style: TextStyle(
+                                  color: _qualityColor(widget.profile.quality),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    _formatDate(calibration.createdAt),
-                    style: const TextStyle(
-                      color: AppTheme.textMuted,
-                      fontSize: 12,
                     ),
-                  ),
-                ],
-              ),
             ),
+
+            const SizedBox(width: 8),
 
             // Actions
             Row(
               mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isDefault)
-                  _ActionIcon(
-                    icon: Icons.star_border_rounded,
-                    tooltip: 'Set Default',
-                    color: const Color(0xFFF59E0B),
-                    onTap: onSetDefault,
-                  ),
-                if (isDefault)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
-                  ),
-                const SizedBox(width: 4),
-                _ActionIcon(
-                  icon: Icons.delete_outline_rounded,
-                  tooltip: 'Delete',
-                  color: AppTheme.destructive,
-                  onTap: onDelete,
-                ),
-              ],
+              children: _isEditing
+                  ? [
+                      _ActionIcon(
+                        icon: Icons.wifi_tethering_rounded,
+                        tooltip: 'Recalibrate',
+                        color: AppTheme.brandPrimary,
+                        onTap: () {
+                          setState(() {
+                            _isEditing = false;
+                          });
+                          widget.onSelect();
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _ActionIcon(
+                        icon: Icons.check_rounded,
+                        tooltip: 'Save',
+                        color: const Color(0xFF22C55E),
+                        onTap: () {
+                          final trimmed = _nameController.text.trim();
+                          if (trimmed.isNotEmpty && trimmed != widget.profile.name) {
+                            widget.onRename(trimmed);
+                          }
+                          setState(() {
+                            _isEditing = false;
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _ActionIcon(
+                        icon: Icons.close_rounded,
+                        tooltip: 'Cancel',
+                        color: AppTheme.textMuted,
+                        onTap: () {
+                          setState(() {
+                            _isEditing = false;
+                            _nameController.text = widget.profile.name;
+                          });
+                        },
+                      ),
+                    ]
+                  : [
+                      if (!isDefault)
+                        _ActionIcon(
+                          icon: Icons.star_border_rounded,
+                          tooltip: 'Set Default',
+                          color: const Color(0xFFF59E0B),
+                          onTap: widget.onSetDefault,
+                        ),
+                      if (isDefault)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8),
+                          child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
+                        ),
+                      if (!isDefault && widget.profile.id != 0) ...[
+                        const SizedBox(width: 4),
+                        _ActionIcon(
+                          icon: Icons.delete_outline_rounded,
+                          tooltip: 'Delete',
+                          color: AppTheme.destructive,
+                          onTap: widget.onDelete,
+                        ),
+                      ],
+                    ],
             ),
           ],
         ),
       ),
     );
-  }
-
-  String _formatDate(DateTime dt) {
-    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }
 
@@ -637,9 +800,9 @@ class _SlotUsageBar extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(
+            const Text(
               'Slot usage',
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             ),
             const Spacer(),
             Text(
@@ -672,9 +835,10 @@ class _SlotUsageBar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DeleteDialog extends StatelessWidget {
-  const _DeleteDialog({required this.calibration});
+  const _DeleteDialog({required this.profileName, required this.isDefault});
 
-  final SavedCalibration calibration;
+  final String profileName;
+  final bool isDefault;
 
   @override
   Widget build(BuildContext context) {
@@ -707,8 +871,8 @@ class _DeleteDialog extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'Are you sure you want to delete "${calibration.name}"?'
-                  '${calibration.isDefault ? '\n\nThe next calibration will become the default.' : ''}',
+              'Are you sure you want to delete "$profileName"?'
+                  '${isDefault ? '\n\nThe next calibration will become the default.' : ''}',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: AppTheme.textSecondary,
@@ -757,112 +921,4 @@ class _DeleteDialog extends StatelessWidget {
     );
   }
 }
-
-class _RecalibrateDialog extends StatelessWidget {
-  const _RecalibrateDialog({required this.calibration});
-
-  final SavedCalibration calibration;
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                gradient: AppTheme.brandGradient,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.brandPrimary.withValues(alpha: 0.25),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.wifi_tethering_rounded,
-                  color: Colors.white, size: 28),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Recalibrate?',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Do you want to recalibrate "${calibration.name}"?\n\nSit in your ideal posture before starting.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 14,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      side: BorderSide(color: AppTheme.border),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: const Text('Cancel',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: AppTheme.brandGradient,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Container(
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: const Text(
-                          'Recalibrate',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+

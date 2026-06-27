@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
+import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/home/ongoing_therapy_page.dart';
 import 'package:correctv1/services/device_manager.dart';
 
@@ -128,7 +129,11 @@ class _TherapyPageState extends State<TherapyPage>
 
     if (_deviceService.connectionStatus.value !=
         DeviceConnectionStatus.connected) {
-      _showConnectDeviceSnack();
+      await showPodDisconnectedDialog(
+        context,
+        subtitle:
+            'Connect your Align Pod to start a therapy session.',
+      );
       return;
     }
 
@@ -191,7 +196,7 @@ class _TherapyPageState extends State<TherapyPage>
         behavior: SnackBarBehavior.floating,
         backgroundColor: const Color(0xFF1F2937),
         content: Text(
-          message ?? 'Connect your Aligneye pod to start therapy.',
+          message ?? 'Connect your Align Pod to start therapy.',
           style: const TextStyle(color: Colors.white),
         ),
         duration: const Duration(seconds: 2),

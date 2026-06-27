@@ -20,6 +20,7 @@ import 'package:correctv1/sessions/sessions_history_page.dart';
 import 'package:correctv1/settings/settings_page.dart';
 import 'package:correctv1/components/nav_bar.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
+import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
@@ -1606,7 +1607,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                     children: [
                       const Center(
                         child: Text(
-                          'Aligneye Pod',
+                          'Align Pod',
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w700,
@@ -2184,6 +2185,11 @@ class _HomeDashboardState extends State<HomeDashboard>
                 delayMs: 400,
                 child: _CalibrationCard(
                   onCalibratePressed: () async {
+                    if (_deviceService.connectionStatus.value !=
+                        DeviceConnectionStatus.connected) {
+                      await showPodDisconnectedDialog(context);
+                      return;
+                    }
                     final result = await Navigator.of(context).push<bool>(
                       MaterialPageRoute<bool>(
                         builder: (_) => CalibrationManagerPage(
@@ -2543,11 +2549,16 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SvgPicture.asset(
-                'assets/logosvg.svg',
-                height: 30,
-                fit: BoxFit.contain,
-                alignment: Alignment.centerLeft,
+              ClipRect(
+                child: Transform.translate(
+                  offset: const Offset(-25, 0),
+                  child: Image.asset(
+                    'assets/newLogo.png',
+                    height: 30,
+                    fit: BoxFit.fitHeight,
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
               ),
               const SizedBox(height: 2),
               ShaderMask(
@@ -4197,7 +4208,7 @@ class _ConnectedDeviceSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'AlignEye Pod',
+                        'Align Pod',
                         style: TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 16,

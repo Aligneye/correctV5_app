@@ -447,17 +447,17 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
 
   Widget _buildStatusLabel() {
     final title = _connecting
-        ? 'Connecting to AlignEye Pod'
+        ? 'Connecting to Align Pod'
         : _found.isNotEmpty
             ? '${_found.length} Pod${_found.length > 1 ? 's' : ''} Found Nearby'
             : _scanning
-                ? 'Scanning for AlignEye Pods'
+                ? 'Scanning for Align Pods'
                 : 'No pods detected';
 
     final sub = _connecting
         ? 'Establishing a secure connection…'
         : _found.isNotEmpty
-            ? 'Tap Connect to pair your AlignEye Pod'
+            ? 'Tap Connect to pair your Align Pod'
             : _scanning
                 ? 'Keep your pod powered on'
                 : 'Make sure your pod is powered on and in range';
@@ -539,7 +539,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
             itemBuilder: (_, i) {
               final r = _found[i];
               final name = r.device.platformName.isEmpty
-                  ? 'AlignEye Pod'
+                  ? 'Align Pod'
                   : r.device.platformName;
               return _DeviceCard(
                 name: name,
@@ -581,7 +581,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         ),
         const SizedBox(height: 6),
         Text(
-          'Power on your AlignEye Pod and\nkeep it within 2 metres',
+          'Power on your Align Pod and\nkeep it within 2 metres',
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: AppTheme.textSecondary,
@@ -646,7 +646,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         ),
         const SizedBox(height: 6),
         const Text(
-          'Pairing with your AlignEye Pod…',
+          'Pairing with your Align Pod…',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
         ),
       ],

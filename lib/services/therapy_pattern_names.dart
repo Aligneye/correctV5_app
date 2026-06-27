@@ -74,7 +74,7 @@ int? therapyPatternIndexFromDeviceNumber(int rawPattern) {
 }
 
 /// Map whatever raw label firmware emits (e.g. "Muscle Act [S2:13 0s]")
-/// into the friendly Aligneye-facing name shown in the UI
+/// into the friendly Align-facing name shown in the UI
 /// (e.g. "Wake-Up Pulse"). Returns the stripped original string if no
 /// mapping is found so we still render something meaningful instead of
 /// "Unknown".
