@@ -5,7 +5,9 @@ import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/sessions/sessions_history_page.dart';
+import 'package:correctv1/services/angle_history_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─── Data Models ─────────────────────────────────────────────────────────────
 
@@ -212,9 +214,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   List<SessionData>? _sessions;
   Map<String, dynamic>? _weeklyStats;
+  TodayStats? _todayStats;
   List<double>? _dailyScores;
   bool _isLoadingSessions = true;
   bool _isLoadingStats = true;
+  bool _isLoadingToday = true;
   bool _isLoadingDaily = true;
   int _lastSyncTick = 0;
   bool _isReloading = false;
@@ -223,6 +227,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   bool get _isDeviceDisconnected =>
       _btManager.deviceService.connectionStatus.value ==
       DeviceConnectionStatus.disconnected;
+
   bool get _isDeviceConnecting =>
       _btManager.deviceService.connectionStatus.value ==
       DeviceConnectionStatus.connecting;
@@ -243,7 +248,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _deviceManager.syncCompletedTick.removeListener(_onSyncFinished);
     _deviceManager.isSyncing.removeListener(_onSyncingChanged);
     _deviceManager.activeSessionId.removeListener(_onActiveSessionChanged);
-    _btManager.deviceService.connectionStatus.removeListener(_onConnectionChanged);
+    _btManager.deviceService.connectionStatus.removeListener(
+      _onConnectionChanged,
+    );
     super.dispose();
   }
 
@@ -275,6 +282,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     setState(() {
       _isLoadingSessions = true;
       _isLoadingStats = true;
+      _isLoadingToday = true;
       _isLoadingDaily = true;
       _isLoadingStreak = true;
       _isLoadingHeatmap = true;
@@ -295,6 +303,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       _repo.fetchStreakStats().catchError((_) => null),
 
       _repo.fetchHeatmapData().catchError((_) => null),
+
+      _repo.fetchTodayStats().catchError((_) => null),
     ]);
 
     if (!mounted) return;
@@ -304,14 +314,42 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       _dailyScores = results[2] as List<double>?;
       _streakStats = results[3] as StreakStats?;
       _heatmapData = results[4] as List<int>?;
+      _todayStats = results[5] as TodayStats?;
       _isLoadingHeatmap = false;
 
       _isLoadingStreak = false;
       _isLoadingSessions = false;
       _isLoadingStats = false;
+      _isLoadingToday = false;
       _isLoadingDaily = false;
     });
     _isReloading = false;
+  }
+
+  // Reloads only period-dependent data (sessions + weekly chart).
+  // Never touches _todayStats so the top score card stays stable.
+  Future<void> _reloadPeriodData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingSessions = true;
+      _isLoadingStats = true;
+    });
+    final results = await Future.wait([
+      _repo
+          .fetchByPeriod(
+            _periodKeys[_period],
+            liveSessionId: _deviceManager.activeSessionId.value,
+          )
+          .catchError((_) => <SessionData>[]),
+      _repo.fetchWeeklyStats().catchError((_) => null),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _sessions = results[0] as List<SessionData>? ?? [];
+      _weeklyStats = results[1] as Map<String, dynamic>?;
+      _isLoadingSessions = false;
+      _isLoadingStats = false;
+    });
   }
 
   Future<void> _loadSessionsOnly() async {
@@ -485,11 +523,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               color: _kBlue.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(11),
             ),
-            child: const Icon(
-              Icons.history_rounded,
-              size: 18,
-              color: _kBlue,
-            ),
+            child: const Icon(Icons.history_rounded, size: 18, color: _kBlue),
           ),
           const SizedBox(width: 12),
           const Expanded(
@@ -632,9 +666,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ── Header ──────────────────────────────────────────────────────────────────
 
   Widget _buildHeader() {
-    final stats = _weeklyStats;
-    final score = _scoreText(stats);
-    final delta = _deltaText(stats);
+    final score = _todayScoreText();
+    final delta = _todayDeltaText();
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
@@ -765,13 +798,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ── Summary grid ────────────────────────────────────────────────────────────
 
   Widget _buildSummaryGrid() {
-    final stats = _weeklyStats;
-    final trackedHours = _hoursValue(stats?['trackedHours'], fallback: 8.0);
-    final scorePct = _scoreNumber(stats, fallback: 85);
-    final goodHours = trackedHours * (scorePct / 100);
-    final poorHours = (trackedHours - goodHours)
-        .clamp(0, double.infinity)
-        .toDouble();
+    final today = _todayStats;
+    final goodHours = today != null
+        ? today.todayPostureDurationSec / 3600.0
+        : 6.8;
+    final poorHours = today != null
+        ? (today.todayTrackedSec - today.todayPostureDurationSec)
+              .clamp(0, double.maxFinite) /
+          3600.0
+        : 1.2;
 
     return Row(
       children: [
@@ -809,7 +844,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               onTap: () {
                 if (_period == i) return;
                 setState(() => _period = i);
-                _reloadAll();
+                _reloadPeriodData();
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
@@ -916,6 +951,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         ],
       ),
     );
+  }
+
+  // Today-specific helpers — never change when toggling Weekly/Monthly.
+  String _todayScoreText() {
+    if (_isLoadingToday || _todayStats == null) return '—';
+    return _todayStats!.todayPct.toString();
+  }
+
+  String _todayDeltaText() {
+    if (_isLoadingToday || _todayStats == null) return '';
+    final today = _todayStats!;
+    if (!today.yesterdayHasPostureData) return 'No data from yesterday';
+    final delta = today.todayPct - today.yesterdayPct;
+    if (delta == 0) return 'No change from yesterday';
+    final sign = delta > 0 ? '+' : '';
+    return '$sign$delta% from yesterday';
   }
 
   String _scoreText(Map<String, dynamic>? stats) {
@@ -1177,13 +1228,44 @@ class _DailyScoreTrendCard extends StatelessWidget {
 
 // ─── Angle deviation throughout day (demo series) ────────────────────────────
 
-class _AngleDeviationDayCard extends StatelessWidget {
+class _AngleDeviationDayCard extends StatefulWidget {
   const _AngleDeviationDayCard();
 
-  /// Demo curve: 8am → 8pm (6pm point has no x-label in the reference UI).
-  static const _values = [75.0, 82.0, 78.0, 85.0, 93.0, 88.0, 80.0];
-  static const _xLabels = ['8am', '10am', '12pm', '2pm', '4pm', '', '8pm'];
+  @override
+  State<_AngleDeviationDayCard> createState() => _AngleDeviationDayCardState();
+}
+
+class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
+  static const _fallback = [75.0, 82.0, 78.0, 85.0, 93.0, 88.0, 80.0];
+  static const _xLabels = ['8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
   static const _plotHeight = 132.0;
+
+  final _angleService = AngleHistoryService();
+  List<double> _values = _fallback;
+  double _avgDeviation = 0;
+  double _maxDeviation = 0;
+  bool _hasRealData = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  void _refresh() {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId != null) {
+      _angleService.syncToSupabase(userId);
+    }
+    final raw = _angleService.todayHourlyDeviations();
+    final hasReal = _angleService.hasTodayData;
+    setState(() {
+      _values = hasReal ? raw : _fallback;
+      _hasRealData = hasReal;
+      _avgDeviation = _angleService.todayAverageDeviation;
+      _maxDeviation = _angleService.todayMaxDeviation;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1302,10 +1384,11 @@ class _AngleDeviationDayCard extends StatelessWidget {
                   color: Colors.amber.shade600,
                 ),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Your posture tends to worsen in the afternoon. Consider '
-                    'setting more frequent reminders during 2-6 PM.',
+                    _hasRealData
+                        ? 'Avg deviation today: ${_avgDeviation.toStringAsFixed(1)}°  •  Max: ${_maxDeviation.toStringAsFixed(1)}°  •  Ref angle: ${_angleService.referenceAngle.toStringAsFixed(1)}°'
+                        : 'Your posture tends to worsen in the afternoon. Consider setting more frequent reminders during 2-6 PM.',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
@@ -1643,6 +1726,7 @@ class _HeatmapCard extends StatelessWidget {
 class _AnalyticsDisconnectedBanner extends StatelessWidget {
   final bool isReconnecting;
   final VoidCallback onSyncNow;
+
   const _AnalyticsDisconnectedBanner({
     required this.isReconnecting,
     required this.onSyncNow,
@@ -1750,6 +1834,7 @@ class _AnalyticsDisconnectedBanner extends StatelessWidget {
 class _AnalyticsLiveSessionRow extends StatelessWidget {
   final SessionData session;
   final VoidCallback onTap;
+
   const _AnalyticsLiveSessionRow({required this.session, required this.onTap});
 
   @override
@@ -1872,6 +1957,7 @@ class _AnalyticsLiveSessionRow extends StatelessWidget {
 class _AnalyticsSessionItem extends StatelessWidget {
   final SessionData session;
   final VoidCallback onTap;
+
   const _AnalyticsSessionItem({required this.session, required this.onTap});
 
   static const _kItemText = Color(0xFF1A1A2E);
@@ -2064,6 +2150,7 @@ class _AnalyticsSessionItem extends StatelessWidget {
 
 class _AnalyticsMiniStat extends StatelessWidget {
   final String value, label;
+
   const _AnalyticsMiniStat({required this.value, required this.label});
 
   @override

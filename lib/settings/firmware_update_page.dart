@@ -438,7 +438,7 @@ class _DeviceInfoCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  info?.model.isNotEmpty == true ? info!.model : 'AlignEye Pod',
+                  info?.model.isNotEmpty == true ? info!.model : 'Align Pod',
                   style: const TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 15,

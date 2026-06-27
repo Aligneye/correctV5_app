@@ -86,10 +86,6 @@ class PostureReading {
   final String calibrationPhase;
   final int calibrationQuality;
   final String calibrationFailReason;
-  final int calibrationPassedSamples;
-  final double calibrationRefX;
-  final double calibrationRefY;
-  final double calibrationRefZ;
   final String posture;
   final bool isBadPosture;
   final double batteryVoltage;
@@ -140,10 +136,6 @@ class PostureReading {
     required this.calibrationPhase,
     this.calibrationQuality = 0,
     this.calibrationFailReason = '',
-    this.calibrationPassedSamples = 0,
-    this.calibrationRefX = 0.0,
-    this.calibrationRefY = 0.0,
-    this.calibrationRefZ = 0.0,
     required this.posture,
     required this.isBadPosture,
     required this.batteryVoltage,
@@ -376,9 +368,6 @@ class DeviceInfo {
   }
 }
 
-// ── Firmware Profile Model ────────────────────────────────────────────────────
-// Mirrors the {"t":"P"} JSON packet from firmware.
-// Firmware is the single source of truth — app never stores its own list.
 class FirmwareProfile {
   final int id;
   final int slot;
@@ -399,31 +388,14 @@ class FirmwareProfile {
   });
 
   factory FirmwareProfile.fromJson(Map<String, dynamic> json) {
-    int toInt(dynamic val) {
-      if (val is num) return val.toInt();
-      if (val is String) return int.tryParse(val) ?? 0;
-      return 0;
-    }
-
-    bool toBool(dynamic val) {
-      if (val == null) return false;
-      if (val is bool) return val;
-      if (val is num) return val != 0;
-      if (val is String) {
-        final lowered = val.toLowerCase();
-        return lowered == 'true' || lowered == '1';
-      }
-      return false;
-    }
-
     return FirmwareProfile(
-      id: toInt(json['id']),
-      slot: toInt(json['slot'] ?? json['s']),
-      name: (json['name'] ?? json['n'])?.toString() ?? 'Profile',
-      isActive: toBool(json['active'] ?? json['a']),
-      isDefault: toBool(json['default'] ?? json['d']),
-      createdEpoch: toInt(json['created'] ?? json['c']),
-      quality: toInt(json['quality'] ?? json['q']),
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      slot: (json['slot'] as num?)?.toInt() ?? 0,
+      name: json['name']?.toString() ?? 'Profile',
+      isActive: json['active'] == true,
+      isDefault: json['default'] == true,
+      createdEpoch: (json['created'] as num?)?.toInt() ?? 0,
+      quality: (json['quality'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -442,7 +414,6 @@ class FirmwareProfile {
   String toString() =>
       'FirmwareProfile(id=$id, slot=$slot, name=$name, active=$isActive, default=$isDefault)';
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
 enum EnterDfuResult { success, lowBattery, sessionActive, timeout, error }
 
@@ -452,11 +423,6 @@ class AlignEyeDeviceService {
 
   final String _deviceNamePrefix;
   final _readingController = StreamController<PostureReading>.broadcast();
-
-  // ── Profile list stream ────────────────────────────────────────────────────
-  // Firmware is the single source of truth for calibration profiles.
-  // Whenever a {"t":"P",...} packet arrives (or after any profile command),
-  // this stream emits the latest list so CalibrationManagerPage can rebuild.
   final _profileListController =
       StreamController<List<FirmwareProfile>>.broadcast();
   Stream<List<FirmwareProfile>> get profileListStream =>
@@ -464,7 +430,6 @@ class AlignEyeDeviceService {
   List<FirmwareProfile> _lastKnownProfiles = [];
   List<FirmwareProfile> get lastKnownProfiles =>
       List.unmodifiable(_lastKnownProfiles);
-  // ──────────────────────────────────────────────────────────────────────────
 
   final connectionStatus = ValueNotifier<DeviceConnectionStatus>(
     DeviceConnectionStatus.disconnected,
@@ -722,85 +687,47 @@ class AlignEyeDeviceService {
     if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
     }
-    return _writeJsonCommand({'cmd': 'CALIBRATE_CANCEL'});
+    return _writeTextCommand('ACTION=CALIBRATE_CANCEL');
   }
 
-  // ── Profile management commands (firmware = source of truth) ──────────────
-
-  /// Request full profile list from firmware.
-  /// Firmware responds with {"t":"P","profiles":[...]} → profileListStream emits.
   Future<bool> getProfiles() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
     return _writeJsonCommand({'cmd': 'GET_PROFILES'});
   }
 
-  /// Start a new calibration that auto-assigns to the next available slot.
-  /// Use this instead of the old ACTION=CALIBRATE text command.
   Future<bool> sendCalibrationStartJson({String name = 'Profile'}) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
-    return _writeJsonCommand({
-      'cmd': 'CALIBRATE_START',
-      'slot': 'auto',
-      'name': name,
-    });
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    return _writeJsonCommand({'cmd': 'CALIBRATE_START', 'slot': 'auto', 'name': name});
   }
 
-  /// Set a profile as the default on firmware.
   Future<bool> setDefaultProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
     return _writeJsonCommand({'cmd': 'PROFILE_SET_DEFAULT', 'id': profileId});
   }
 
-  /// Select (activate) a profile for posture tracking.
   Future<bool> selectProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
     return _writeJsonCommand({'cmd': 'PROFILE_SELECT', 'id': profileId});
   }
 
-  /// Rename a profile on firmware.
   Future<bool> renameProfile(int profileId, String name) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
-    return _writeJsonCommand({
-      'cmd': 'PROFILE_RENAME',
-      'id': profileId,
-      'name': name,
-    });
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    return _writeJsonCommand({'cmd': 'PROFILE_RENAME', 'id': profileId, 'name': name});
   }
 
-  /// Delete a profile from firmware storage.
   Future<bool> deleteProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
     return _writeJsonCommand({'cmd': 'PROFILE_DELETE', 'id': profileId});
   }
 
-  /// Erase all calibration profiles from firmware.
   Future<bool> clearAllProfiles() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) {
-      return false;
-    }
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
     return _writeJsonCommand({'cmd': 'PROFILE_CLEAR_ALL'});
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /// Sends a JSON-encoded command without waiting for a response.
   Future<bool> _writeJsonCommand(Map<String, dynamic> command) async {
     return _writeTextCommand(jsonEncode(command));
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
 
   /// Sends a JSON command (e.g. {"cmd":"GET_INFO"}) and waits up to
   /// [timeout] for a matching response on the notify characteristic.
@@ -867,13 +794,10 @@ class AlignEyeDeviceService {
       return null;
     }
 
-    final result = await completer.future.timeout(
-      timeout,
-      onTimeout: () {
-        debugPrint('JSON command timed out: $payload');
-        return null;
-      },
-    );
+    final result = await completer.future.timeout(timeout, onTimeout: () {
+      debugPrint('JSON command timed out: $payload');
+      return null;
+    });
 
     await rawSub.cancel();
     await sub.cancel();
@@ -882,9 +806,10 @@ class AlignEyeDeviceService {
 
   /// Sends {"cmd":"GET_INFO"} and returns a DeviceInfo on success.
   Future<DeviceInfo?> getDeviceInfo() async {
-    final resp = await sendJsonCommand({
-      'cmd': 'GET_INFO',
-    }, matcher: (m) => m['t'] == 'INFO');
+    final resp = await sendJsonCommand(
+      {'cmd': 'GET_INFO'},
+      matcher: (m) => m['t'] == 'INFO',
+    );
     if (resp == null) return null;
     return DeviceInfo.fromJson(resp);
   }
@@ -929,13 +854,10 @@ class AlignEyeDeviceService {
       }
     });
 
-    final result = await completer.future.timeout(
-      timeout,
-      onTimeout: () {
-        debugPrint('waitForNotification timed out');
-        return null;
-      },
-    );
+    final result = await completer.future.timeout(timeout, onTimeout: () {
+      debugPrint('waitForNotification timed out');
+      return null;
+    });
 
     await rawSub.cancel();
     return result;
@@ -1164,6 +1086,7 @@ class AlignEyeDeviceService {
         _connectionTimeoutTimer?.cancel();
         connectionStatus.value = DeviceConnectionStatus.disconnected;
 
+
         throw Exception(
           'Device "align pod" not found. Please ensure the device is powered on and within range.',
         );
@@ -1268,6 +1191,7 @@ class AlignEyeDeviceService {
               debugPrint('Failed to request MTU (non-fatal): $e');
             }
           }
+
         } catch (e) {
           debugPrint('Connection failed: $e');
 
@@ -1275,8 +1199,7 @@ class AlignEyeDeviceService {
           // after GATT connect.  The physical connection was established (GATT
           // connected), so treat this as a non-fatal hiccup and fall through to
           // service discovery rather than aborting the whole connect attempt.
-          final isMtuError =
-              e.toString().toLowerCase().contains('requestmtu') ||
+          final isMtuError = e.toString().toLowerCase().contains('requestmtu') ||
               e.toString().toLowerCase().contains('mtu');
           final deviceAfterError = _device;
           final stateAfterError = deviceAfterError == null
@@ -1401,8 +1324,6 @@ class AlignEyeDeviceService {
         debugPrint(sent ? 'DateTime synced to device' : 'DateTime sync failed');
       });
 
-      // Fetch calibration profiles from firmware immediately on connect
-      // so CalibrationManagerPage always shows real firmware state.
       Future.delayed(const Duration(milliseconds: 500), () {
         if (connectionStatus.value == DeviceConnectionStatus.connected) {
           getProfiles().then((_) => debugPrint('GET_PROFILES sent on connect'));
@@ -1414,7 +1335,9 @@ class AlignEyeDeviceService {
         hasEverConnected: true,
         lastConnectedDeviceId: _device?.remoteId.toString(),
       );
-      debugPrint('Saved connection state: hasEverConnected=true');
+      debugPrint(
+        'Saved connection state: hasEverConnected=true',
+      );
 
       debugPrint('Connection established successfully');
     } catch (e) {
@@ -1423,6 +1346,7 @@ class AlignEyeDeviceService {
       _connectionTimeoutTimer?.cancel();
       await disconnect();
       connectionStatus.value = DeviceConnectionStatus.disconnected;
+
     }
   }
 
@@ -1500,9 +1424,7 @@ class AlignEyeDeviceService {
       final bonded = await FlutterBluePlus.bondedDevices;
       for (final dev in bonded) {
         if (_matchesTargetDeviceName(dev.platformName)) {
-          debugPrint(
-            'Unpairing bonded target device: ${dev.platformName} (${dev.remoteId})',
-          );
+          debugPrint('Unpairing bonded target device: ${dev.platformName} (${dev.remoteId})');
           await _unpairDevice(dev);
         }
       }
@@ -1584,9 +1506,7 @@ class AlignEyeDeviceService {
       }
       final bondedDevices = await FlutterBluePlus.bondedDevices;
       return bondedDevices.any(
-        (device) =>
-            device.remoteId.toString().toLowerCase() ==
-            preferredId.toLowerCase(),
+        (device) => device.remoteId.toString().toLowerCase() == preferredId.toLowerCase(),
       );
     } catch (e) {
       debugPrint('Error checking bonded target devices: $e');
@@ -1741,9 +1661,7 @@ class AlignEyeDeviceService {
       final deviceId = device.remoteId.toString().toLowerCase();
       if (normalizedPreferredId != null) {
         if (deviceId == normalizedPreferredId) {
-          debugPrint(
-            'Found preferred connected device: ${device.platformName}',
-          );
+          debugPrint('Found preferred connected device: ${device.platformName}');
           return device;
         }
       } else {
@@ -1929,6 +1847,7 @@ class AlignEyeDeviceService {
   }
 
   void _handleNotifyData(List<int> data) {
+
     if (data.isEmpty) return;
     final rawData = utf8.decode(data, allowMalformed: true);
     // debugPrint("BLE RAW: $rawData");
@@ -1960,6 +1879,7 @@ class AlignEyeDeviceService {
       int end = -1;
       bool inString = false;
       bool escape = false;
+      bool restartFromNestedStart = false;
       for (int i = 0; i < _buffer.length; i++) {
         final ch = _buffer[i];
         if (escape) {
@@ -1976,6 +1896,11 @@ class AlignEyeDeviceService {
         }
         if (inString) continue;
         if (ch == '{') {
+          if (depth > 0) {
+            _buffer = _buffer.substring(i);
+            restartFromNestedStart = true;
+            break;
+          }
           depth++;
         }
         if (ch == '}') {
@@ -1985,6 +1910,10 @@ class AlignEyeDeviceService {
             break;
           }
         }
+      }
+
+      if (restartFromNestedStart) {
+        continue;
       }
 
       if (end == -1) {
@@ -2139,7 +2068,9 @@ class AlignEyeDeviceService {
       _connectionRetryCount = 0;
 
       // Save state: user has connected again
-      _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
+      _saveConnectionState(
+        lastConnectedDeviceId: _device?.remoteId.toString(),
+      );
 
       // Verify connection is actually working
       _verifyConnection().then((isValid) {

@@ -101,7 +101,7 @@ class _PendingSession {
   }
 }
 
-/// Pulls unsent posture/therapy sessions off the Aligneye wearable over BLE,
+/// Pulls unsent posture/therapy sessions off the Align wearable over BLE,
 /// uploads each one to Supabase, and ACKs the device only once the insert
 /// succeeds so failed rows retry on the next connection.
 ///

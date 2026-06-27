@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
+import 'package:correctv1/services/angle_history_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -96,7 +97,7 @@ class _CalibrationPageState extends State<CalibrationPage>
     _readingSubscription = widget.deviceService.readings.listen(_onReading);
     _ticker = Timer.periodic(
       const Duration(milliseconds: 100),
-      (_) => _onTick(),
+          (_) => _onTick(),
     );
 
     if (widget.autoStart) {
@@ -120,7 +121,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   bool get _isConnected =>
       widget.deviceService.connectionStatus.value ==
-      DeviceConnectionStatus.connected;
+          DeviceConnectionStatus.connected;
 
   Future<void> _startCalibration() async {
     if (!_isConnected) {
@@ -192,7 +193,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     // Transition to getReady when device starts calibrating and phase is GET_READY
     if ((_stage == _CalibrationStage.starting ||
-            _stage == _CalibrationStage.intro) &&
+        _stage == _CalibrationStage.intro) &&
         reading.isCalibrating &&
         (reading.calibrationPhase == 'GET_READY' ||
             reading.calibrationPhase.isEmpty)) {
@@ -213,7 +214,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     // Calibration cancelled from device
     if ((_stage == _CalibrationStage.getReady ||
-            _stage == _CalibrationStage.holdStill) &&
+        _stage == _CalibrationStage.holdStill) &&
         !reading.isCalibrating &&
         reading.calibrationResult.isEmpty) {
       _cancelMissCount++;
@@ -235,6 +236,10 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     if (success) {
       HapticFeedback.lightImpact();
+      // Save current angle as calibrated reference for deviation tracking
+      AngleHistoryService().setReferenceAngle(
+        widget.deviceService.currentAngle,
+      );
       _successBarController.forward();
 
       Future<void> syncMode() async {
@@ -418,7 +423,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   double _getHoldStillProgress() {
     final elapsedMs =
-        _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
+    _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
         ? _deviceElapsedMs - _deviceHoldStartMs
         : _holdStillWallElapsedMs;
     return (elapsedMs / _holdStillMs).clamp(0.0, 1.0);
@@ -504,7 +509,7 @@ class _CalibrationPageState extends State<CalibrationPage>
           color: const Color(0xFF14B8A6),
           title: 'Calibration Complete',
           message:
-              'Your ideal posture has been saved.\nPosture tracking started.',
+          'Your ideal posture has been saved.\nPosture tracking started.',
           subText: _calibrationQuality > 0
               ? 'Quality: ${_qualityLabel(_calibrationQuality)} ($_calibrationQuality%)'
               : 'Auto return → Training Screen',
@@ -696,8 +701,8 @@ class _IntroScreenState extends State<_IntroScreen> {
                             decoration: BoxDecoration(
                               gradient: isSelected
                                   ? const LinearGradient(
-                                      colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-                                    )
+                                colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                              )
                                   : null,
                               color: isSelected ? null : Colors.white.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(20),

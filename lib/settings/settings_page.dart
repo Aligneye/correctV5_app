@@ -8,6 +8,7 @@ import 'package:correctv1/theme/app_theme.dart';
 import 'package:correctv1/auth/auth_service.dart';
 import 'package:correctv1/settings/firmware_update_page.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
+import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -362,7 +363,7 @@ class _DeviceInfoCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'AlignEye Pro',
+                      'Align Pro',
                       style: TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 16,
@@ -674,15 +675,21 @@ class _AlignmentCalibrationCard extends StatelessWidget {
           _GradientButton(
             label: 'Start Calibration',
             gradient: AppTheme.trainingGradient,
-            onTap: () {
+            onTap: () async {
               HapticFeedback.selectionClick();
+              final deviceService = BluetoothServiceManager().deviceService;
+              if (deviceService.connectionStatus.value !=
+                  DeviceConnectionStatus.connected) {
+                await showPodDisconnectedDialog(context);
+                return;
+              }
+              if (!context.mounted) return;
               Navigator.of(context).push(
                 PageRouteBuilder(
                   transitionDuration: const Duration(milliseconds: 320),
                   reverseTransitionDuration: const Duration(milliseconds: 260),
                   pageBuilder: (_, animation, __) => CalibrationManagerPage(
-                    deviceService:
-                        BluetoothServiceManager().deviceService,
+                    deviceService: deviceService,
                   ),
                   transitionsBuilder: (_, animation, __, child) =>
                       FadeTransition(
