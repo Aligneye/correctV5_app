@@ -86,6 +86,10 @@ class PostureReading {
   final String calibrationPhase;
   final int calibrationQuality;
   final String calibrationFailReason;
+  final int calibrationPassedSamples;
+  final double calibrationRefX;
+  final double calibrationRefY;
+  final double calibrationRefZ;
   final String posture;
   final bool isBadPosture;
   final double batteryVoltage;
@@ -136,6 +140,10 @@ class PostureReading {
     required this.calibrationPhase,
     this.calibrationQuality = 0,
     this.calibrationFailReason = '',
+    this.calibrationPassedSamples = 0,
+    this.calibrationRefX = 0.0,
+    this.calibrationRefY = 0.0,
+    this.calibrationRefZ = 0.0,
     required this.posture,
     required this.isBadPosture,
     required this.batteryVoltage,
@@ -390,12 +398,12 @@ class FirmwareProfile {
   factory FirmwareProfile.fromJson(Map<String, dynamic> json) {
     return FirmwareProfile(
       id: (json['id'] as num?)?.toInt() ?? 0,
-      slot: (json['slot'] as num?)?.toInt() ?? 0,
-      name: json['name']?.toString() ?? 'Profile',
-      isActive: json['active'] == true,
-      isDefault: json['default'] == true,
-      createdEpoch: (json['created'] as num?)?.toInt() ?? 0,
-      quality: (json['quality'] as num?)?.toInt() ?? 0,
+      slot: (json['s'] as num?)?.toInt() ?? (json['slot'] as num?)?.toInt() ?? 0,
+      name: json['n']?.toString() ?? json['name']?.toString() ?? 'Profile',
+      isActive: (json['a'] as num?)?.toInt() == 1 || json['active'] == true,
+      isDefault: (json['d'] as num?)?.toInt() == 1 || json['default'] == true,
+      createdEpoch: (json['c'] as num?)?.toInt() ?? (json['created'] as num?)?.toInt() ?? 0,
+      quality: (json['q'] as num?)?.toInt() ?? (json['quality'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -1879,7 +1887,6 @@ class AlignEyeDeviceService {
       int end = -1;
       bool inString = false;
       bool escape = false;
-      bool restartFromNestedStart = false;
       for (int i = 0; i < _buffer.length; i++) {
         final ch = _buffer[i];
         if (escape) {
@@ -1896,24 +1903,14 @@ class AlignEyeDeviceService {
         }
         if (inString) continue;
         if (ch == '{') {
-          if (depth > 0) {
-            _buffer = _buffer.substring(i);
-            restartFromNestedStart = true;
-            break;
-          }
           depth++;
-        }
-        if (ch == '}') {
+        } else if (ch == '}') {
           depth--;
           if (depth == 0) {
             end = i;
             break;
           }
         }
-      }
-
-      if (restartFromNestedStart) {
-        continue;
       }
 
       if (end == -1) {
