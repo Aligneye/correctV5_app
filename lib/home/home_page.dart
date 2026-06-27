@@ -85,6 +85,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -161,8 +162,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) =>
-            FadeTransition(opacity: animation, child: TrainingPage(deviceService: BluetoothServiceManager().deviceService)),
+        pageBuilder: (_, animation, __) => FadeTransition(
+          opacity: animation,
+          child: TrainingPage(
+            deviceService: BluetoothServiceManager().deviceService,
+          ),
+        ),
         transitionsBuilder: (_, animation, __, child) {
           final curved = CurvedAnimation(
             parent: animation,
@@ -204,7 +209,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
   }
-
 }
 
 class HomeDashboard extends StatefulWidget {
@@ -248,6 +252,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   // int _batteryLevel = 0;
 
   final _batteryLevel = ValueNotifier<int>(0);
+  final ValueNotifier<int> difficultyDegNotifier = ValueNotifier<int>(25);
 
   _ModeControlType _selectedMode = _ModeControlType.track;
   DateTime? _ignoreModeFromDeviceUntil;
@@ -425,15 +430,19 @@ class _HomeDashboardState extends State<HomeDashboard>
       // 🔥 [FIX]: In values ko direct update karein bina pure page ko setState se heavy re-build kiye
       postureAngleNotifier.value = reading.angle;
       isBadPostureNotifier.value = reading.isBadPosture;
-      postureStatusNotifier.value = reading.isBadPosture
-          ? 'Bad posture'
-          : 'Good posture';
+      difficultyDegNotifier.value = reading.difficultyDeg;
+
+      final postureText = reading.posture.trim();
+      postureStatusNotifier.value =
+          postureText.isNotEmpty && postureText.toUpperCase() != 'UNKNOWN'
+              ? postureText
+              : (reading.isBadPosture ? 'BAD POSTURE' : 'GOOD POSTURE');
 
       final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
       final isLiveMode =
           isTherapyMode ||
-              reading.mode.trim().toUpperCase() == 'TRAINING' ||
-              reading.mode.trim().toUpperCase() == 'POSTURE';
+          reading.mode.trim().toUpperCase() == 'TRAINING' ||
+          reading.mode.trim().toUpperCase() == 'POSTURE';
       final reportedRemainingSec = reading.therapyRemainingSeconds;
 
       _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
@@ -477,7 +486,8 @@ class _HomeDashboardState extends State<HomeDashboard>
       // this entire 6000-line widget tree and is the main cause of jank.
       bool needsRebuild = false;
 
-      final ignoreModeNow = _ignoreModeFromDeviceUntil != null &&
+      final ignoreModeNow =
+          _ignoreModeFromDeviceUntil != null &&
           DateTime.now().isBefore(_ignoreModeFromDeviceUntil!);
 
       if (modeOrTimingChanged && !ignoreModeNow) {
@@ -490,21 +500,22 @@ class _HomeDashboardState extends State<HomeDashboard>
         }
         needsRebuild = true;
       }
-      final isOff = reading.mode.trim().toUpperCase() == 'OFF';
-      if (isOff) {
-
+      final isIdle = reading.mode.trim().toUpperCase() == 'IDLE';
+      if (isIdle) {
         isBadPostureNotifier.value = false;
-        postureStatusNotifier.value = 'Device off';
+        postureStatusNotifier.value = 'Device idle';
         needsRebuild = true;
       }
 
       if (isTherapyMode && reportedRemainingSec > 0) {
-        final secondsChanged = _therapyRemainingSeconds.value != reportedRemainingSec;
+        final secondsChanged =
+            _therapyRemainingSeconds.value != reportedRemainingSec;
         _therapyRemainingSeconds.value = reportedRemainingSec;
         _ensureTherapyCountdownRunning();
         if (secondsChanged) needsRebuild = true;
       } else if (!isTherapyMode) {
-        if (_therapyCountdownTimer != null || _therapyRemainingSeconds.value != 0) {
+        if (_therapyCountdownTimer != null ||
+            _therapyRemainingSeconds.value != 0) {
           _therapyCountdownTimer?.cancel();
           _therapyCountdownTimer = null;
           _therapyRemainingSeconds.value = 0;
@@ -559,7 +570,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   @override
   void dispose() {
     _readingSubscription?.cancel();
-    FirmwareUpdateService.instance.state.removeListener(_onFirmwareStateChanged);
+    FirmwareUpdateService.instance.state.removeListener(
+      _onFirmwareStateChanged,
+    );
     _deviceManager.syncCompletedTick.removeListener(_handleSessionSyncFinished);
     _deviceManager.isSyncing.removeListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.removeListener(_handleActiveSessionChanged);
@@ -622,7 +635,11 @@ class _HomeDashboardState extends State<HomeDashboard>
                 gradient: AppTheme.brandGradient,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Icon(Icons.system_update_rounded, color: Colors.white, size: 28),
+              child: const Icon(
+                Icons.system_update_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -638,16 +655,26 @@ class _HomeDashboardState extends State<HomeDashboard>
             ),
             if (manifest.releaseNotes.isNotEmpty) ...[
               const SizedBox(height: 12),
-              ...manifest.releaseNotes.map((note) => Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('• ', style: TextStyle(color: Colors.grey)),
-                    Expanded(child: Text(note, style: const TextStyle(fontSize: 13, color: Colors.grey))),
-                  ],
+              ...manifest.releaseNotes.map(
+                (note) => Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('• ', style: TextStyle(color: Colors.grey)),
+                      Expanded(
+                        child: Text(
+                          note,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              )),
+              ),
             ],
             const SizedBox(height: 20),
           ],
@@ -662,8 +689,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                   .millisecondsSinceEpoch;
               await prefs.setInt('firmware_snooze_until_ms', snoozeUntil);
             },
-            child: const Text('Remind me next week',
-                style: TextStyle(color: Colors.grey)),
+            child: const Text(
+              'Remind me next week',
+              style: TextStyle(color: Colors.grey),
+            ),
           ),
           FilledButton(
             onPressed: () {
@@ -673,16 +702,23 @@ class _HomeDashboardState extends State<HomeDashboard>
                   transitionDuration: const Duration(milliseconds: 320),
                   reverseTransitionDuration: const Duration(milliseconds: 260),
                   pageBuilder: (_, animation, __) => const FirmwareUpdatePage(),
-                  transitionsBuilder: (_, animation, __, child) => FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.06),
-                        end: Offset.zero,
-                      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-                      child: child,
-                    ),
-                  ),
+                  transitionsBuilder: (_, animation, __, child) =>
+                      FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position:
+                              Tween<Offset>(
+                                begin: const Offset(0, 0.06),
+                                end: Offset.zero,
+                              ).animate(
+                                CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                ),
+                              ),
+                          child: child,
+                        ),
+                      ),
                 ),
               );
             },
@@ -739,7 +775,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _syncLiveSessionTickerWithConnection() {
     final connected =
         _deviceService.connectionStatus.value ==
-            DeviceConnectionStatus.connected;
+        DeviceConnectionStatus.connected;
     final hasLiveSession = _deviceManager.activeSessionId.value != null;
     if (connected && hasLiveSession && _liveDisplayHasFrame) {
       _ensureLiveSessionTicker();
@@ -786,7 +822,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       // 🔥 CHANGE 2: Agar conditions follow nahi ho rahi hain, toh return karne ke bajay
       // ticker ko cancel karke band kar dein taaki battery aur memory bache.
       if (_deviceService.connectionStatus.value !=
-          DeviceConnectionStatus.connected ||
+              DeviceConnectionStatus.connected ||
           _deviceManager.activeSessionId.value == null ||
           !_liveDisplayHasFrame) {
         _liveSessionTicker?.cancel();
@@ -928,7 +964,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       gradient: gradient,
       positiveTrend: positive,
       trendNeutral:
-      !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
+          !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
     );
   }
 
@@ -1073,9 +1109,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   static _StatItemData _lastSessionStatItem(
-      List<SessionData> sessions,
-      bool isLoading,
-      ) {
+    List<SessionData> sessions,
+    bool isLoading,
+  ) {
     const label = 'Last session';
 
     if (isLoading && sessions.isEmpty) {
@@ -1388,7 +1424,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   /// therapy mode and we still have time on the clock. Used to swap the
   /// live-posture card for a compact ongoing-therapy preview.
   bool get _isTherapyLive =>
-      _selectedMode == _ModeControlType.therapy && _therapyRemainingSeconds.value > 0;
+      _selectedMode == _ModeControlType.therapy &&
+      _therapyRemainingSeconds.value > 0;
 
   /// Idempotent: spin up the 1 Hz ticker if it isn't already alive. Called
   /// from the BLE reading handler on every frame so the countdown keeps
@@ -1397,8 +1434,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _ensureTherapyCountdownRunning() {
     if (_therapyCountdownTimer?.isActive ?? false) return;
     _therapyCountdownTimer = Timer.periodic(const Duration(seconds: 1), (
-        timer,
-        ) {
+      timer,
+    ) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -1518,7 +1555,13 @@ class _HomeDashboardState extends State<HomeDashboard>
       isScrollControlled: true,
       builder: (ctx) => _ConnectedDeviceSheet(
         batteryLevel: _batteryLevel.value,
-        profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
+        profile:
+            BluetoothServiceManager()
+                .deviceService
+                .currentReading
+                .value
+                ?.profile ??
+            '',
         onDisconnect: () async {
           Navigator.of(ctx).pop();
           await BluetoothServiceManager.instance.disconnectByUser();
@@ -1676,10 +1719,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                               onPressed: isConnecting
                                   ? null
                                   : () {
-                                setModalState(() => isConnecting = true);
-                                Navigator.of(context).pop();
-                                unawaited(_handleDeviceStatusTap());
-                              },
+                                      setModalState(() => isConnecting = true);
+                                      Navigator.of(context).pop();
+                                      unawaited(_handleDeviceStatusTap());
+                                    },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: popupPrimary,
                                 foregroundColor: Colors.white,
@@ -1690,13 +1733,13 @@ class _HomeDashboardState extends State<HomeDashboard>
                               ),
                               child: isConnecting
                                   ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
                                   : const Text('Connect'),
                             ),
                           ),
@@ -1720,7 +1763,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     required int difficultyDegrees,
   }) async {
     final modeLabel = switch (mode) {
-      _ModeControlType.track => 'TRACKING',
+      _ModeControlType.track => 'IDLE',
       _ModeControlType.posture => 'TRAINING',
       _ModeControlType.therapy => 'THERAPY',
     };
@@ -1737,7 +1780,6 @@ class _HomeDashboardState extends State<HomeDashboard>
       difficultyDegrees: difficultyDegrees,
     );
   }
-
 
   /// Variant for the mini card tap: therapy is already running on the pod,
   /// so we just navigate without re-issuing start/prime commands.
@@ -2015,7 +2057,13 @@ class _HomeDashboardState extends State<HomeDashboard>
                               isSyncing: isSyncing,
                               isLive: activeSessionId != null,
                               batteryLevel: _batteryLevel.value,
-                              profile: BluetoothServiceManager().deviceService.currentReading.value?.profile ?? '',
+                              profile:
+                                  BluetoothServiceManager()
+                                      .deviceService
+                                      .currentReading
+                                      .value
+                                      ?.profile ??
+                                  '',
                               onTap: _handleDeviceStatusTap,
                             );
                           },
@@ -2055,36 +2103,42 @@ class _HomeDashboardState extends State<HomeDashboard>
                 // tap it to jump into the full immersive page.
                 child: _isTherapyLive
                     ? _MiniOngoingTherapyCard(
-                  deviceService: _deviceService,
-                  totalMinutes: _therapyDurationMinutes,
-                  onTap: _openOngoingTherapyFromHome,
-                )
-                // : _PostureGaugeCard(
-                //     postureAngle: _postureAngle,
-                //     postureStatus: _postureStatus,
-                //     isBadPosture: _isBadPosture,
-                //     controller: _controller,
-                //   ),
+                        deviceService: _deviceService,
+                        totalMinutes: _therapyDurationMinutes,
+                        onTap: _openOngoingTherapyFromHome,
+                      )
+                    // : _PostureGaugeCard(
+                    //     postureAngle: _postureAngle,
+                    //     postureStatus: _postureStatus,
+                    //     isBadPosture: _isBadPosture,
+                    //     controller: _controller,
+                    //   ),
                     : ValueListenableBuilder<double>(
-                  valueListenable: postureAngleNotifier,
+                        valueListenable: postureAngleNotifier,
 
-                  builder: (context, angle, _) =>
-                      ValueListenableBuilder<bool>(
-                        valueListenable: isBadPostureNotifier,
+                        builder: (context, angle, _) =>
+                            ValueListenableBuilder<bool>(
+                              valueListenable: isBadPostureNotifier,
 
-                        builder: (context, isBad, _) => _PostureGaugeCard(
-                          postureAngle: angle,
+                              builder: (context, isBad, _) =>
+                                  ValueListenableBuilder<String>(
+                                    valueListenable: postureStatusNotifier,
 
-                          postureStatus: isBad
-                              ? 'Bad posture'
-                              : 'Good posture',
+                                    builder: (context, status, _) =>
+                                        ValueListenableBuilder<int>(
+                                          valueListenable: difficultyDegNotifier,
 
-                          isBadPosture: isBad,
-
-                          controller: _controller,
-                        ),
+                                          builder: (context, diff, _) => _PostureGaugeCard(
+                                            postureAngle: angle,
+                                            postureStatus: status,
+                                            isBadPosture: isBad,
+                                            difficultyDeg: diff,
+                                            controller: _controller,
+                                          ),
+                                        ),
+                                  ),
+                            ),
                       ),
-                ),
               ),
               _kSectionSpacing,
               _StaggeredFadeSlide(
@@ -2130,8 +2184,9 @@ class _HomeDashboardState extends State<HomeDashboard>
                       return;
                     }
                     setState(() => _selectedMode = mode);
-                    _ignoreModeFromDeviceUntil =
-                        DateTime.now().add(const Duration(seconds: 1));
+                    _ignoreModeFromDeviceUntil = DateTime.now().add(
+                      const Duration(seconds: 1),
+                    );
                     _stopTherapyCountdown();
                     unawaited(
                       _syncModeControlToDevice(
@@ -2219,10 +2274,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                           isLoading: _isLoadingOfflineSessions,
                           isSyncing: isSyncing,
                           isDeviceDisconnected:
-                          status == DeviceConnectionStatus.disconnected &&
+                              status == DeviceConnectionStatus.disconnected &&
                               !_syncBannerDismissed,
                           isDeviceConnecting:
-                          status == DeviceConnectionStatus.connecting,
+                              status == DeviceConnectionStatus.connecting,
                           onViewAll: () => Navigator.of(context).push<void>(
                             MaterialPageRoute<void>(
                               builder: (_) => const SessionsHistoryPage(),
@@ -2277,7 +2332,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         const SnackBar(
           content: Text(
             'Bluetooth connection cancelled. '
-                'Tap the connect button when ready.',
+            'Tap the connect button when ready.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -2421,8 +2476,8 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
 
     _typewriterTimer?.cancel();
     _typewriterTimer = Timer.periodic(const Duration(milliseconds: 80), (
-        timer,
-        ) {
+      timer,
+    ) {
       if (_charIndex < _chosenText.length) {
         _charIndex++;
         _displayedText = _chosenText.substring(0, _charIndex);
@@ -2726,34 +2781,34 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
                 clipBehavior: Clip.hardEdge,
                 child: isConnected
                     ? Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(batteryIcon, size: 12, color: batteryColor),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${widget.batteryLevel}%',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: batteryColor,
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(batteryIcon, size: 12, color: batteryColor),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${widget.batteryLevel}%',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                                color: batteryColor,
+                              ),
+                            ),
+                            if (widget.profile.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                '· ${widget.profile}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: batteryColor.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ),
-                      if (widget.profile.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          '· ${widget.profile}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                            color: batteryColor.withValues(alpha: 0.7),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                )
+                      )
                     : const SizedBox.shrink(),
               ),
             ],
@@ -2793,12 +2848,14 @@ class _PostureGaugeCard extends StatelessWidget {
   final double postureAngle;
   final String postureStatus;
   final bool isBadPosture;
+  final int difficultyDeg;
   final Animation<double> controller;
 
   const _PostureGaugeCard({
     required this.postureAngle,
     required this.postureStatus,
     required this.isBadPosture,
+    required this.difficultyDeg,
     required this.controller,
   });
 
@@ -2841,34 +2898,48 @@ class _PostureGaugeCard extends StatelessWidget {
           _StaggeredFadeSlide(
             controller: controller,
             delayMs: 500,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [accentColor.withValues(alpha: 0.9), accentColor],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1F000000),
-                    blurRadius: 12,
-                    offset: Offset(0, 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [accentColor.withValues(alpha: 0.9), accentColor],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1F000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 6),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: Text(
-                  'Posture Status: $postureStatus',
-                  key: ValueKey(postureStatus),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    child: Text(
+                      'Posture Status: $postureStatus',
+                      key: ValueKey(postureStatus),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(height: 12),
+                Text(
+                  'Bad posture above ${difficultyDeg}°',
+                  style: TextStyle(
+                    color: AppTheme.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -2964,7 +3035,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
   void _syncLocalTickerWithConnection() {
     final connected =
         widget.deviceService.connectionStatus.value ==
-            DeviceConnectionStatus.connected;
+        DeviceConnectionStatus.connected;
     if (connected) {
       _ensureLocalTicker();
     } else {
@@ -3096,9 +3167,9 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
 
     final friendlyPattern = friendlyTherapyPatternLabel(_lastPatternName);
     final pillLabel =
-    friendlyPattern.isEmpty ||
-        friendlyPattern.toLowerCase() == 'preparing pattern...' ||
-        friendlyPattern.toLowerCase() == 'waiting for therapy'
+        friendlyPattern.isEmpty ||
+            friendlyPattern.toLowerCase() == 'preparing pattern...' ||
+            friendlyPattern.toLowerCase() == 'waiting for therapy'
         ? 'Preparing pattern…'
         : friendlyPattern;
 
@@ -3350,15 +3421,15 @@ class _MiniTherapyOrbPainter extends CustomPainter {
 
     final ambientHaloPaint = Paint()
       ..shader =
-      RadialGradient(
-        colors: [
-          const Color(0xFFFFB4C5).withValues(alpha: 0.28),
-          const Color(0xFFFFB4C5).withValues(alpha: 0.0),
-        ],
-        stops: const [0.25, 1.0],
-      ).createShader(
-        Rect.fromCircle(center: center, radius: breathRadius * 1.7),
-      );
+          RadialGradient(
+            colors: [
+              const Color(0xFFFFB4C5).withValues(alpha: 0.28),
+              const Color(0xFFFFB4C5).withValues(alpha: 0.0),
+            ],
+            stops: const [0.25, 1.0],
+          ).createShader(
+            Rect.fromCircle(center: center, radius: breathRadius * 1.7),
+          );
     canvas.drawCircle(center, breathRadius * 1.7, ambientHaloPaint);
 
     final orbRect = Rect.fromCircle(center: center, radius: breathRadius);
@@ -3412,14 +3483,14 @@ class _MiniTherapyOrbPainter extends CustomPainter {
   }
 
   void _drawRing(
-      Canvas canvas,
-      Offset center,
-      double radius,
-      double progress, {
-        required double strokeWidth,
-        required Color trackColor,
-        required List<Color> gradientColors,
-      }) {
+    Canvas canvas,
+    Offset center,
+    double radius,
+    double progress, {
+    required double strokeWidth,
+    required Color trackColor,
+    required List<Color> gradientColors,
+  }) {
     final trackPaint = Paint()
       ..color = trackColor
       ..style = PaintingStyle.stroke
@@ -3540,24 +3611,24 @@ class _RecentSessionsCard extends StatelessWidget {
         else if (sessions.isEmpty)
           const _EmptyRecentSessions()
         else ...[
-            for (final live in liveSessions) ...[
-              _LiveSessionRow(session: live, onTap: () => onSessionTap(live)),
-              const SizedBox(height: 8),
-            ],
-            for (
+          for (final live in liveSessions) ...[
+            _LiveSessionRow(session: live, onTap: () => onSessionTap(live)),
+            const SizedBox(height: 8),
+          ],
+          for (
             var i = 0;
             i < finishedSessions.length && (liveSessions.length + i) < 5;
             i++
-            ) ...[
-              _HomeSessionItem(
-                session: finishedSessions[i],
-                onTap: () => onSessionTap(finishedSessions[i]),
-              ),
-              if ((liveSessions.length + i + 1) <
-                  (liveSessions.length + finishedSessions.length).clamp(0, 5))
-                const SizedBox(height: 8),
-            ],
+          ) ...[
+            _HomeSessionItem(
+              session: finishedSessions[i],
+              onTap: () => onSessionTap(finishedSessions[i]),
+            ),
+            if ((liveSessions.length + i + 1) <
+                (liveSessions.length + finishedSessions.length).clamp(0, 5))
+              const SizedBox(height: 8),
           ],
+        ],
       ],
     );
   }
@@ -3603,7 +3674,7 @@ class _DisconnectedBanner extends StatelessWidget {
                 SizedBox(height: 1),
                 Text(
                   'Sessions are still being saved on the pod. '
-                      'Sync to pull them in.',
+                  'Sync to pull them in.',
                   style: TextStyle(
                     fontSize: 11,
                     color: Color(0xFFB45309),
@@ -3866,13 +3937,13 @@ class _HomeSessionItem extends StatelessWidget {
         .toList(growable: false);
     final therapyPatternCount =
         playedTherapyEvents?.length ??
-            session.therapyPatterns?.length ??
-            (session.pattern == null ? null : 1);
+        session.therapyPatterns?.length ??
+        (session.pattern == null ? null : 1);
     final lastPatternIndex =
         playedTherapyEvents?.lastOrNull?.patternIndex ??
-            session.therapyPatternEvents?.lastOrNull?.patternIndex ??
-            session.therapyPatterns?.lastOrNull ??
-            session.pattern;
+        session.therapyPatternEvents?.lastOrNull?.patternIndex ??
+        session.therapyPatterns?.lastOrNull ??
+        session.pattern;
     final lastPatternName = lastPatternIndex == null
         ? null
         : therapyPatternName(lastPatternIndex);
@@ -4275,7 +4346,11 @@ class _ConnectedDeviceSheet extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
                 children: [
-                  const Icon(Icons.person_outline_rounded, size: 14, color: Color(0xFF6B7280)),
+                  const Icon(
+                    Icons.person_outline_rounded,
+                    size: 14,
+                    color: Color(0xFF6B7280),
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     profile,
@@ -4448,7 +4523,7 @@ class _ModeControlCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _ModeButton(
-                  label: 'Track/Off',
+                  label: 'Idle',
                   selected: selectedMode == _ModeControlType.track,
                   onTap: () => onModeSelected(_ModeControlType.track),
                 ),
@@ -4598,21 +4673,21 @@ class _TherapyStatusRowState extends State<_TherapyStatusRow> {
   Widget build(BuildContext context) {
     final isActive =
         widget.therapyCountdownRunning &&
-            widget.currentPattern != 'Waiting for therapy' &&
-            widget.currentPattern != 'Preparing pattern...';
+        widget.currentPattern != 'Waiting for therapy' &&
+        widget.currentPattern != 'Preparing pattern...';
 
     return Container(
       height: 86,
       decoration: BoxDecoration(
         gradient: isActive
             ? LinearGradient(
-          colors: [
-            AppTheme.brandPrimary.withValues(alpha: 0.06),
-            AppTheme.purple600.withValues(alpha: 0.04),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        )
+                colors: [
+                  AppTheme.brandPrimary.withValues(alpha: 0.06),
+                  AppTheme.purple600.withValues(alpha: 0.04),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
             : null,
         color: isActive ? null : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(20),
@@ -4624,12 +4699,12 @@ class _TherapyStatusRowState extends State<_TherapyStatusRow> {
         ),
         boxShadow: isActive
             ? [
-          BoxShadow(
-            color: _kPrimaryBlue.withValues(alpha: 0.1),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ]
+                BoxShadow(
+                  color: _kPrimaryBlue.withValues(alpha: 0.1),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ]
             : null,
       ),
       child: Row(
@@ -4641,13 +4716,13 @@ class _TherapyStatusRowState extends State<_TherapyStatusRow> {
             decoration: BoxDecoration(
               gradient: isActive
                   ? LinearGradient(
-                colors: [
-                  AppTheme.brandPrimary.withValues(alpha: 0.15),
-                  AppTheme.brandPrimary.withValues(alpha: 0.08),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              )
+                      colors: [
+                        AppTheme.brandPrimary.withValues(alpha: 0.15),
+                        AppTheme.brandPrimary.withValues(alpha: 0.08),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
                   : null,
               color: isActive ? null : const Color(0xFFF1F5F9),
               borderRadius: const BorderRadius.only(
@@ -4713,14 +4788,14 @@ class _TherapyStatusRowState extends State<_TherapyStatusRow> {
             decoration: BoxDecoration(
               gradient: isActive
                   ? LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  AppTheme.brandPrimary.withValues(alpha: 0.2),
-                  Colors.transparent,
-                ],
-              )
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        AppTheme.brandPrimary.withValues(alpha: 0.2),
+                        Colors.transparent,
+                      ],
+                    )
                   : null,
               color: isActive ? null : AppTheme.border,
             ),
@@ -4801,8 +4876,8 @@ class _ModeButton extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: selected
               ? const LinearGradient(
-            colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-          )
+                  colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                )
               : null,
           color: selected ? null : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(12),
@@ -4944,7 +5019,7 @@ class _CalibrationCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Sit in your ideal posture position before calibrating. '
-                        'This will set your baseline reference angle.',
+                    'This will set your baseline reference angle.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 13,
@@ -5086,19 +5161,19 @@ class _PageIndicator extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: isActive
             ? LinearGradient(
-          colors: [AppTheme.brandPrimary, AppTheme.purple600],
-        )
+                colors: [AppTheme.brandPrimary, AppTheme.purple600],
+              )
             : null,
         color: isActive ? null : const Color(0xFFCBD5E1),
         borderRadius: BorderRadius.circular(3),
         boxShadow: isActive
             ? [
-          BoxShadow(
-            color: AppTheme.brandPrimary.withValues(alpha: 0.4),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ]
+                BoxShadow(
+                  color: AppTheme.brandPrimary.withValues(alpha: 0.4),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ]
             : null,
       ),
     );
@@ -5142,22 +5217,22 @@ class _DropdownModeButton<T> extends StatelessWidget {
           selectedItemBuilder: selectedLabelBuilder == null
               ? null
               : (context) => items
-              .map(
-                (item) => Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                selectedLabelBuilder!(item.value as T),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ),
-          )
-              .toList(),
+                    .map(
+                      (item) => Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          selectedLabelBuilder!(item.value as T),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
           items: items,
           onChanged: onChanged,
         ),
@@ -5254,33 +5329,33 @@ class _QuickModesSection extends StatelessWidget {
           children: modes
               .map(
                 (mode) => _QuickModeCard(
-              mode: mode,
-              onTap: () {
-                if (mode.title == 'Therapy') {
-                  onTherapyModeTap();
-                  return;
-                }
-                if (mode.title == 'Training') {
-                  onTrainingModeTap();
-                  return;
-                }
-                if (mode.title == 'Breathe') {
-                  onMeditationModeTap();
-                  return;
-                }
-                if (mode.title == 'Walking') {
-                  Navigator.of(context).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                      const _ComingSoonPage(title: 'Walking Mode'),
-                    ),
-                  );
-                  return;
-                }
-                onModeTap(mode.targetIndex);
-              },
-            ),
-          )
+                  mode: mode,
+                  onTap: () {
+                    if (mode.title == 'Therapy') {
+                      onTherapyModeTap();
+                      return;
+                    }
+                    if (mode.title == 'Training') {
+                      onTrainingModeTap();
+                      return;
+                    }
+                    if (mode.title == 'Breathe') {
+                      onMeditationModeTap();
+                      return;
+                    }
+                    if (mode.title == 'Walking') {
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              const _ComingSoonPage(title: 'Walking Mode'),
+                        ),
+                      );
+                      return;
+                    }
+                    onModeTap(mode.targetIndex);
+                  },
+                ),
+              )
               .toList(),
         ),
         _kInnerSpacing,
@@ -5964,17 +6039,17 @@ class _StreakPopupState extends State<_StreakPopup>
     final isRecord = isIncreased && widget.stats.isNewRecord && days > 1;
     final title = isIncreased
         ? (days <= 1
-        ? 'Streak started!'
-        : isRecord
-        ? 'New personal best!'
-        : '$days-day streak!')
+              ? 'Streak started!'
+              : isRecord
+              ? 'New personal best!'
+              : '$days-day streak!')
         : 'Streak reset';
     final subtitle = isIncreased
         ? (days <= 1
-        ? 'One session in. Come back tomorrow to grow it.'
-        : isRecord
-        ? 'You just set a new record of $days days. Keep the flame alive.'
-        : 'You showed up ${days == 2 ? '2 days' : '$days days'} in a row. Best so far: ${widget.stats.highestStreak}.')
+              ? 'One session in. Come back tomorrow to grow it.'
+              : isRecord
+              ? 'You just set a new record of $days days. Keep the flame alive.'
+              : 'You showed up ${days == 2 ? '2 days' : '$days days'} in a row. Best so far: ${widget.stats.highestStreak}.')
         : 'You missed a day. Start a new streak today — every day counts.';
 
     return PopScope(
@@ -6049,10 +6124,10 @@ class _StreakPopupState extends State<_StreakPopup>
   }
 
   Widget _buildCardContent(
-      _StreakPalette palette,
-      String title,
-      String subtitle,
-      ) {
+    _StreakPalette palette,
+    String title,
+    String subtitle,
+  ) {
     final isIncreased = widget.kind == _StreakPopupKind.increased;
     final days = widget.stats.currentStreak;
     return Container(
@@ -6291,8 +6366,8 @@ class _StreakBurstPainter extends CustomPainter {
   @override
   bool shouldRepaint(_StreakBurstPainter oldDelegate) =>
       oldDelegate.progress != progress ||
-          oldDelegate.dimmed != dimmed ||
-          oldDelegate.palette != palette;
+      oldDelegate.dimmed != dimmed ||
+      oldDelegate.palette != palette;
 }
 
 class _SummaryMetricTile extends StatelessWidget {
@@ -6924,39 +6999,39 @@ class _DebugLogSection extends StatelessWidget {
             ),
             child: logs.isEmpty
                 ? const Center(
-              child: Text(
-                'Waiting for hardware data...',
-                style: TextStyle(color: Color(0xFF475569), fontSize: 12),
-              ),
-            )
-                : ListView.builder(
-              reverse: true,
-              padding: const EdgeInsets.all(8),
-              itemCount: logs.length,
-              itemBuilder: (context, index) {
-                final entry = logs[logs.length - 1 - index];
-                final isLatest = index == 0;
-                final line =
-                    '[${entry['time']}] mode=${entry['mode']}  '
-                    'angle=${(entry['angle'] as double).toStringAsFixed(1)}°  '
-                    'bad=${entry['isBad']}  '
-                    'bat=${entry['bat%']}%  '
-                    'sess=${entry['sessElapsed']}s';
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(
-                    line,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontFamily: 'monospace',
-                      color: isLatest
-                          ? const Color(0xFF86EFAC)
-                          : const Color(0xFF475569),
+                    child: Text(
+                      'Waiting for hardware data...',
+                      style: TextStyle(color: Color(0xFF475569), fontSize: 12),
                     ),
+                  )
+                : ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      final entry = logs[logs.length - 1 - index];
+                      final isLatest = index == 0;
+                      final line =
+                          '[${entry['time']}] mode=${entry['mode']}  '
+                          'angle=${(entry['angle'] as double).toStringAsFixed(1)}°  '
+                          'bad=${entry['isBad']}  '
+                          'bat=${entry['bat%']}%  '
+                          'sess=${entry['sessElapsed']}s';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: Text(
+                          line,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontFamily: 'monospace',
+                            color: isLatest
+                                ? const Color(0xFF86EFAC)
+                                : const Color(0xFF475569),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ],

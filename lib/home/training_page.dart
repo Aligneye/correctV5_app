@@ -105,7 +105,7 @@ class _TrainingPageState extends State<TrainingPage>
     } else {
       // Training stop — tracking mode pe wapas
       unawaited(service.sendModeControl(
-        mode: 'TRACKING',
+        mode: 'IDLE',
         postureTiming: 'INSTANT',
         therapyDurationMinutes: 10,
         difficultyDegrees: _sensitivity.round(),
@@ -429,7 +429,11 @@ class _TrainingPageState extends State<TrainingPage>
                         ),
                       ),
                       const SizedBox(height: 16),
-                      _LiveGraph(pulseController: _pulseController, liveAngle: _liveAngle,),
+                      _LiveGraph(
+                        pulseController: _pulseController,
+                        liveAngle: _liveAngle,
+                        difficultyDeg: widget.deviceService.currentReading.value?.difficultyDeg.toDouble() ?? _sensitivity,
+                      ),
                       const SizedBox(height: 10),
                       const Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -824,9 +828,13 @@ class _DelayChip extends StatelessWidget {
 class _LiveGraph extends StatelessWidget {
   final AnimationController pulseController;
   final double liveAngle;
+  final double difficultyDeg;
 
-  const _LiveGraph({required this.pulseController,
-    required this.liveAngle,});
+  const _LiveGraph({
+    required this.pulseController,
+    required this.liveAngle,
+    required this.difficultyDeg,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -846,7 +854,11 @@ class _LiveGraph extends StatelessWidget {
             animation: pulseController,
             builder: (context, _) {
               return CustomPaint(
-                painter: _LiveGraphPainter(progress: pulseController.value,liveAngle: liveAngle, ),
+                painter: _LiveGraphPainter(
+                  progress: pulseController.value,
+                  liveAngle: liveAngle,
+                  difficultyDeg: difficultyDeg,
+                ),
                 child: Center(
                   child: Icon(
                     Icons.show_chart_rounded,
@@ -866,8 +878,13 @@ class _LiveGraph extends StatelessWidget {
 class _LiveGraphPainter extends CustomPainter {
   final double progress;
   final double liveAngle;
+  final double difficultyDeg;
 
-  const _LiveGraphPainter({required this.progress,required this.liveAngle, });
+  const _LiveGraphPainter({
+    required this.progress,
+    required this.liveAngle,
+    required this.difficultyDeg,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -896,15 +913,15 @@ class _LiveGraphPainter extends CustomPainter {
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
 
     // Bad posture zone — red background
-    if (liveAngle > 25) {
+    if (liveAngle > difficultyDeg) {
       canvas.drawRect(
         Rect.fromLTWH(0, 0, size.width, size.height),
         Paint()..color = const Color(0xFFEF4444).withValues(alpha: 0.08),
       );
     }
 
-    // Threshold line — 25 degree pe
-    final thresholdY = size.height * (0.2 + ((25 + 90) / 180) * 0.6);
+    // Threshold line — difficultyDeg degree pe
+    final thresholdY = size.height * (0.2 + ((difficultyDeg + 90) / 180) * 0.6);
     canvas.drawLine(
       Offset(0, thresholdY),
       Offset(size.width, thresholdY),
@@ -917,7 +934,7 @@ class _LiveGraphPainter extends CustomPainter {
     // Main wave line
     final paint = Paint()
       ..shader = LinearGradient(
-        colors: liveAngle > 25
+        colors: liveAngle > difficultyDeg
             ? [const Color(0xFFEF4444), const Color(0xFFE11D48)]
             : [const Color(0xFFA855F7), const Color(0xFF22C55E)],
       ).createShader(rect)
@@ -931,7 +948,9 @@ class _LiveGraphPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LiveGraphPainter old) =>
-      old.progress != progress || old.liveAngle != liveAngle;
+      old.progress != progress ||
+      old.liveAngle != liveAngle ||
+      old.difficultyDeg != difficultyDeg;
 }
 
 
