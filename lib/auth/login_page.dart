@@ -8,7 +8,6 @@ import 'package:correctv1/auth/auth_service.dart';
 import 'package:correctv1/auth/forgot_password_page.dart';
 import 'package:correctv1/auth/signup_page.dart';
 import 'package:correctv1/theme/app_theme.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -140,16 +139,15 @@ class _LoginPageState extends State<LoginPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 15),
                       Center(
-                        child: SvgPicture.asset(
-                          'assets/logosvg.svg',
-                          height: 40,
+                        child: Image.asset(
+                          'assets/newLogo.png',
+                          width: 180,
                           fit: BoxFit.contain,
-                          alignment: Alignment.centerLeft,
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 5),
                       Text(
                         'Welcome Back',
                         textAlign: TextAlign.center,
