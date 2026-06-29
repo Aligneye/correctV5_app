@@ -1,22 +1,26 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:correctv1/main.dart';
+import 'package:correctv1/splash_screen.dart';
+import 'package:correctv1/theme/app_theme.dart';
 
 void main() {
-  testWidgets('shows configuration screen when Supabase is not configured', (
+  testWidgets('splash screen renders logo and tagline', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MyApp(isSupabaseConfigured: false));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: const SplashScreen(
+          supabaseUrl: '',
+          supabaseAnonKey: '',
+        ),
+      ),
+    );
 
-    expect(find.text('Supabase is not configured'), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+    // Let the scale animation start
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('REDEFINING POSTURE'), findsOneWidget);
   });
 }
