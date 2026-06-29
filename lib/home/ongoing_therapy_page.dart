@@ -9,6 +9,7 @@ import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
+import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 
 class OngoingTherapyPage extends StatefulWidget {
   final AlignEyeDeviceService deviceService;
@@ -264,8 +265,24 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
     Navigator.of(context).pop();
   }
 
+  bool _isDisconnectPopupShowing = false;
+
+  Future<void> _showDisconnectPopup() async {
+    if (_isDisconnectPopupShowing || !mounted) return;
+    _isDisconnectPopupShowing = true;
+    await showPodDisconnectedDialog(
+      context,
+      subtitle: 'Connect your Align Pod to resume your therapy session.',
+    );
+    _isDisconnectPopupShowing = false;
+  }
+
   void _handleConnectionStatus() {
     _syncLocalTickerWithConnection();
+    if (widget.deviceService.connectionStatus.value ==
+        DeviceConnectionStatus.disconnected) {
+      _showDisconnectPopup();
+    }
   }
 
   /// Start the 1 Hz extrapolator only when we're actually receiving data.
@@ -900,28 +917,38 @@ class _OngoingHeader extends StatelessWidget {
               }
             }
 
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: color.withValues(alpha: 0.30)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _PulsingDot(color: color, animate: animate),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
+            return GestureDetector(
+              onTap: () {
+                if (status == DeviceConnectionStatus.disconnected && !isCompleted) {
+                  showPodDisconnectedDialog(
+                    context,
+                    subtitle: 'Connect your Align Pod to resume your therapy session.',
+                  );
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: color.withValues(alpha: 0.30)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PulsingDot(color: color, animate: animate),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           },
