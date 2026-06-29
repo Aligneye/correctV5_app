@@ -2989,6 +2989,11 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
   String _lastPatternName = '';
   int? _lastKnownPatternDurationSeconds;
 
+  // Real-time pattern progress and posture state variables (V5)
+  int _patternElapsedSecondsState = 0;
+  int _patternRemainingSecondsState = -1;
+  bool _hasPatternProgress = false;
+
   @override
   void initState() {
     super.initState();
@@ -3074,6 +3079,9 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
     }
     final anchoredRemaining = widget.deviceService.therapyRemainingSecondsNow;
     final anchoredElapsed = widget.deviceService.therapyElapsedSecondsNow;
+    final anchoredPatternRemaining = widget.deviceService.therapyPatternRemainingSecondsNow;
+    final anchoredPatternElapsed = widget.deviceService.therapyPatternElapsedSecondsNow;
+
     setState(() {
       if (anchoredRemaining >= 0) {
         _totalRemainingSeconds = anchoredRemaining;
@@ -3084,6 +3092,19 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
         _totalElapsedSeconds = anchoredElapsed;
       } else {
         _totalElapsedSeconds += 1;
+      }
+
+      if (_hasPatternProgress) {
+        if (anchoredPatternRemaining >= 0) {
+          _patternRemainingSecondsState = anchoredPatternRemaining;
+        } else if (_patternRemainingSecondsState > 0) {
+          _patternRemainingSecondsState -= 1;
+        }
+        if (anchoredPatternElapsed >= 0) {
+          _patternElapsedSecondsState = anchoredPatternElapsed;
+        } else {
+          _patternElapsedSecondsState += 1;
+        }
       }
     });
   }
@@ -3105,7 +3126,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
       _frameRemainingSeconds = remaining;
       _totalElapsedSeconds = elapsed;
       _totalRemainingSeconds = remaining;
-      final firmwareTotal = elapsed + remaining;
+      final firmwareTotal = reading.therapyTotalDurationSeconds > 0 ? reading.therapyTotalDurationSeconds : (elapsed + remaining);
       if (firmwareTotal > 0) {
         _totalDurationSeconds = firmwareTotal;
       }
@@ -3121,6 +3142,16 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
         _lastPatternName = cleanPatternName;
         _lastPatternStartElapsed = elapsed;
       }
+
+      if (reading.therapyPatternRemainingSeconds > 0 || reading.therapyPatternElapsedSeconds > 0) {
+        _patternElapsedSecondsState = reading.therapyPatternElapsedSeconds;
+        _patternRemainingSecondsState = reading.therapyPatternRemainingSeconds;
+        _hasPatternProgress = true;
+      } else {
+        _hasPatternProgress = false;
+      }
+
+      // Removed posture/angle mapping (not sent in TL telemetry)
     });
   }
 
@@ -3131,11 +3162,17 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
   }
 
   int get _patternElapsedSeconds {
+    if (_hasPatternProgress) {
+      return _patternElapsedSecondsState;
+    }
     if (_totalElapsedSeconds <= 0) return 0;
     return math.max(0, _totalElapsedSeconds - _lastPatternStartElapsed);
   }
 
   int get _patternDurationSeconds {
+    if (_hasPatternProgress) {
+      return _patternElapsedSecondsState + _patternRemainingSecondsState;
+    }
     final guess =
         _lastKnownPatternDurationSeconds ?? (_totalDurationSeconds ~/ 7);
     return math.max(20, guess);
@@ -3165,7 +3202,10 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
       1.0,
     );
 
-    final friendlyPattern = friendlyTherapyPatternLabel(_lastPatternName);
+    final cachedId = widget.deviceService.latestTherapyPatternId;
+    final friendlyPattern = cachedId >= 0
+        ? therapyPatternName(cachedId)
+        : friendlyTherapyPatternLabel(_lastPatternName);
     final pillLabel =
         friendlyPattern.isEmpty ||
             friendlyPattern.toLowerCase() == 'preparing pattern...' ||
@@ -3294,6 +3334,7 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
               ),
               const SizedBox(height: 20),
               _NowPatternPill(label: pillLabel),
+              // Removed posture badge layout (not sent in TL telemetry)
             ],
           ),
         ),

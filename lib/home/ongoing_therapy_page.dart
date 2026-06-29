@@ -49,6 +49,11 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   late final DateTime _pageOpenedAt;
   int? _lastKnownPatternDurationSeconds;
 
+  // Real-time pattern progress and posture state variables (V5)
+  int _patternElapsedSecondsState = 0;
+  int _patternRemainingSecondsState = -1;
+  bool _hasPatternProgress = false;
+
   // Local 1 Hz tick keeps the countdown buttery-smooth between BLE frames
   // (firmware batches JSON every 2-5s, so raw-mirroring caused the timer to
   // jump 5+ seconds at a time). Whenever a fresh frame lands we snap this
@@ -315,6 +320,11 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         widget.deviceService.therapyRemainingSecondsNow;
     final anchoredElapsed =
         widget.deviceService.therapyElapsedSecondsNow;
+    final anchoredPatternRemaining =
+        widget.deviceService.therapyPatternRemainingSecondsNow;
+    final anchoredPatternElapsed =
+        widget.deviceService.therapyPatternElapsedSecondsNow;
+
     setState(() {
       if (anchoredRemaining >= 0) {
         _totalRemainingSeconds = anchoredRemaining;
@@ -325,6 +335,19 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         _totalElapsedSeconds = anchoredElapsed;
       } else {
         _totalElapsedSeconds += 1;
+      }
+
+      if (_hasPatternProgress) {
+        if (anchoredPatternRemaining >= 0) {
+          _patternRemainingSecondsState = anchoredPatternRemaining;
+        } else if (_patternRemainingSecondsState > 0) {
+          _patternRemainingSecondsState -= 1;
+        }
+        if (anchoredPatternElapsed >= 0) {
+          _patternElapsedSecondsState = anchoredPatternElapsed;
+        } else {
+          _patternElapsedSecondsState += 1;
+        }
       }
     });
   }
@@ -387,7 +410,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
       // for the "phone reconnects mid-session" case where the duration we
       // were constructed with is a guess (e.g. 10 m default) but the pod
       // is actually running a 20 m session.
-      final firmwareTotal = elapsed + remaining;
+      final firmwareTotal = reading.therapyTotalDurationSeconds > 0 ? reading.therapyTotalDurationSeconds : (elapsed + remaining);
       if (firmwareTotal > 0) {
         _totalDurationSeconds = firmwareTotal;
       }
@@ -397,6 +420,16 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
           reading.therapyIntensityLevel <= 3) {
         _intensityLevel = reading.therapyIntensityLevel;
       }
+
+      if (reading.therapyPatternRemainingSeconds > 0 || reading.therapyPatternElapsedSeconds > 0) {
+        _patternElapsedSecondsState = reading.therapyPatternElapsedSeconds;
+        _patternRemainingSecondsState = reading.therapyPatternRemainingSeconds;
+        _hasPatternProgress = true;
+      } else {
+        _hasPatternProgress = false;
+      }
+
+      // Removed posture/angle mapping (not sent in TL telemetry)
 
       // Track when the current pattern started so we can show elapsed-in-pattern
       // without asking firmware for it. Pattern boundaries are detected by a
@@ -419,10 +452,10 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         _lastPatternStartElapsed = elapsed;
       }
 
-      // Pull the full plan from the device. Firmware may publish sequence
-      // fields a few JSON frames after therapy starts; once we have it we
-      // keep it (don't let a momentarily missing frame blank the UI).
-      // therapyPatternSequence is deprecated
+      // Pull the full plan from the device.
+      if (reading.therapyPatternSequence.isNotEmpty) {
+        _patternPlan = List<int>.unmodifiable(reading.therapyPatternSequence);
+      }
       if (reading.therapyTotalPatterns > 0) {
         _totalPatternSlots = reading.therapyTotalPatterns;
       }
@@ -474,6 +507,10 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
 
   String? _friendlyLivePatternName() {
     final raw = widget.deviceService.latestTherapyPatternName;
+    final id = widget.deviceService.latestTherapyPatternId;
+    if (id >= 0) {
+      return therapyPatternName(id);
+    }
     if (raw.trim().isEmpty) return null;
     final label = friendlyTherapyPatternLabel(raw);
     return label.isEmpty ? null : label;
@@ -481,6 +518,10 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
 
   String? _friendlyLivePatternDescription() {
     final raw = widget.deviceService.latestTherapyPatternName;
+    final id = widget.deviceService.latestTherapyPatternId;
+    if (id >= 0) {
+      return therapyPatternDescription(id);
+    }
     if (raw.trim().isEmpty) return null;
     final idx = therapyPatternIndexFromName(_stripSessionMeta(raw));
     if (idx == null) return null;
@@ -533,11 +574,17 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   }
 
   int get _patternElapsedSeconds {
+    if (_hasPatternProgress) {
+      return _patternElapsedSecondsState;
+    }
     if (_totalElapsedSeconds <= 0) return 0;
     return math.max(0, _totalElapsedSeconds - _lastPatternStartElapsed);
   }
 
   int get _patternDurationSeconds {
+    if (_hasPatternProgress) {
+      return _patternElapsedSecondsState + _patternRemainingSecondsState;
+    }
     // Best estimate for the current pattern length:
     //   1. last completed pattern's observed duration, else
     //   2. total session / 7 (firmware uses ~1 min per pattern but clamps to
@@ -611,6 +658,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
                         deviceService: widget.deviceService,
                       ),
                     ),
+                    // Removed posture badge layout (not sent in TL telemetry)
                     const SizedBox(height: 6),
                     Expanded(
                       child: _StaggeredEntrance(

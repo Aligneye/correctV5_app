@@ -107,3 +107,11 @@ int? therapyPatternIndexFromName(String rawPattern) {
 
   return null;
 }
+
+String firmwarePatternName(int patternIndex) {
+  if (patternIndex >= 0 && patternIndex < _kFirmwarePatternNames.length) {
+    return _kFirmwarePatternNames[patternIndex];
+  }
+  return 'Unknown';
+}
+
