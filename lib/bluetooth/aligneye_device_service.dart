@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:correctv1/services/therapy_pattern_names.dart';
 
 const _kServiceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const _kCharacteristicUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
@@ -115,6 +116,14 @@ class PostureReading {
   /// `t_total`; used as a fallback length when `t_seq` is missing so the
   /// pager can still render a placeholder card per slot.
   final int therapyTotalPatterns;
+
+  /// New V5 fields for exact pattern, session, and total duration tracking.
+  final int therapyPatternId;
+  final int therapyTotalDurationSeconds;
+  final int therapyPatternDurationSeconds;
+  final int therapyPatternElapsedSeconds;
+  final int therapyPatternRemainingSeconds;
+
   final int liveSessionId;
   final int liveSessionElapsedSeconds;
   final int liveSessionStartEpoch;
@@ -158,6 +167,11 @@ class PostureReading {
     required this.therapyPatternSequence,
     required this.therapyCurrentPatternIndex,
     required this.therapyTotalPatterns,
+    this.therapyPatternId = -1,
+    this.therapyTotalDurationSeconds = 0,
+    this.therapyPatternDurationSeconds = 0,
+    this.therapyPatternElapsedSeconds = 0,
+    this.therapyPatternRemainingSeconds = 0,
     required this.liveSessionId,
     required this.liveSessionElapsedSeconds,
     required this.liveSessionStartEpoch,
@@ -200,9 +214,12 @@ class PostureReading {
       isCal = v == true || v?.toString() == 'true';
     }
 
+    final tType = json['t']?.toString().toUpperCase();
+    final parsedMode = json['mode'] ?? (tType == 'TP' || tType == 'TL' ? 'THERAPY' : null);
+
     return PostureReading(
       mode: normalizeDeviceMode(
-        json['mode'],
+        parsedMode,
         fallback: current?.mode ?? 'IDLE',
       ),
       subMode: json['sub_mode']?.toString() ?? current?.subMode ?? 'INSTANT',
@@ -261,7 +278,7 @@ class PostureReading {
       profile: json['profile']?.toString() ?? current?.profile ?? '',
       difficultyDeg: toIntOrNull(json['difficulty_angle'] ?? json['difficulty_deg']) ?? current?.difficultyDeg ?? 25,
       therapyPattern: () {
-        final val = json['t_patt'] ?? json['therapy_pattern'];
+        final val = json['t_patt'] ?? json['therapy_pattern'] ?? (json['pid'] != null ? firmwarePatternName(toInt(json['pid'])) : null);
         return val != null ? val.toString() : (current?.therapyPattern ?? '');
       }(),
       therapyNextPattern: () {
@@ -269,20 +286,23 @@ class PostureReading {
         return val != null ? val.toString() : (current?.therapyNextPattern ?? '');
       }(),
       therapyElapsedSeconds: () {
-        final val = json['t_elap'] ?? json['therapy_elapsed_sec'];
+        final val = json['t_elap'] ?? json['therapy_elapsed_sec'] ?? json['elapsed'] ?? (json['t']?.toString().toUpperCase() == 'TP' ? 0 : null);
         return val != null ? toInt(val) : (current?.therapyElapsedSeconds ?? 0);
       }(),
       therapyRemainingSeconds: () {
-        final val = json['t_rem'] ?? json['therapy_remaining_sec'];
+        final val = json['t_rem'] ?? json['therapy_remaining_sec'] ?? json['remaining'] ?? json['duration'];
         return val != null ? toInt(val) : (current?.therapyRemainingSeconds ?? 0);
       }(),
       therapyIntensityLevel: () {
-        final val = json['t_lvl'] ?? json['therapy_intensity_level'];
+        final val = json['t_lvl'] ?? json['therapy_intensity_level'] ?? json['intensity'];
         return val != null ? toInt(val) : (current?.therapyIntensityLevel ?? 0);
       }(),
       therapyPatternSequence: () {
-        final val = json['t_seq'] ?? json['therapy_pattern_sequence'];
+        final val = json['t_seq'] ?? json['therapy_pattern_sequence'] ?? json['seq'];
         if (val != null) {
+          if (val is List) {
+            return val.map((e) => toInt(e)).toList();
+          }
           final raw = val.toString();
           if (raw.trim().isEmpty) return const <int>[];
           final out = <int>[];
@@ -295,18 +315,44 @@ class PostureReading {
         return current?.therapyPatternSequence ?? const <int>[];
       }(),
       therapyCurrentPatternIndex: () {
-        final raw = json['t_cur'] ?? json['therapy_current_pattern_index'];
+        final raw = json['t_cur'] ?? json['therapy_current_pattern_index'] ?? (json['idx'] != null ? toInt(json['idx']) - 1 : null);
         if (raw == null) return current?.therapyCurrentPatternIndex ?? -1;
         if (raw is int) return raw;
         if (raw is num) return raw.toInt();
         return int.tryParse(raw.toString()) ?? -1;
       }(),
       therapyTotalPatterns: () {
-        final val = json['t_total'] ?? json['therapy_total_patterns'];
+        final val = json['t_total'] ?? json['therapy_total_patterns'] ?? json['total'];
         return val != null ? toInt(val) : (current?.therapyTotalPatterns ?? 0);
       }(),
+      therapyPatternId: () {
+        final val = json['pid'] ?? (json['idx'] != null && json['seq'] is List ? (json['seq'] as List)[toInt(json['idx']) - 1] : null);
+        if (val != null) return toInt(val);
+        final pattStr = json['t_patt'] ?? json['therapy_pattern'];
+        if (pattStr != null) {
+          final idx = therapyPatternIndexFromName(pattStr.toString());
+          if (idx != null) return idx;
+        }
+        return current?.therapyPatternId ?? -1;
+      }(),
+      therapyTotalDurationSeconds: () {
+        final val = json['duration'] ?? (json['remaining'] != null && json['elapsed'] != null ? toInt(json['remaining']) + toInt(json['elapsed']) : null) ?? (json['t_rem'] != null && json['t_elap'] != null ? toInt(json['t_rem']) + toInt(json['t_elap']) : null);
+        return val != null ? toInt(val) : (current?.therapyTotalDurationSeconds ?? 0);
+      }(),
+      therapyPatternDurationSeconds: () {
+        final val = json['pattern_dur'] ?? (json['p_remaining'] != null && json['p_elapsed'] != null ? toInt(json['p_remaining']) + toInt(json['p_elapsed']) : null);
+        return val != null ? toInt(val) : (current?.therapyPatternDurationSeconds ?? 0);
+      }(),
+      therapyPatternElapsedSeconds: () {
+        final val = json['p_elapsed'] ?? (json['t']?.toString().toUpperCase() == 'TP' ? 0 : null);
+        return val != null ? toInt(val) : (current?.therapyPatternElapsedSeconds ?? 0);
+      }(),
+      therapyPatternRemainingSeconds: () {
+        final val = json['p_remaining'] ?? (json['t']?.toString().toUpperCase() == 'TP' ? json['pattern_dur'] : null);
+        return val != null ? toInt(val) : (current?.therapyPatternRemainingSeconds ?? 0);
+      }(),
       liveSessionId: () {
-        final val = json['s_id'] ?? json['session_id'];
+        final val = json['s_id'] ?? json['session_id'] ?? json['sid'];
         return val != null ? toInt(val) : (current?.liveSessionId ?? 0);
       }(),
       liveSessionElapsedSeconds: () {
@@ -462,6 +508,9 @@ class AlignEyeDeviceService {
   int latestTherapyTotalPatterns = 0;
   String latestTherapyPatternName = '';
   String latestTherapyNextPatternName = '';
+  int latestTherapyPatternId = -1;
+  int latestTherapyTotalDurationSeconds = 0;
+  int latestTherapyPatternDurationSeconds = 0;
 
   /// Single source of truth for the therapy countdown so every UI surface
   /// (home mini card + immersive ongoing page) reads the same number.
@@ -472,6 +521,9 @@ class AlignEyeDeviceService {
   int _therapyRemainingAnchorSec = -1;
   int _therapyElapsedAnchorSec = 0;
   DateTime? _therapyAnchorAt;
+
+  int _patternElapsedAnchorSec = 0;
+  int _patternRemainingAnchorSec = -1;
 
   /// Latest firmware-reported remaining seconds, extrapolated to "right now"
   /// by the wall clock. Returns -1 when no therapy frame has been seen yet.
@@ -498,8 +550,25 @@ class AlignEyeDeviceService {
   /// that both the mini home card and the immersive page can share.
   int _currentPatternStartElapsedSec = 0;
   int get therapyPatternElapsedSecondsNow {
+    if (_patternRemainingAnchorSec >= 0) {
+      final anchor = _therapyAnchorAt;
+      if (anchor == null) return _patternElapsedAnchorSec;
+      final elapsed = DateTime.now().difference(anchor).inSeconds;
+      return _patternElapsedAnchorSec + elapsed;
+    }
     final value = therapyElapsedSecondsNow - _currentPatternStartElapsedSec;
     return value < 0 ? 0 : value;
+  }
+
+  int get therapyPatternRemainingSecondsNow {
+    if (_patternRemainingAnchorSec >= 0) {
+      final anchor = _therapyAnchorAt;
+      if (anchor == null) return _patternRemainingAnchorSec;
+      final elapsed = DateTime.now().difference(anchor).inSeconds;
+      final value = _patternRemainingAnchorSec - elapsed;
+      return value < 0 ? 0 : value;
+    }
+    return -1;
   }
 
   BluetoothDevice? _device;
@@ -513,6 +582,7 @@ class AlignEyeDeviceService {
   Timer? _connectionTimeoutTimer;
   Timer? _reconnectTimer;
   int _connectionRetryCount = 0;
+  DateTime? _lastTherapyPlanRequestedAt;
   static const int _maxRetries = 1;
   static const Duration _connectionTimeout = Duration(seconds: 30);
   static const Duration _serviceDiscoveryTimeout = Duration(seconds: 8);
@@ -701,6 +771,11 @@ class AlignEyeDeviceService {
   Future<bool> getProfiles() async {
     if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
     return _writeJsonCommand({'cmd': 'GET_PROFILES'});
+  }
+
+  Future<bool> getTherapyPlan() async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    return _writeJsonCommand({'cmd': 'GET_THERAPY_PLAN'});
   }
 
   Future<bool> sendCalibrationStartJson({String name = 'Profile'}) async {
@@ -1949,6 +2024,15 @@ class AlignEyeDeviceService {
               final reading = PostureReading.fromJson(decoded, current: currentReading.value);
               _updateTherapyCache(reading);
               _emitReading(reading, throttle: false);
+
+              if (reading.mode.toUpperCase() == 'THERAPY' && latestTherapyPatternSequence.isEmpty) {
+                final now = DateTime.now();
+                if (_lastTherapyPlanRequestedAt == null ||
+                    now.difference(_lastTherapyPlanRequestedAt!).inSeconds >= 5) {
+                  _lastTherapyPlanRequestedAt = now;
+                  getTherapyPlan();
+                }
+              }
               break;
 
             case 'T':
@@ -2303,6 +2387,15 @@ class AlignEyeDeviceService {
       if (reading.therapyTotalPatterns > 0) {
         latestTherapyTotalPatterns = reading.therapyTotalPatterns;
       }
+      if (reading.therapyPatternId >= 0) {
+        latestTherapyPatternId = reading.therapyPatternId;
+      }
+      if (reading.therapyTotalDurationSeconds > 0) {
+        latestTherapyTotalDurationSeconds = reading.therapyTotalDurationSeconds;
+      }
+      if (reading.therapyPatternDurationSeconds > 0) {
+        latestTherapyPatternDurationSeconds = reading.therapyPatternDurationSeconds;
+      }
       final pattName = reading.therapyPattern.trim();
       if (pattName.isNotEmpty) {
         // Firmware decorates the name with "[S2:13 0s]" — strip it
@@ -2333,6 +2426,9 @@ class AlignEyeDeviceService {
         _therapyRemainingAnchorSec = reading.therapyRemainingSeconds;
         _therapyElapsedAnchorSec = reading.therapyElapsedSeconds;
         _therapyAnchorAt = DateTime.now();
+
+        _patternElapsedAnchorSec = reading.therapyPatternElapsedSeconds;
+        _patternRemainingAnchorSec = reading.therapyPatternRemainingSeconds;
       }
     } else {
       // Device left therapy mode — clear the cache so the next session
@@ -2342,10 +2438,16 @@ class AlignEyeDeviceService {
       latestTherapyTotalPatterns = 0;
       latestTherapyPatternName = '';
       latestTherapyNextPatternName = '';
+      latestTherapyPatternId = -1;
+      latestTherapyTotalDurationSeconds = 0;
+      latestTherapyPatternDurationSeconds = 0;
       _therapyRemainingAnchorSec = -1;
       _therapyElapsedAnchorSec = 0;
       _therapyAnchorAt = null;
       _currentPatternStartElapsedSec = 0;
+      _patternElapsedAnchorSec = 0;
+      _patternRemainingAnchorSec = -1;
+      _lastTherapyPlanRequestedAt = null;
     }
   }
 }
