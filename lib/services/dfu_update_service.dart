@@ -14,24 +14,30 @@ class DfuUpdateService {
         deviceAddress,
         firmwareZipPath,
         fileInAsset: false,
-        onProgressChanged: (
-          address,
-          percent,
-          speed,
-          avgSpeed,
-          currentPart,
-          partsTotal,
-        ) {
-          onProgress(percent);
-        },
-        onDfuCompleted: (address) {
-          debugPrint('DFU completed on $address');
-          onCompleted();
-        },
-        onError: (address, error, errorType, message) {
-          debugPrint('DFU error on $address: $message (type=$errorType)');
-          onError(message);
-        },
+        numberOfPackets: 6,
+        androidParameters: const AndroidParameters(
+          packetReceiptNotificationsEnabled: true,
+        ),
+        dfuEventHandler: DfuEventHandler(
+          onProgressChanged: (
+            address,
+            percent,
+            speed,
+            avgSpeed,
+            currentPart,
+            partsTotal,
+          ) {
+            onProgress(percent);
+          },
+          onDfuCompleted: (address) {
+            debugPrint('DFU completed on $address');
+            onCompleted();
+          },
+          onError: (address, error, errorType, message) {
+            debugPrint('DFU error on $address: $message (type=$errorType)');
+            onError(message);
+          },
+        ),
       );
     } catch (e) {
       debugPrint('DFU exception: $e');

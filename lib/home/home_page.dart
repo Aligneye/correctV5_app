@@ -7,7 +7,6 @@ import 'package:correctv1/bluetooth/device_connect_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:correctv1/home/meditation_page.dart';
@@ -22,12 +21,11 @@ import 'package:correctv1/components/nav_bar.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
 import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/services/device_manager.dart';
+import 'package:correctv1/services/firmware_manifest_service.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:correctv1/services/firmware_update_service.dart';
-import 'package:correctv1/settings/firmware_update_page.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -278,12 +276,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool _streakPopupCheckedThisSession = false;
   final GlobalKey _streakTileKey = GlobalKey();
 
-  // ── [TEMP DEBUG] Hardware log fields ─────────────────────────────
-  final List<Map<String, dynamic>> _debugLogs = [];
-  static const int _kMaxDebugLogs = 60;
-  bool _showDebugLog = false;
-  final ValueNotifier<int> _debugFrameCount = ValueNotifier<int>(0);
-
+  bool _deviceInfoRequestInFlight = false;
   static final List<_QuickMode> _quickModes = [
     _QuickMode(
       title: 'Therapy',
@@ -371,53 +364,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     // });
     _readingSubscription = _deviceService.readings.listen((reading) {
       if (!mounted) return;
-      // ── [TEMP DEBUG] Capture all hardware fields ──────────────
-      final debugEntry = <String, dynamic>{
-        'time': DateTime.now().toIso8601String().substring(11, 19),
-        'mode': reading.mode,
-        'subMode': reading.subMode,
-        // Posture
-        'angle': reading.angle,
-        'angleX': reading.angleX,
-        'angleY': reading.angleY,
-        'angleZ': reading.angleZ,
-        'posture': reading.posture,
-        'isBad': reading.isBadPosture,
-        'difficulty': reading.difficultyDeg,
-        // Raw sensor
-        'rawX': reading.rawXG,
-        'rawY': reading.rawYG,
-        'rawZ': reading.rawZG,
-        'calY': reading.calY,
-        'calZ': reading.calZ,
-        // Battery
-        'batV': reading.batteryVoltage,
-        'bat%': reading.batteryPercentage,
-        // Calibration
-        'isCalib': reading.isCalibrating,
-        'calibPhase': reading.calibrationPhase,
-        'calibResult': reading.calibrationResult,
-        'calibElapsed': reading.calibrationElapsedMs,
-        'calibTotal': reading.calibrationTotalMs,
-        // Therapy
-        'tPattern': reading.therapyPattern,
-        'tNextPat': reading.therapyNextPattern,
-        'tElapsed': reading.therapyElapsedSeconds,
-        'tRemaining': reading.therapyRemainingSeconds,
-        'tIntensity': reading.therapyIntensityLevel,
-        'tCurIndex': reading.therapyCurrentPatternIndex,
-        'tTotal': reading.therapyTotalPatterns,
-        'tSeq': reading.therapyPatternSequence.join(','),
-        // Live session
-        'sessId': reading.liveSessionId,
-        'sessElapsed': reading.liveSessionElapsedSeconds,
-        'sessBadCount': reading.liveSessionBadCount,
-        'sessEpoch': reading.liveSessionStartEpoch,
-      };
-      if (_debugLogs.length >= _kMaxDebugLogs) _debugLogs.removeAt(0);
-      _debugLogs.add(debugEntry);
-      _debugFrameCount.value++;
-      // ─────────────────────────────────────────────────────────
       if (reading.isBadPosture != isBadPostureNotifier.value ||
           reading.mode != _lastMode) {
         FlutterBackgroundService().invoke('posture_update', {
@@ -539,14 +485,20 @@ class _HomeDashboardState extends State<HomeDashboard>
       }
     });
 
-    FirmwareUpdateService.instance.state.addListener(_onFirmwareStateChanged);
-
     unawaited(_handleStartupDevicePrompt());
     _lastSyncTick = _deviceManager.syncCompletedTick.value;
     _deviceManager.syncCompletedTick.addListener(_handleSessionSyncFinished);
     _deviceManager.isSyncing.addListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.addListener(_handleActiveSessionChanged);
     _deviceService.connectionStatus.addListener(_handleConnectionStatusChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _printDeviceInfoStatus('startup');
+      if (_deviceService.connectionStatus.value ==
+          DeviceConnectionStatus.connected) {
+        unawaited(_logDeviceInfoAfterConnectionDelay());
+      }
+    });
     unawaited(_hydrateCachedStreak());
     unawaited(_loadOfflineSessions());
   }
@@ -570,9 +522,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   @override
   void dispose() {
     _readingSubscription?.cancel();
-    FirmwareUpdateService.instance.state.removeListener(
-      _onFirmwareStateChanged,
-    );
     _deviceManager.syncCompletedTick.removeListener(_handleSessionSyncFinished);
     _deviceManager.isSyncing.removeListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.removeListener(_handleActiveSessionChanged);
@@ -588,7 +537,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     _liveSessionTicker = null;
 
     postureAngleNotifier.dispose();
-    _debugFrameCount.dispose();
+
     isBadPostureNotifier.dispose();
     postureStatusNotifier.dispose();
     _batteryLevel.dispose();
@@ -596,137 +545,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     // unawaited(_deviceService.dispose());
     _controller.dispose();
     super.dispose();
-  }
-
-  void _onFirmwareStateChanged() {
-    if (!mounted) return;
-    if (FirmwareUpdateService.instance.state.value ==
-        FirmwareUpdateState.ready) {
-      _showFirmwareUpdateBanner();
-    }
-  }
-
-  Future<void> _showFirmwareUpdateBanner() async {
-    final manifest = FirmwareUpdateService.instance.manifest;
-    if (manifest == null) return;
-
-    // Check snooze: skip dialog until the snoozed date has passed.
-    final prefs = await SharedPreferences.getInstance();
-    final snoozeUntil = prefs.getInt('firmware_snooze_until_ms');
-    if (snoozeUntil != null &&
-        DateTime.now().millisecondsSinceEpoch < snoozeUntil) {
-      return;
-    }
-
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                gradient: AppTheme.brandGradient,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(
-                Icons.system_update_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Firmware Update Ready',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Version ${manifest.latestVersion} is ready to install.',
-              style: const TextStyle(color: Colors.grey, fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-            if (manifest.releaseNotes.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              ...manifest.releaseNotes.map(
-                (note) => Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('• ', style: TextStyle(color: Colors.grey)),
-                      Expanded(
-                        child: Text(
-                          note,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              final prefs = await SharedPreferences.getInstance();
-              final snoozeUntil = DateTime.now()
-                  .add(const Duration(days: 7))
-                  .millisecondsSinceEpoch;
-              await prefs.setInt('firmware_snooze_until_ms', snoozeUntil);
-            },
-            child: const Text(
-              'Remind me next week',
-              style: TextStyle(color: Colors.grey),
-            ),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              Navigator.of(context).push(
-                PageRouteBuilder(
-                  transitionDuration: const Duration(milliseconds: 320),
-                  reverseTransitionDuration: const Duration(milliseconds: 260),
-                  pageBuilder: (_, animation, __) => const FirmwareUpdatePage(),
-                  transitionsBuilder: (_, animation, __, child) =>
-                      FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position:
-                              Tween<Offset>(
-                                begin: const Offset(0, 0.06),
-                                end: Offset.zero,
-                              ).animate(
-                                CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeOutCubic,
-                                ),
-                              ),
-                          child: child,
-                        ),
-                      ),
-                ),
-              );
-            },
-            child: const Text('Install Now'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _handleSyncingChanged() {
@@ -748,28 +566,97 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   void _handleConnectionStatusChanged() {
     _syncLiveSessionTickerWithConnection();
+    _printDeviceInfoStatus('connection_changed');
 
     if (_deviceService.connectionStatus.value ==
         DeviceConnectionStatus.connected) {
       unawaited(_loadOfflineSessions());
-
-      // If a firmware update is already downloaded and waiting, show the
-      // banner again — user reconnected without installing yet.
-      if (FirmwareUpdateService.instance.state.value ==
-          FirmwareUpdateState.ready) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _showFirmwareUpdateBanner();
-        });
-      } else {
-        // Silent background firmware check + download
-        unawaited(
-          FirmwareUpdateService.instance.onDeviceConnected(_deviceService),
-        );
-      }
-    } else {
-      // Device disconnected — reset so next connection triggers fresh check
-      FirmwareUpdateService.instance.reset();
+      unawaited(_logDeviceInfoAfterConnectionDelay());
     }
+  }
+
+  Future<void> _logDeviceInfoAfterConnectionDelay() async {
+    if (_deviceInfoRequestInFlight) return;
+    _deviceInfoRequestInFlight = true;
+    _printDeviceInfoLog('GET_DEVICE_INFO will be sent in 5 seconds');
+    await Future<void>.delayed(const Duration(seconds: 5));
+    if (!mounted ||
+        _deviceService.connectionStatus.value !=
+            DeviceConnectionStatus.connected) {
+      _deviceInfoRequestInFlight = false;
+      _printDeviceInfoStatus('send_cancelled');
+      return;
+    }
+
+    _printDeviceInfoLog('Sending GET_DEVICE_INFO now');
+    final info = await _deviceService.getDeviceInfo();
+    _deviceInfoRequestInFlight = false;
+    if (info == null) {
+      _printDeviceInfoLog('GET_DEVICE_INFO: no response from device');
+      return;
+    }
+    unawaited(_checkFirmwareLatestInSupabase(info));
+  }
+
+  Future<void> _checkFirmwareLatestInSupabase(DeviceInfo info) async {
+    _printDeviceInfoLog(
+      'Checking Supabase firmware version for '
+      'model=${info.model}, hw=${info.hardwareRevision}, fw=${info.firmwareVersion}',
+    );
+
+    final manifest = await FirmwareManifestService()
+        .fetchLatestForDeviceFromSupabase(
+          deviceModel: info.model,
+          hardwareRevision: info.hardwareRevision,
+        );
+
+    if (manifest == null) {
+      _printDeviceInfoLog(
+        'Supabase firmware check: no active firmware row found for '
+        'model=${info.model}, hw=${info.hardwareRevision}',
+      );
+      return;
+    }
+
+    final hasUpdate = FirmwareManifestService.isNewerVersion(
+      manifest.latestVersion,
+      info.firmwareVersion,
+    );
+
+    _printDeviceInfoLog(
+      'Supabase firmware check result: '
+      'current=${info.firmwareVersion}, '
+      'latest=${manifest.latestVersion}, '
+      'build=${manifest.buildNumber}, '
+      'updateAvailable=$hasUpdate',
+    );
+
+    if (hasUpdate) {
+      _printDeviceInfoLog(
+        'Firmware update available: '
+        'current=${info.firmwareVersion}, latest=${manifest.latestVersion}, '
+        'notes=${manifest.releaseNotes.join(" | ")}, '
+        'url=${manifest.firmwareUrl}',
+      );
+    } else {
+      _printDeviceInfoLog(
+        'Firmware is latest: ${info.firmwareVersion}',
+      );
+    }
+  }
+
+  void _printDeviceInfoStatus(String reason) {
+    _printDeviceInfoLog(
+      'Device info status [$reason]: '
+      '${_deviceService.connectionStatus.value}',
+    );
+  }
+
+  void _printDeviceInfoLog(String message) {
+    final line = '[DEVICE_INFO] $message';
+    debugPrint(line);
+    // ignore: avoid_print
+    print(line);
   }
 
   void _syncLiveSessionTickerWithConnection() {
@@ -2292,25 +2179,6 @@ class _HomeDashboardState extends State<HomeDashboard>
                   },
                 ),
               ),
-              const SizedBox(height: 24),
-              // ── [TEMP DEBUG] Remove before release ─────────────
-              ValueListenableBuilder<int>(
-                valueListenable: _debugFrameCount,
-                builder: (context, _, __) {
-                  return _DebugLogSection(
-                    visible: _showDebugLog,
-                    logs: _debugLogs,
-                    onToggle: () =>
-                        setState(() => _showDebugLog = !_showDebugLog),
-                    onClear: () {
-                      _debugLogs.clear();
-                      _debugFrameCount.value = 0;
-                    },
-                  );
-                },
-              ),
-
-              // ───────────────────────────────────────────────────
             ],
           ),
         ),
@@ -6831,302 +6699,6 @@ class _AllModesSheetItem extends StatelessWidget {
   }
 }
 
-// ── [TEMP DEBUG] Remove this entire class before release ─────────
-class _DebugLogSection extends StatelessWidget {
-  final bool visible;
-  final List<Map<String, dynamic>> logs;
-  final VoidCallback onToggle;
-  final VoidCallback onClear;
-
-  const _DebugLogSection({
-    required this.visible,
-    required this.logs,
-    required this.onToggle,
-    required this.onClear,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final latest = logs.isNotEmpty ? logs.last : null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Toggle bar
-        Row(
-          children: [
-            Expanded(
-              child: GestureDetector(
-                onTap: onToggle,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.bug_report_rounded,
-                        color: Color(0xFF94A3B8),
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        visible
-                            ? '▲ Hide Hardware Log'
-                            : '▼ Hardware Debug Log  (${logs.length} frames)',
-                        style: const TextStyle(
-                          color: Color(0xFF94A3B8),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (visible) ...[
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: onClear,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF7F1D1D),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    'Clear',
-                    style: TextStyle(
-                      color: Color(0xFFFCA5A5),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-
-        if (visible) ...[
-          const SizedBox(height: 8),
-
-          // Latest frame — full detail card
-          if (latest != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: const Color(0xFF22C55E).withOpacity(0.4),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '● LATEST FRAME  [${latest['time']}]',
-                    style: const TextStyle(
-                      color: Color(0xFF22C55E),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const Divider(color: Color(0xFF1E293B), height: 12),
-                  _DebugGrid(
-                    entries: [
-                      // Basic
-                      _kv('mode', latest['mode']),
-                      _kv('subMode', latest['subMode']),
-                      _kv('posture', latest['posture']),
-                      _kv('isBad', latest['isBad']),
-                      _kv('difficulty', '${latest['difficulty']}°'),
-                      // Angle
-                      _kv(
-                        'angle',
-                        '${(latest['angle'] as double).toStringAsFixed(2)}°',
-                      ),
-                      _kv(
-                        'angleX',
-                        '${(latest['angleX'] as double).toStringAsFixed(2)}°',
-                      ),
-                      _kv(
-                        'angleY',
-                        '${(latest['angleY'] as double).toStringAsFixed(2)}°',
-                      ),
-                      _kv(
-                        'angleZ',
-                        '${(latest['angleZ'] as double).toStringAsFixed(2)}°',
-                      ),
-                      // Raw sensor
-                      _kv(
-                        'rawX',
-                        (latest['rawX'] as double).toStringAsFixed(3),
-                      ),
-                      _kv(
-                        'rawY',
-                        (latest['rawY'] as double).toStringAsFixed(3),
-                      ),
-                      _kv(
-                        'rawZ',
-                        (latest['rawZ'] as double).toStringAsFixed(3),
-                      ),
-                      _kv(
-                        'calY',
-                        (latest['calY'] as double).toStringAsFixed(3),
-                      ),
-                      _kv(
-                        'calZ',
-                        (latest['calZ'] as double).toStringAsFixed(3),
-                      ),
-                      // Battery
-                      _kv('bat%', '${latest['bat%']}%'),
-                      _kv(
-                        'batV',
-                        '${(latest['batV'] as double).toStringAsFixed(2)}V',
-                      ),
-                      // Calibration
-                      _kv('isCalib', latest['isCalib']),
-                      _kv('calibPhase', latest['calibPhase']),
-                      _kv('calibResult', latest['calibResult']),
-                      _kv('calibElapsed', '${latest['calibElapsed']}ms'),
-                      _kv('calibTotal', '${latest['calibTotal']}ms'),
-                      // Therapy
-                      _kv('tPattern', latest['tPattern']),
-                      _kv('tNextPat', latest['tNextPat']),
-                      _kv('tElapsed', '${latest['tElapsed']}s'),
-                      _kv('tRemaining', '${latest['tRemaining']}s'),
-                      _kv('tIntensity', latest['tIntensity']),
-                      _kv('tCurIndex', latest['tCurIndex']),
-                      _kv('tTotal', latest['tTotal']),
-                      _kv(
-                        'tSeq',
-                        latest['tSeq'].toString().isEmpty
-                            ? '—'
-                            : latest['tSeq'],
-                      ),
-                      // Live session
-                      _kv('sessId', latest['sessId']),
-                      _kv('sessElapsed', '${latest['sessElapsed']}s'),
-                      _kv('sessBadCount', latest['sessBadCount']),
-                      _kv('sessEpoch', latest['sessEpoch']),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-
-          // Scrollable log history
-          Container(
-            height: 180,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF1E293B)),
-            ),
-            child: logs.isEmpty
-                ? const Center(
-                    child: Text(
-                      'Waiting for hardware data...',
-                      style: TextStyle(color: Color(0xFF475569), fontSize: 12),
-                    ),
-                  )
-                : ListView.builder(
-                    reverse: true,
-                    padding: const EdgeInsets.all(8),
-                    itemCount: logs.length,
-                    itemBuilder: (context, index) {
-                      final entry = logs[logs.length - 1 - index];
-                      final isLatest = index == 0;
-                      final line =
-                          '[${entry['time']}] mode=${entry['mode']}  '
-                          'angle=${(entry['angle'] as double).toStringAsFixed(1)}°  '
-                          'bad=${entry['isBad']}  '
-                          'bat=${entry['bat%']}%  '
-                          'sess=${entry['sessElapsed']}s';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 3),
-                        child: Text(
-                          line,
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontFamily: 'monospace',
-                            color: isLatest
-                                ? const Color(0xFF86EFAC)
-                                : const Color(0xFF475569),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  static Map<String, dynamic> _kv(String k, dynamic v) => {'k': k, 'v': v};
-}
-
-class _DebugGrid extends StatelessWidget {
-  final List<Map<String, dynamic>> entries;
-  const _DebugGrid({required this.entries});
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 6,
-      children: entries.map((e) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: '${e['k']}: ',
-                  style: const TextStyle(
-                    color: Color(0xFF64748B),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                TextSpan(
-                  text: '${e['v']}',
-                  style: const TextStyle(
-                    color: Color(0xFFE2E8F0),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-// ── [TEMP DEBUG END] ─────────────────────────────────────────────
 class _ComingSoonPage extends StatelessWidget {
   final String title;
   const _ComingSoonPage({required this.title});

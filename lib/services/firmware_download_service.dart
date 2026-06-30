@@ -5,6 +5,24 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 class FirmwareDownloadService {
+  Future<File> _fileForUrl(String url) async {
+    final appDir = await getApplicationSupportDirectory();
+    final firmwareDir = Directory('${appDir.path}/firmware_updates');
+    if (!await firmwareDir.exists()) {
+      await firmwareDir.create(recursive: true);
+    }
+    final fileName = url.split('/').last.split('?').first;
+    return File('${firmwareDir.path}/$fileName');
+  }
+
+  Future<String?> cachedDownloadPath(String url) async {
+    final file = await _fileForUrl(url);
+    if (await file.exists() && await file.length() > 0) {
+      return file.path;
+    }
+    return null;
+  }
+
   /// Downloads the firmware ZIP from [url] into the app cache directory.
   /// Reports download progress via [onProgress] (0.0 – 1.0).
   /// Throws if the download fails or the file is empty.
@@ -13,9 +31,7 @@ class FirmwareDownloadService {
     String url, {
     void Function(double)? onProgress,
   }) async {
-    final cacheDir = await getTemporaryDirectory();
-    final fileName = url.split('/').last.split('?').first;
-    final file = File('${cacheDir.path}/$fileName');
+    final file = await _fileForUrl(url);
 
     // Delete a previous incomplete download.
     if (await file.exists()) await file.delete();

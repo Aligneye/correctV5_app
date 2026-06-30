@@ -36,6 +36,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   late final AnimationController _wavesController;
 
   StreamSubscription<PostureReading>? _readingSub;
+  StreamSubscription<TherapyCompletion>? _therapyCompletionSub;
 
   // Live state mirrored from the device. Until the first therapy-mode JSON
   // arrives we show "Starting…" instead of fabricating a countdown.
@@ -89,6 +90,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   // notification; empty until the device announces the sequence.
   List<int> _patternPlan = const [];
   int _liveIndexInPlan = 0;
+
   /// Known session pattern count from firmware's `t_total`. Used when we
   /// know how long the plan is but firmware hasn't given us the full `t_seq`
   /// yet (e.g. a mid-session reconnect) — lets the pager still show N cards
@@ -182,6 +184,9 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
     }
 
     _readingSub = widget.deviceService.readings.listen(_handleReading);
+    _therapyCompletionSub = widget.deviceService.therapyCompletions.listen(
+      _handleTherapyCompletion,
+    );
 
     // Animate the "Starting..." dots while we wait for the first BLE frame.
     _startingDotTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
@@ -215,6 +220,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   @override
   void dispose() {
     _readingSub?.cancel();
+    _therapyCompletionSub?.cancel();
     _localTicker?.cancel();
     widget.deviceService.connectionStatus.removeListener(
       _handleConnectionStatus,
@@ -291,7 +297,7 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
   void _syncLocalTickerWithConnection() {
     final connected =
         widget.deviceService.connectionStatus.value ==
-            DeviceConnectionStatus.connected;
+        DeviceConnectionStatus.connected;
     if (connected && !_sessionEndedByDevice) {
       _ensureLocalTicker();
     } else {
@@ -333,10 +339,8 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         DeviceConnectionStatus.connected) {
       return;
     }
-    final anchoredRemaining =
-        widget.deviceService.therapyRemainingSecondsNow;
-    final anchoredElapsed =
-        widget.deviceService.therapyElapsedSecondsNow;
+    final anchoredRemaining = widget.deviceService.therapyRemainingSecondsNow;
+    final anchoredElapsed = widget.deviceService.therapyElapsedSecondsNow;
     final anchoredPatternRemaining =
         widget.deviceService.therapyPatternRemainingSecondsNow;
     final anchoredPatternElapsed =
@@ -373,6 +377,54 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
     _consumeReading(reading);
   }
 
+  void _handleTherapyCompletion(TherapyCompletion completion) {
+    if (!mounted) return;
+    setState(() {
+      _sessionEndedByDevice = true;
+      _deviceFrameReceived = true;
+      _hasSeenValidTherapyFrame = true;
+      _frameRemainingSeconds = 0;
+      _totalRemainingSeconds = 0;
+      if (completion.elapsedSeconds > 0) {
+        _totalElapsedSeconds = completion.elapsedSeconds;
+      }
+      if (completion.durationSeconds > 0) {
+        _totalDurationSeconds = completion.durationSeconds;
+      }
+      if (completion.patternDurationSeconds > 0) {
+        _patternElapsedSecondsState = completion.patternDurationSeconds;
+        _patternRemainingSecondsState = 0;
+        _lastKnownPatternDurationSeconds = completion.patternDurationSeconds;
+        _hasPatternProgress = true;
+      }
+      if (completion.patternSequence.isNotEmpty) {
+        _patternPlan = List<int>.unmodifiable(completion.patternSequence);
+      }
+      if (completion.totalPatterns > 0) {
+        _totalPatternSlots = completion.totalPatterns;
+        _liveIndexInPlan = (completion.totalPatterns - 1).clamp(
+          0,
+          completion.totalPatterns - 1,
+        );
+        _visiblePatternPage = _liveIndexInPlan;
+      }
+    });
+
+    _startingDotTimer?.cancel();
+    _startingDotTimer = null;
+    _overlayFallbackTimer?.cancel();
+    _overlayFallbackTimer = null;
+    _localTicker?.cancel();
+    _localTicker = null;
+    _breathController.stop();
+    _wavesController.stop();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_patternPageController.hasClients) return;
+      _patternPageController.jumpToPage(_liveCardIndex());
+    });
+  }
+
   void _consumeReading(PostureReading? reading) {
     if (reading == null || !mounted) return;
 
@@ -387,7 +439,8 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
     setState(() {
       if (!isTherapy) {
         final startupWindowPassed =
-            DateTime.now().difference(_pageOpenedAt) > const Duration(seconds: 5);
+            DateTime.now().difference(_pageOpenedAt) >
+            const Duration(seconds: 5);
 
         final sessionActuallyNearEnd =
             _totalDurationSeconds > 0 &&
@@ -427,7 +480,9 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
       // for the "phone reconnects mid-session" case where the duration we
       // were constructed with is a guess (e.g. 10 m default) but the pod
       // is actually running a 20 m session.
-      final firmwareTotal = reading.therapyTotalDurationSeconds > 0 ? reading.therapyTotalDurationSeconds : (elapsed + remaining);
+      final firmwareTotal = reading.therapyTotalDurationSeconds > 0
+          ? reading.therapyTotalDurationSeconds
+          : (elapsed + remaining);
       if (firmwareTotal > 0) {
         _totalDurationSeconds = firmwareTotal;
       }
@@ -438,7 +493,8 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         _intensityLevel = reading.therapyIntensityLevel;
       }
 
-      if (reading.therapyPatternRemainingSeconds > 0 || reading.therapyPatternElapsedSeconds > 0) {
+      if (reading.therapyPatternRemainingSeconds > 0 ||
+          reading.therapyPatternElapsedSeconds > 0) {
         _patternElapsedSecondsState = reading.therapyPatternElapsedSeconds;
         _patternRemainingSecondsState = reading.therapyPatternRemainingSeconds;
         _hasPatternProgress = true;
@@ -711,8 +767,9 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
                         liveIndex: _liveCardIndex(),
                         visibleIndex: _visiblePatternPage,
                         targetPoint: widget.targetPointName,
-                        intensity:
-                        _intensityLevel > 0 ? _intensityLevel : widget.intensity,
+                        intensity: _intensityLevel > 0
+                            ? _intensityLevel
+                            : widget.intensity,
                         isCompleted: _sessionEndedByDevice,
                         onPageChanged: _onPatternPageChanged,
                         onReturnToLive: _snapToLivePattern,
@@ -721,7 +778,8 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
                         // card even before the full plan arrives on a
                         // mid-session reconnect.
                         livePatternName: _friendlyLivePatternName(),
-                        livePatternDescription: _friendlyLivePatternDescription(),
+                        livePatternDescription:
+                            _friendlyLivePatternDescription(),
                         // When firmware has announced "total patterns in this
                         // session" but hasn't given us the full sequence yet,
                         // pass the count through so the pager can still render
@@ -789,10 +847,8 @@ class _StartingOverlay extends StatelessWidget {
                 tween: Tween(begin: 0.92, end: 1.0),
                 duration: const Duration(milliseconds: 900),
                 curve: Curves.easeInOut,
-                builder: (context, scale, child) => Transform.scale(
-                  scale: scale,
-                  child: child,
-                ),
+                builder: (context, scale, child) =>
+                    Transform.scale(scale: scale, child: child),
                 child: Container(
                   width: 88,
                   height: 88,
@@ -831,7 +887,7 @@ class _StartingOverlay extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 'Connecting to device and loading your therapy pattern...',
-              textAlign: TextAlign.center,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: const Color(0xFF6B7280),
                   fontSize: 14,
@@ -919,15 +975,20 @@ class _OngoingHeader extends StatelessWidget {
 
             return GestureDetector(
               onTap: () {
-                if (status == DeviceConnectionStatus.disconnected && !isCompleted) {
+                if (status == DeviceConnectionStatus.disconnected &&
+                    !isCompleted) {
                   showPodDisconnectedDialog(
                     context,
-                    subtitle: 'Connect your Align Pod to resume your therapy session.',
+                    subtitle:
+                        'Connect your Align Pod to resume your therapy session.',
                   );
                 }
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(999),
@@ -1082,8 +1143,10 @@ class _RelaxingOrb extends StatelessWidget {
             alignment: Alignment.center,
             children: [
               AnimatedBuilder(
-                animation:
-                Listenable.merge([breathController, wavesController]),
+                animation: Listenable.merge([
+                  breathController,
+                  wavesController,
+                ]),
                 builder: (context, _) {
                   return CustomPaint(
                     size: Size(orbSize, orbSize),
@@ -1224,10 +1287,16 @@ class _OrbPainter extends CustomPainter {
     // vibration field a slow, synchronous heartbeat.
     if (!isCompleted) {
       final resonancePaint = Paint()
-        ..color = const Color(0xFFFF2B62).withValues(alpha: 0.08 + breath * 0.06)
+        ..color = const Color(
+          0xFFFF2B62,
+        ).withValues(alpha: 0.08 + breath * 0.06)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 0.8;
-      canvas.drawCircle(center, baseRadius * (1.10 + breath * 0.05), resonancePaint);
+      canvas.drawCircle(
+        center,
+        baseRadius * (1.10 + breath * 0.05),
+        resonancePaint,
+      );
     }
 
     // Breathing amplitude intentionally small — a calm pulse, not a throb.
@@ -1236,27 +1305,29 @@ class _OrbPainter extends CustomPainter {
     // Two-layer halo: wide soft ambient glow + tighter inner bloom. Reads
     // like the orb is emitting light rather than just sitting on a backdrop.
     final ambientHaloPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          const Color(0xFFFFB4C5).withValues(alpha: 0.30),
-          const Color(0xFFFFB4C5).withValues(alpha: 0.0),
-        ],
-        stops: const [0.25, 1.0],
-      ).createShader(
-        Rect.fromCircle(center: center, radius: breathRadius * 1.85),
-      );
+      ..shader =
+          RadialGradient(
+            colors: [
+              const Color(0xFFFFB4C5).withValues(alpha: 0.30),
+              const Color(0xFFFFB4C5).withValues(alpha: 0.0),
+            ],
+            stops: const [0.25, 1.0],
+          ).createShader(
+            Rect.fromCircle(center: center, radius: breathRadius * 1.85),
+          );
     canvas.drawCircle(center, breathRadius * 1.85, ambientHaloPaint);
 
     final innerBloomPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          const Color(0xFFFF7DA0).withValues(alpha: 0.26 + breath * 0.10),
-          const Color(0xFFFF7DA0).withValues(alpha: 0.0),
-        ],
-        stops: const [0.35, 1.0],
-      ).createShader(
-        Rect.fromCircle(center: center, radius: breathRadius * 1.25),
-      );
+      ..shader =
+          RadialGradient(
+            colors: [
+              const Color(0xFFFF7DA0).withValues(alpha: 0.26 + breath * 0.10),
+              const Color(0xFFFF7DA0).withValues(alpha: 0.0),
+            ],
+            stops: const [0.35, 1.0],
+          ).createShader(
+            Rect.fromCircle(center: center, radius: breathRadius * 1.25),
+          );
     canvas.drawCircle(center, breathRadius * 1.25, innerBloomPaint);
 
     // Breathing orb body — softer, more pastel gradient for a calmer feel.
@@ -1265,11 +1336,7 @@ class _OrbPainter extends CustomPainter {
       ..shader = const RadialGradient(
         center: Alignment(-0.15, -0.20),
         radius: 1.05,
-        colors: [
-          Color(0xFFFFF5F7),
-          Color(0xFFFFE4E6),
-          Color(0xFFFDD5E0),
-        ],
+        colors: [Color(0xFFFFF5F7), Color(0xFFFFE4E6), Color(0xFFFDD5E0)],
         stops: [0.0, 0.55, 1.0],
       ).createShader(orbRect);
     canvas.drawCircle(center, breathRadius, orbPaint);
@@ -1330,14 +1397,14 @@ class _OrbPainter extends CustomPainter {
   }
 
   void _drawProgressRing(
-      Canvas canvas,
-      Offset center,
-      double radius,
-      double progress, {
-        required double strokeWidth,
-        required Color trackColor,
-        required List<Color> gradientColors,
-      }) {
+    Canvas canvas,
+    Offset center,
+    double radius,
+    double progress, {
+    required double strokeWidth,
+    required Color trackColor,
+    required List<Color> gradientColors,
+  }) {
     final trackPaint = Paint()
       ..color = trackColor
       ..style = PaintingStyle.stroke
@@ -1391,12 +1458,14 @@ class _PatternCardPager extends StatelessWidget {
   final bool isCompleted;
   final ValueChanged<int> onPageChanged;
   final VoidCallback onReturnToLive;
+
   /// Best-known friendly name of the currently-playing pattern. Used as a
   /// graceful fallback when [patternPlan] is still empty (e.g. right after
   /// a mid-session reconnect) so we show something meaningful instead of
   /// "Getting your therapy session ready…".
   final String? livePatternName;
   final String? livePatternDescription;
+
   /// Total scheduled patterns in the current session (firmware `t_total`).
   /// Only consulted when [patternPlan] is empty — lets the pager render
   /// N cards with Played/Live/Upcoming statuses even before the full
@@ -1440,42 +1509,51 @@ class _PatternCardPager extends StatelessWidget {
             status = _PatternCardStatus.upcoming;
           }
           final isLiveSlot = status == _PatternCardStatus.live;
-          final name = isLiveSlot &&
-              livePatternName != null &&
-              livePatternName!.trim().isNotEmpty
+          final name =
+              isLiveSlot &&
+                  livePatternName != null &&
+                  livePatternName!.trim().isNotEmpty
               ? livePatternName!
               : 'Pattern ${i + 1}';
           final description = isLiveSlot
-              ? (livePatternDescription ??
-              'This pattern is currently playing.')
+              ? (livePatternDescription ?? 'This pattern is currently playing.')
               : (status == _PatternCardStatus.played
-              ? 'Already played earlier in this session.'
-              : 'Pattern details will appear once it plays.');
-          pages.add(_PatternCardData.fromPlan(
-            name: name,
-            description: description,
-            indexInSession: i,
-            totalInSession: totalPatternSlots,
-            status: status,
-          ));
+                    ? 'Already played earlier in this session.'
+                    : 'Pattern details will appear once it plays.');
+          pages.add(
+            _PatternCardData.fromPlan(
+              name: name,
+              description: description,
+              indexInSession: i,
+              totalInSession: totalPatternSlots,
+              status: status,
+            ),
+          );
         }
-      } else if (livePatternName != null && livePatternName!.trim().isNotEmpty) {
-        pages.add(_PatternCardData(
-          name: livePatternName!,
-          description: livePatternDescription ??
-              'Pattern details will appear once the plan syncs.',
-          badge: 'Playing now',
-          status: _PatternCardStatus.live,
-          isPlaceholder: false,
-        ));
+      } else if (livePatternName != null &&
+          livePatternName!.trim().isNotEmpty) {
+        pages.add(
+          _PatternCardData(
+            name: livePatternName!,
+            description:
+                livePatternDescription ??
+                'Pattern details will appear once the plan syncs.',
+            badge: 'Playing now',
+            status: _PatternCardStatus.live,
+            isPlaceholder: false,
+          ),
+        );
       } else {
         pages.add(_PatternCardData.placeholder(isCompleted: isCompleted));
       }
     } else {
       for (var i = 0; i < patternPlan.length; i++) {
         final patternId = patternPlan[i];
-        final hasName = patternId >= 0 && patternId < kTherapyPatternNames.length;
-        final name = hasName ? therapyPatternName(patternId) : 'Pattern ${i + 1}';
+        final hasName =
+            patternId >= 0 && patternId < kTherapyPatternNames.length;
+        final name = hasName
+            ? therapyPatternName(patternId)
+            : 'Pattern ${i + 1}';
         final description = hasName
             ? therapyPatternDescription(patternId)
             : 'Pattern details will appear once it plays.';
@@ -1491,13 +1569,15 @@ class _PatternCardPager extends StatelessWidget {
           status = _PatternCardStatus.upcoming;
         }
 
-        pages.add(_PatternCardData.fromPlan(
-          name: name,
-          description: description,
-          indexInSession: i,
-          totalInSession: patternPlan.length,
-          status: status,
-        ));
+        pages.add(
+          _PatternCardData.fromPlan(
+            name: name,
+            description: description,
+            indexInSession: i,
+            totalInSession: patternPlan.length,
+            status: status,
+          ),
+        );
       }
     }
 
@@ -1538,7 +1618,11 @@ class _PatternCardPager extends StatelessWidget {
             if (showReturnToLive)
               _BackToLivePill(onTap: onReturnToLive)
             else
-              _PageDots(count: totalPages, activeIndex: effectiveVisible, liveIndex: liveIndex),
+              _PageDots(
+                count: totalPages,
+                activeIndex: effectiveVisible,
+                liveIndex: liveIndex,
+              ),
           ],
         ),
       ],
@@ -1578,8 +1662,9 @@ class _PatternCardData {
     final badge = switch (status) {
       _PatternCardStatus.live => 'Playing now',
       _PatternCardStatus.upcoming =>
-      'Up next · ${indexInSession + 1}/$totalInSession',
-      _PatternCardStatus.played => 'Played · ${indexInSession + 1}/$totalInSession',
+        'Up next · ${indexInSession + 1}/$totalInSession',
+      _PatternCardStatus.played =>
+        'Played · ${indexInSession + 1}/$totalInSession',
     };
     return _PatternCardData(
       name: name,
@@ -1624,12 +1709,12 @@ class _PatternInfoCard extends StatelessWidget {
     final patternDescription = data.description;
     final badgeLabel = data.badge;
     final accentGradient = switch (data.status) {
-      _PatternCardStatus.live =>
-      const [Color(0xFFFF1F5B), Color(0xFFED2CA6)],
-      _PatternCardStatus.upcoming =>
-      const [Color(0xFFFFB4C5), Color(0xFFFBCFE8)],
-      _PatternCardStatus.played =>
-      const [Color(0xFFE5E7EB), Color(0xFFD1D5DB)],
+      _PatternCardStatus.live => const [Color(0xFFFF1F5B), Color(0xFFED2CA6)],
+      _PatternCardStatus.upcoming => const [
+        Color(0xFFFFB4C5),
+        Color(0xFFFBCFE8),
+      ],
+      _PatternCardStatus.played => const [Color(0xFFE5E7EB), Color(0xFFD1D5DB)],
     };
     final badgeColor = switch (data.status) {
       _PatternCardStatus.live => const Color(0xFFFF2B62),
@@ -1755,10 +1840,7 @@ class _PatternInfoCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              _MetaChip(
-                icon: Icons.gps_fixed_rounded,
-                label: targetPoint,
-              ),
+              _MetaChip(icon: Icons.gps_fixed_rounded, label: targetPoint),
               const SizedBox(width: 8),
               _MetaChip(
                 icon: Icons.graphic_eq_rounded,
@@ -1800,9 +1882,7 @@ class _PageDots extends StatelessWidget {
           width: isActive ? (isLive ? 20 : 16) : 6,
           decoration: BoxDecoration(
             color: isActive
-                ? (isLive
-                ? const Color(0xFFFF2B62)
-                : const Color(0xFFED2CA6))
+                ? (isLive ? const Color(0xFFFF2B62) : const Color(0xFFED2CA6))
                 : const Color(0xFFFBCFE8),
             borderRadius: BorderRadius.circular(999),
           ),
@@ -1849,11 +1929,7 @@ class _BackToLivePill extends StatelessWidget {
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.graphic_eq_rounded,
-                color: Colors.white,
-                size: 14,
-              ),
+              Icon(Icons.graphic_eq_rounded, color: Colors.white, size: 14),
               SizedBox(width: 6),
               Text(
                 'Back to live',
@@ -2071,16 +2147,17 @@ class _StopConfirmDialog extends StatelessWidget {
                 Expanded(
                   child: TextButton(
                     onPressed: () => Navigator.of(context).pop(true),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ).copyWith(
-                      backgroundColor: WidgetStateProperty.all(
-                        const Color(0xFFFF2B62),
-                      ),
-                    ),
+                    style:
+                        TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ).copyWith(
+                          backgroundColor: WidgetStateProperty.all(
+                            const Color(0xFFFF2B62),
+                          ),
+                        ),
                     child: const Text(
                       'End',
                       style: TextStyle(
