@@ -209,19 +209,18 @@ class PostureReading {
 
     // Determine isCalibrating:
     bool isCal = current?.isCalibrating ?? false;
-    if (json.containsKey('isCalibrating') || json.containsKey('is_calibrating')) {
+    if (json.containsKey('isCalibrating') ||
+        json.containsKey('is_calibrating')) {
       final v = json['isCalibrating'] ?? json['is_calibrating'];
       isCal = v == true || v?.toString() == 'true';
     }
 
     final tType = json['t']?.toString().toUpperCase();
-    final parsedMode = json['mode'] ?? (tType == 'TP' || tType == 'TL' ? 'THERAPY' : null);
+    final parsedMode =
+        json['mode'] ?? (tType == 'TP' || tType == 'TL' ? 'THERAPY' : null);
 
     return PostureReading(
-      mode: normalizeDeviceMode(
-        parsedMode,
-        fallback: current?.mode ?? 'IDLE',
-      ),
+      mode: normalizeDeviceMode(parsedMode, fallback: current?.mode ?? 'IDLE'),
       subMode: json['sub_mode']?.toString() ?? current?.subMode ?? 'INSTANT',
       angle: toDoubleOrNull(json['angle']) ?? current?.angle ?? 0.0,
       rawXG: toDoubleOrNull(json['raw_x_g']) ?? current?.rawXG ?? 0.0,
@@ -238,7 +237,8 @@ class PostureReading {
             json.containsKey('calibration_result') ||
             json.containsKey('calibResult') ||
             json.containsKey('result')) {
-          final v = json['calibrationResult']?.toString() ??
+          final v =
+              json['calibrationResult']?.toString() ??
               json['calibration_result']?.toString() ??
               json['calibResult']?.toString() ??
               json['result']?.toString() ??
@@ -258,47 +258,92 @@ class PostureReading {
       }(),
       calibrationPhase: () {
         final val = json['c_phase'];
-        return val != null ? val.toString().toUpperCase() : (current?.calibrationPhase ?? 'IDLE');
+        return val != null
+            ? val.toString().toUpperCase()
+            : (current?.calibrationPhase ?? 'IDLE');
       }(),
-      calibrationQuality: json.containsKey('quality') ? toInt(json['quality']) : (current?.calibrationQuality ?? 0),
-      calibrationFailReason: json.containsKey('reason') ? json['reason']?.toString() ?? '' : (current?.calibrationFailReason ?? ''),
-      calibrationPassedSamples: json.containsKey('passed_samples') ? toInt(json['passed_samples']) : (current?.calibrationPassedSamples ?? 0),
-      calibrationRefX: json.containsKey('x') ? toDouble(json['x']) : (current?.calibrationRefX ?? 0.0),
-      calibrationRefY: json.containsKey('y') ? toDouble(json['y']) : (current?.calibrationRefY ?? 0.0),
-      calibrationRefZ: json.containsKey('z') ? toDouble(json['z']) : (current?.calibrationRefZ ?? 0.0),
-      posture: json['posture']?.toString() ?? current?.posture ?? 'GOOD POSTURE',
-      isBadPosture: json['is_bad_posture'] == true ||
+      calibrationQuality: json.containsKey('quality')
+          ? toInt(json['quality'])
+          : (current?.calibrationQuality ?? 0),
+      calibrationFailReason: json.containsKey('reason')
+          ? json['reason']?.toString() ?? ''
+          : (current?.calibrationFailReason ?? ''),
+      calibrationPassedSamples: json.containsKey('passed_samples')
+          ? toInt(json['passed_samples'])
+          : (current?.calibrationPassedSamples ?? 0),
+      calibrationRefX: json.containsKey('x')
+          ? toDouble(json['x'])
+          : (current?.calibrationRefX ?? 0.0),
+      calibrationRefY: json.containsKey('y')
+          ? toDouble(json['y'])
+          : (current?.calibrationRefY ?? 0.0),
+      calibrationRefZ: json.containsKey('z')
+          ? toDouble(json['z'])
+          : (current?.calibrationRefZ ?? 0.0),
+      posture:
+          json['posture']?.toString() ?? current?.posture ?? 'GOOD POSTURE',
+      isBadPosture:
+          json['is_bad_posture'] == true ||
           json['is_bad_posture']?.toString().toLowerCase() == 'true' ||
-          (json['posture']?.toString().toUpperCase().contains('BAD') ?? current?.isBadPosture ?? false),
-      batteryVoltage: toDoubleOrNull(json['battery_voltage']) ?? current?.batteryVoltage ?? 0.0,
+          (json['posture']?.toString().toUpperCase().contains('BAD') ??
+              current?.isBadPosture ??
+              false),
+      batteryVoltage:
+          toDoubleOrNull(json['battery_voltage']) ??
+          current?.batteryVoltage ??
+          0.0,
       batteryPercentage: () {
         final val = json['battery_percentage'] ?? json['battery'];
         return val != null ? toInt(val) : (current?.batteryPercentage ?? 0);
       }(),
       profile: json['profile']?.toString() ?? current?.profile ?? '',
-      difficultyDeg: toIntOrNull(json['difficulty_angle'] ?? json['difficulty_deg']) ?? current?.difficultyDeg ?? 25,
+      difficultyDeg:
+          toIntOrNull(json['difficulty_angle'] ?? json['difficulty_deg']) ??
+          current?.difficultyDeg ??
+          25,
       therapyPattern: () {
-        final val = json['t_patt'] ?? json['therapy_pattern'] ?? (json['pid'] != null ? firmwarePatternName(toInt(json['pid'])) : null);
+        final val =
+            json['t_patt'] ??
+            json['therapy_pattern'] ??
+            (json['pid'] != null
+                ? firmwarePatternName(toInt(json['pid']))
+                : null);
         return val != null ? val.toString() : (current?.therapyPattern ?? '');
       }(),
       therapyNextPattern: () {
         final val = json['t_next'] ?? json['therapy_next_pattern'];
-        return val != null ? val.toString() : (current?.therapyNextPattern ?? '');
+        return val != null
+            ? val.toString()
+            : (current?.therapyNextPattern ?? '');
       }(),
       therapyElapsedSeconds: () {
-        final val = json['t_elap'] ?? json['therapy_elapsed_sec'] ?? json['elapsed'] ?? (json['t']?.toString().toUpperCase() == 'TP' ? 0 : null);
+        final val =
+            json['t_elap'] ??
+            json['therapy_elapsed_sec'] ??
+            json['elapsed'] ??
+            (json['t']?.toString().toUpperCase() == 'TP' ? 0 : null);
         return val != null ? toInt(val) : (current?.therapyElapsedSeconds ?? 0);
       }(),
       therapyRemainingSeconds: () {
-        final val = json['t_rem'] ?? json['therapy_remaining_sec'] ?? json['remaining'] ?? json['duration'];
-        return val != null ? toInt(val) : (current?.therapyRemainingSeconds ?? 0);
+        final val =
+            json['t_rem'] ??
+            json['therapy_remaining_sec'] ??
+            json['remaining'] ??
+            json['duration'];
+        return val != null
+            ? toInt(val)
+            : (current?.therapyRemainingSeconds ?? 0);
       }(),
       therapyIntensityLevel: () {
-        final val = json['t_lvl'] ?? json['therapy_intensity_level'] ?? json['intensity'];
+        final val =
+            json['t_lvl'] ??
+            json['therapy_intensity_level'] ??
+            json['intensity'];
         return val != null ? toInt(val) : (current?.therapyIntensityLevel ?? 0);
       }(),
       therapyPatternSequence: () {
-        final val = json['t_seq'] ?? json['therapy_pattern_sequence'] ?? json['seq'];
+        final val =
+            json['t_seq'] ?? json['therapy_pattern_sequence'] ?? json['seq'];
         if (val != null) {
           if (val is List) {
             return val.map((e) => toInt(e)).toList();
@@ -315,18 +360,26 @@ class PostureReading {
         return current?.therapyPatternSequence ?? const <int>[];
       }(),
       therapyCurrentPatternIndex: () {
-        final raw = json['t_cur'] ?? json['therapy_current_pattern_index'] ?? (json['idx'] != null ? toInt(json['idx']) - 1 : null);
+        final raw =
+            json['t_cur'] ??
+            json['therapy_current_pattern_index'] ??
+            (json['idx'] != null ? toInt(json['idx']) - 1 : null);
         if (raw == null) return current?.therapyCurrentPatternIndex ?? -1;
         if (raw is int) return raw;
         if (raw is num) return raw.toInt();
         return int.tryParse(raw.toString()) ?? -1;
       }(),
       therapyTotalPatterns: () {
-        final val = json['t_total'] ?? json['therapy_total_patterns'] ?? json['total'];
+        final val =
+            json['t_total'] ?? json['therapy_total_patterns'] ?? json['total'];
         return val != null ? toInt(val) : (current?.therapyTotalPatterns ?? 0);
       }(),
       therapyPatternId: () {
-        final val = json['pid'] ?? (json['idx'] != null && json['seq'] is List ? (json['seq'] as List)[toInt(json['idx']) - 1] : null);
+        final val =
+            json['pid'] ??
+            (json['idx'] != null && json['seq'] is List
+                ? (json['seq'] as List)[toInt(json['idx']) - 1]
+                : null);
         if (val != null) return toInt(val);
         final pattStr = json['t_patt'] ?? json['therapy_pattern'];
         if (pattStr != null) {
@@ -336,20 +389,45 @@ class PostureReading {
         return current?.therapyPatternId ?? -1;
       }(),
       therapyTotalDurationSeconds: () {
-        final val = json['duration'] ?? (json['remaining'] != null && json['elapsed'] != null ? toInt(json['remaining']) + toInt(json['elapsed']) : null) ?? (json['t_rem'] != null && json['t_elap'] != null ? toInt(json['t_rem']) + toInt(json['t_elap']) : null);
-        return val != null ? toInt(val) : (current?.therapyTotalDurationSeconds ?? 0);
+        final val =
+            json['duration'] ??
+            (json['remaining'] != null && json['elapsed'] != null
+                ? toInt(json['remaining']) + toInt(json['elapsed'])
+                : null) ??
+            (json['t_rem'] != null && json['t_elap'] != null
+                ? toInt(json['t_rem']) + toInt(json['t_elap'])
+                : null);
+        return val != null
+            ? toInt(val)
+            : (current?.therapyTotalDurationSeconds ?? 0);
       }(),
       therapyPatternDurationSeconds: () {
-        final val = json['pattern_dur'] ?? (json['p_remaining'] != null && json['p_elapsed'] != null ? toInt(json['p_remaining']) + toInt(json['p_elapsed']) : null);
-        return val != null ? toInt(val) : (current?.therapyPatternDurationSeconds ?? 0);
+        final val =
+            json['pattern_dur'] ??
+            (json['p_remaining'] != null && json['p_elapsed'] != null
+                ? toInt(json['p_remaining']) + toInt(json['p_elapsed'])
+                : null);
+        return val != null
+            ? toInt(val)
+            : (current?.therapyPatternDurationSeconds ?? 0);
       }(),
       therapyPatternElapsedSeconds: () {
-        final val = json['p_elapsed'] ?? (json['t']?.toString().toUpperCase() == 'TP' ? 0 : null);
-        return val != null ? toInt(val) : (current?.therapyPatternElapsedSeconds ?? 0);
+        final val =
+            json['p_elapsed'] ??
+            (json['t']?.toString().toUpperCase() == 'TP' ? 0 : null);
+        return val != null
+            ? toInt(val)
+            : (current?.therapyPatternElapsedSeconds ?? 0);
       }(),
       therapyPatternRemainingSeconds: () {
-        final val = json['p_remaining'] ?? (json['t']?.toString().toUpperCase() == 'TP' ? json['pattern_dur'] : null);
-        return val != null ? toInt(val) : (current?.therapyPatternRemainingSeconds ?? 0);
+        final val =
+            json['p_remaining'] ??
+            (json['t']?.toString().toUpperCase() == 'TP'
+                ? json['pattern_dur']
+                : null);
+        return val != null
+            ? toInt(val)
+            : (current?.therapyPatternRemainingSeconds ?? 0);
       }(),
       liveSessionId: () {
         final val = json['s_id'] ?? json['session_id'] ?? json['sid'];
@@ -357,7 +435,9 @@ class PostureReading {
       }(),
       liveSessionElapsedSeconds: () {
         final val = json['s_elap'] ?? json['session_elapsed_sec'];
-        return val != null ? toInt(val) : (current?.liveSessionElapsedSeconds ?? 0);
+        return val != null
+            ? toInt(val)
+            : (current?.liveSessionElapsedSeconds ?? 0);
       }(),
       liveSessionStartEpoch: () {
         final val = json['s_start'] ?? json['session_start_epoch'];
@@ -388,19 +468,25 @@ class PostureReading {
   }
 }
 
-// ── Device Info model (from GET_INFO response) ──────────────────────────────
+// ── Device Info model (from GET_DEVICE_INFO response) ───────────────────────
 
 class DeviceInfo {
+  final String deviceName;
   final String model;
   final String hardwareRevision;
   final String firmwareVersion;
+  final String firmwareBuildDate;
+  final String serial;
   final int batteryPercent;
   final bool dfuReady;
 
   const DeviceInfo({
+    required this.deviceName,
     required this.model,
     required this.hardwareRevision,
     required this.firmwareVersion,
+    required this.firmwareBuildDate,
+    required this.serial,
     required this.batteryPercent,
     required this.dfuReady,
   });
@@ -413,12 +499,29 @@ class DeviceInfo {
     }
 
     return DeviceInfo(
-      model: json['model']?.toString() ?? '',
+      deviceName: json['device_name']?.toString() ?? '',
+      model: json['device_model']?.toString() ?? json['model']?.toString() ?? '',
       hardwareRevision: json['hw']?.toString() ?? '',
       firmwareVersion: json['fw']?.toString() ?? '',
+      firmwareBuildDate: json['fw_build_date']?.toString() ?? '',
+      serial: json['serial']?.toString() ?? '',
       batteryPercent: toInt(json['battery']),
       dfuReady: json['dfu_ready'] == true,
     );
+  }
+
+  @override
+  String toString() {
+    return 'DeviceInfo('
+        'deviceName=$deviceName, '
+        'model=$model, '
+        'hw=$hardwareRevision, '
+        'fw=$firmwareVersion, '
+        'fwBuildDate=$firmwareBuildDate, '
+        'serial=$serial, '
+        'batteryPercent=$batteryPercent, '
+        'dfuReady=$dfuReady'
+        ')';
   }
 }
 
@@ -444,12 +547,19 @@ class FirmwareProfile {
   factory FirmwareProfile.fromJson(Map<String, dynamic> json) {
     return FirmwareProfile(
       id: (json['id'] as num?)?.toInt() ?? 0,
-      slot: (json['s'] as num?)?.toInt() ?? (json['slot'] as num?)?.toInt() ?? 0,
+      slot:
+          (json['s'] as num?)?.toInt() ?? (json['slot'] as num?)?.toInt() ?? 0,
       name: json['n']?.toString() ?? json['name']?.toString() ?? 'Profile',
       isActive: (json['a'] as num?)?.toInt() == 1 || json['active'] == true,
       isDefault: (json['d'] as num?)?.toInt() == 1 || json['default'] == true,
-      createdEpoch: (json['c'] as num?)?.toInt() ?? (json['created'] as num?)?.toInt() ?? 0,
-      quality: (json['q'] as num?)?.toInt() ?? (json['quality'] as num?)?.toInt() ?? 0,
+      createdEpoch:
+          (json['c'] as num?)?.toInt() ??
+          (json['created'] as num?)?.toInt() ??
+          0,
+      quality:
+          (json['q'] as num?)?.toInt() ??
+          (json['quality'] as num?)?.toInt() ??
+          0,
     );
   }
 
@@ -469,7 +579,75 @@ class FirmwareProfile {
       'FirmwareProfile(id=$id, slot=$slot, name=$name, active=$isActive, default=$isDefault)';
 }
 
+class TherapyCompletion {
+  final int sessionId;
+  final bool completed;
+  final int elapsedSeconds;
+  final int durationSeconds;
+  final int patternDurationSeconds;
+  final int totalPatterns;
+  final int uniquePatterns;
+  final List<int> patternSequence;
+  final DateTime timestamp;
+
+  const TherapyCompletion({
+    required this.sessionId,
+    required this.completed,
+    required this.elapsedSeconds,
+    required this.durationSeconds,
+    required this.patternDurationSeconds,
+    required this.totalPatterns,
+    required this.uniquePatterns,
+    required this.patternSequence,
+    required this.timestamp,
+  });
+
+  factory TherapyCompletion.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    bool toBool(dynamic value) {
+      if (value is bool) return value;
+      if (value is num) return value.toInt() != 0;
+      final normalized = value?.toString().trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+
+    final rawSeq = json['seq'];
+    final sequence = rawSeq is List
+        ? rawSeq.map(toInt).toList(growable: false)
+        : rawSeq
+                  ?.toString()
+                  .split(',')
+                  .map((token) => int.tryParse(token.trim()))
+                  .whereType<int>()
+                  .toList(growable: false) ??
+              const <int>[];
+
+    return TherapyCompletion(
+      sessionId: toInt(json['sid'] ?? json['session_id']),
+      completed: toBool(json['completed']),
+      elapsedSeconds: toInt(json['elapsed']),
+      durationSeconds: toInt(json['duration']),
+      patternDurationSeconds: toInt(json['pattern_dur']),
+      totalPatterns: toInt(json['total']),
+      uniquePatterns: toInt(json['unique']),
+      patternSequence: sequence,
+      timestamp: DateTime.now(),
+    );
+  }
+}
+
 enum EnterDfuResult { success, lowBattery, sessionActive, timeout, error }
+
+void _bleConsoleLog(String message) {
+  debugPrint(message);
+  // ignore: avoid_print
+  print(message);
+}
 
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
@@ -479,8 +657,12 @@ class AlignEyeDeviceService {
   final _readingController = StreamController<PostureReading>.broadcast();
   final _profileListController =
       StreamController<List<FirmwareProfile>>.broadcast();
+  final _therapyCompletionController =
+      StreamController<TherapyCompletion>.broadcast();
   Stream<List<FirmwareProfile>> get profileListStream =>
       _profileListController.stream;
+  Stream<TherapyCompletion> get therapyCompletions =>
+      _therapyCompletionController.stream;
   List<FirmwareProfile> _lastKnownProfiles = [];
   List<FirmwareProfile> get lastKnownProfiles =>
       List.unmodifiable(_lastKnownProfiles);
@@ -769,42 +951,58 @@ class AlignEyeDeviceService {
   }
 
   Future<bool> getProfiles() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
     return _writeJsonCommand({'cmd': 'GET_PROFILES'});
   }
 
   Future<bool> getTherapyPlan() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
     return _writeJsonCommand({'cmd': 'GET_THERAPY_PLAN'});
   }
 
   Future<bool> sendCalibrationStartJson({String name = 'Profile'}) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
-    return _writeJsonCommand({'cmd': 'CALIBRATE_START', 'slot': 'auto', 'name': name});
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
+    return _writeJsonCommand({
+      'cmd': 'CALIBRATE_START',
+      'slot': 'auto',
+      'name': name,
+    });
   }
 
   Future<bool> setDefaultProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
     return _writeJsonCommand({'cmd': 'PROFILE_SET_DEFAULT', 'id': profileId});
   }
 
   Future<bool> selectProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
     return _writeJsonCommand({'cmd': 'PROFILE_SELECT', 'id': profileId});
   }
 
   Future<bool> renameProfile(int profileId, String name) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
-    return _writeJsonCommand({'cmd': 'PROFILE_RENAME', 'id': profileId, 'name': name});
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
+    return _writeJsonCommand({
+      'cmd': 'PROFILE_RENAME',
+      'id': profileId,
+      'name': name,
+    });
   }
 
   Future<bool> deleteProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
     return _writeJsonCommand({'cmd': 'PROFILE_DELETE', 'id': profileId});
   }
 
   Future<bool> clearAllProfiles() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected) return false;
+    if (connectionStatus.value != DeviceConnectionStatus.connected)
+      return false;
     return _writeJsonCommand({'cmd': 'PROFILE_CLEAR_ALL'});
   }
 
@@ -870,31 +1068,45 @@ class AlignEyeDeviceService {
         withoutResponse: characteristic.properties.writeWithoutResponse,
       );
       debugPrint('JSON command sent: $payload');
+      if (payload.contains('GET_DEVICE_INFO')) {
+        _bleConsoleLog('BLE TX APP: $payload');
+      }
     } catch (e) {
       debugPrint('Failed to send JSON command: $e');
+      if (payload.contains('GET_DEVICE_INFO')) {
+        _bleConsoleLog('BLE TX APP FAILED: $payload error=$e');
+      }
       await rawSub.cancel();
       await sub.cancel();
       return null;
     }
 
-    final result = await completer.future.timeout(timeout, onTimeout: () {
-      debugPrint('JSON command timed out: $payload');
-      return null;
-    });
+    final result = await completer.future.timeout(
+      timeout,
+      onTimeout: () {
+        debugPrint('JSON command timed out: $payload');
+        if (payload.contains('GET_DEVICE_INFO')) {
+          _bleConsoleLog('GET_DEVICE_INFO timed out waiting for INFO packet');
+        }
+        return null;
+      },
+    );
 
     await rawSub.cancel();
     await sub.cancel();
     return result;
   }
 
-  /// Sends {"cmd":"GET_INFO"} and returns a DeviceInfo on success.
+  /// Sends {"cmd":"GET_DEVICE_INFO"} and returns a DeviceInfo on success.
   Future<DeviceInfo?> getDeviceInfo() async {
-    final resp = await sendJsonCommand(
-      {'cmd': 'GET_INFO'},
-      matcher: (m) => m['t'] == 'INFO',
-    );
+    final resp = await sendJsonCommand({
+      'cmd': 'GET_DEVICE_INFO',
+    }, matcher: (m) => m['t'] == 'INFO');
     if (resp == null) return null;
-    return DeviceInfo.fromJson(resp);
+    _bleConsoleLog('GET_DEVICE_INFO response: $resp');
+    final info = DeviceInfo.fromJson(resp);
+    _bleConsoleLog('Parsed device info: $info');
+    return info;
   }
 
   /// Waits for an unsolicited notification matching [matcher] without sending
@@ -937,10 +1149,13 @@ class AlignEyeDeviceService {
       }
     });
 
-    final result = await completer.future.timeout(timeout, onTimeout: () {
-      debugPrint('waitForNotification timed out');
-      return null;
-    });
+    final result = await completer.future.timeout(
+      timeout,
+      onTimeout: () {
+        debugPrint('waitForNotification timed out');
+        return null;
+      },
+    );
 
     await rawSub.cancel();
     return result;
@@ -948,15 +1163,25 @@ class AlignEyeDeviceService {
 
   /// Sends {"cmd":"ENTER_DFU"} and waits for a two-step ARMED→ENTERED ack.
   Future<EnterDfuResult> sendEnterDfu() async {
+    bool hasDfuStatus(Map<String, dynamic> message) {
+      return message['dfu'] != null || message['status'] != null;
+    }
+
+    String normalizedDfuStatus(Map<String, dynamic> message) {
+      final value = message['dfu'] ?? message['status'];
+      return value?.toString().trim().toUpperCase() ?? '';
+    }
+
     // Step 1: Send command, wait for ARMED ack
     final resp = await sendJsonCommand(
       {'cmd': 'ENTER_DFU'},
-      matcher: (m) => m['status'] != null || m['dfu'] != null,
+      matcher: hasDfuStatus,
       timeout: const Duration(seconds: 8),
     );
 
     if (resp == null) return EnterDfuResult.timeout;
-    if (resp['status'] == 'error') {
+    final status = normalizedDfuStatus(resp);
+    if (status == 'ERROR') {
       final reason = resp['reason']?.toString() ?? '';
       if (reason == 'LOW_BATTERY') return EnterDfuResult.lowBattery;
       if (reason == 'SESSION_ACTIVE') return EnterDfuResult.sessionActive;
@@ -964,7 +1189,7 @@ class AlignEyeDeviceService {
     }
 
     // Check for ARMED
-    if (resp['dfu'] != 'ARMED' && resp['status'] != 'ok') {
+    if (status != 'ARMED' && status != 'OK') {
       return EnterDfuResult.error;
     }
 
@@ -972,7 +1197,7 @@ class AlignEyeDeviceService {
 
     // Step 2: Wait for DFU:"ENTERED" (device rebooting into bootloader)
     final entered = await waitForNotification(
-      matcher: (m) => m['dfu'] == 'ENTERED',
+      matcher: (m) => normalizedDfuStatus(m) == 'ENTERED',
       timeout: const Duration(seconds: 15),
     );
 
@@ -1169,7 +1394,6 @@ class AlignEyeDeviceService {
         _connectionTimeoutTimer?.cancel();
         connectionStatus.value = DeviceConnectionStatus.disconnected;
 
-
         throw Exception(
           'Device "align pod" not found. Please ensure the device is powered on and within range.',
         );
@@ -1274,7 +1498,6 @@ class AlignEyeDeviceService {
               debugPrint('Failed to request MTU (non-fatal): $e');
             }
           }
-
         } catch (e) {
           debugPrint('Connection failed: $e');
 
@@ -1282,7 +1505,8 @@ class AlignEyeDeviceService {
           // after GATT connect.  The physical connection was established (GATT
           // connected), so treat this as a non-fatal hiccup and fall through to
           // service discovery rather than aborting the whole connect attempt.
-          final isMtuError = e.toString().toLowerCase().contains('requestmtu') ||
+          final isMtuError =
+              e.toString().toLowerCase().contains('requestmtu') ||
               e.toString().toLowerCase().contains('mtu');
           final deviceAfterError = _device;
           final stateAfterError = deviceAfterError == null
@@ -1418,9 +1642,7 @@ class AlignEyeDeviceService {
         hasEverConnected: true,
         lastConnectedDeviceId: _device?.remoteId.toString(),
       );
-      debugPrint(
-        'Saved connection state: hasEverConnected=true',
-      );
+      debugPrint('Saved connection state: hasEverConnected=true');
 
       debugPrint('Connection established successfully');
     } catch (e) {
@@ -1429,7 +1651,6 @@ class AlignEyeDeviceService {
       _connectionTimeoutTimer?.cancel();
       await disconnect();
       connectionStatus.value = DeviceConnectionStatus.disconnected;
-
     }
   }
 
@@ -1507,7 +1728,9 @@ class AlignEyeDeviceService {
       final bonded = await FlutterBluePlus.bondedDevices;
       for (final dev in bonded) {
         if (_matchesTargetDeviceName(dev.platformName)) {
-          debugPrint('Unpairing bonded target device: ${dev.platformName} (${dev.remoteId})');
+          debugPrint(
+            'Unpairing bonded target device: ${dev.platformName} (${dev.remoteId})',
+          );
           await _unpairDevice(dev);
         }
       }
@@ -1530,6 +1753,7 @@ class AlignEyeDeviceService {
     await disconnect();
     await _readingController.close();
     await _profileListController.close();
+    await _therapyCompletionController.close();
     await _cleanupScan();
     connectionStatus.dispose();
     currentReading.dispose();
@@ -1589,7 +1813,9 @@ class AlignEyeDeviceService {
       }
       final bondedDevices = await FlutterBluePlus.bondedDevices;
       return bondedDevices.any(
-        (device) => device.remoteId.toString().toLowerCase() == preferredId.toLowerCase(),
+        (device) =>
+            device.remoteId.toString().toLowerCase() ==
+            preferredId.toLowerCase(),
       );
     } catch (e) {
       debugPrint('Error checking bonded target devices: $e');
@@ -1744,7 +1970,9 @@ class AlignEyeDeviceService {
       final deviceId = device.remoteId.toString().toLowerCase();
       if (normalizedPreferredId != null) {
         if (deviceId == normalizedPreferredId) {
-          debugPrint('Found preferred connected device: ${device.platformName}');
+          debugPrint(
+            'Found preferred connected device: ${device.platformName}',
+          );
           return device;
         }
       } else {
@@ -1930,7 +2158,6 @@ class AlignEyeDeviceService {
   }
 
   void _handleNotifyData(List<int> data) {
-
     if (data.isEmpty) return;
     final rawData = utf8.decode(data, allowMalformed: true);
     // debugPrint("BLE RAW: $rawData");
@@ -2006,6 +2233,20 @@ class AlignEyeDeviceService {
           final packetType = decoded['t']?.toString().toUpperCase();
 
           switch (packetType) {
+            case 'INFO':
+              final info = DeviceInfo.fromJson(decoded);
+              _bleConsoleLog('BLE RX DEVICE INFO RAW: $decoded');
+              _bleConsoleLog(
+                'BLE RX DEVICE INFO: '
+                'name=${info.deviceName}, '
+                'model=${info.model}, '
+                'hw=${info.hardwareRevision}, '
+                'fw=${info.firmwareVersion}, '
+                'build=${info.firmwareBuildDate}, '
+                'serial=${info.serial}',
+              );
+              break;
+
             case 'L':
               // Fast live posture packet
               // Update angle, mode, difficulty_angle, posture immediately.
@@ -2021,14 +2262,19 @@ class AlignEyeDeviceService {
                 decoded['battery'] = _lastKnownBattery;
               }
 
-              final reading = PostureReading.fromJson(decoded, current: currentReading.value);
+              final reading = PostureReading.fromJson(
+                decoded,
+                current: currentReading.value,
+              );
               _updateTherapyCache(reading);
               _emitReading(reading, throttle: false);
 
-              if (reading.mode.toUpperCase() == 'THERAPY' && latestTherapyPatternSequence.isEmpty) {
+              if (reading.mode.toUpperCase() == 'THERAPY' &&
+                  latestTherapyPatternSequence.isEmpty) {
                 final now = DateTime.now();
                 if (_lastTherapyPlanRequestedAt == null ||
-                    now.difference(_lastTherapyPlanRequestedAt!).inSeconds >= 5) {
+                    now.difference(_lastTherapyPlanRequestedAt!).inSeconds >=
+                        5) {
                   _lastTherapyPlanRequestedAt = now;
                   getTherapyPlan();
                 }
@@ -2054,7 +2300,10 @@ class AlignEyeDeviceService {
                     _lastKnownBattery;
               }
 
-              final reading = PostureReading.fromJson(decoded, current: currentReading.value);
+              final reading = PostureReading.fromJson(
+                decoded,
+                current: currentReading.value,
+              );
               _updateTherapyCache(reading);
               _emitReading(reading, throttle: false);
               break;
@@ -2066,7 +2315,10 @@ class AlignEyeDeviceService {
               if (decoded['mode'] == null) {
                 decoded['mode'] = currentReading.value?.mode ?? 'THERAPY';
               }
-              final reading = PostureReading.fromJson(decoded, current: currentReading.value);
+              final reading = PostureReading.fromJson(
+                decoded,
+                current: currentReading.value,
+              );
               _updateTherapyCache(reading);
               _emitReading(reading, throttle: false);
               break;
@@ -2077,9 +2329,50 @@ class AlignEyeDeviceService {
               if (decoded['mode'] == null) {
                 decoded['mode'] = currentReading.value?.mode ?? 'THERAPY';
               }
-              final reading = PostureReading.fromJson(decoded, current: currentReading.value);
+              final reading = PostureReading.fromJson(
+                decoded,
+                current: currentReading.value,
+              );
               _updateTherapyCache(reading);
               _emitReading(reading, throttle: false);
+              break;
+
+            case 'TC':
+              // Therapy complete summary packet. Firmware sends this once,
+              // then returns the pod to training mode.
+              final completion = TherapyCompletion.fromJson(decoded);
+              if (completion.patternSequence.isNotEmpty) {
+                latestTherapyPatternSequence = List<int>.unmodifiable(
+                  completion.patternSequence,
+                );
+              }
+              if (completion.totalPatterns > 0) {
+                latestTherapyTotalPatterns = completion.totalPatterns;
+              }
+              if (completion.durationSeconds > 0) {
+                latestTherapyTotalDurationSeconds = completion.durationSeconds;
+              }
+              if (completion.patternDurationSeconds > 0) {
+                latestTherapyPatternDurationSeconds =
+                    completion.patternDurationSeconds;
+              }
+              _therapyRemainingAnchorSec = 0;
+              _therapyElapsedAnchorSec = completion.elapsedSeconds;
+              _therapyAnchorAt = DateTime.now();
+              _patternElapsedAnchorSec = completion.patternDurationSeconds;
+              _patternRemainingAnchorSec = 0;
+              _therapyCompletionController.add(completion);
+
+              final completionReading = PostureReading.fromJson({
+                ...decoded,
+                'mode': 'TRAINING',
+                't_rem': 0,
+                't_elap': completion.elapsedSeconds,
+                'duration': completion.durationSeconds,
+                'pattern_dur': completion.patternDurationSeconds,
+                't_total': completion.totalPatterns,
+              }, current: currentReading.value);
+              _emitReading(completionReading, throttle: false);
               break;
 
             case 'C':
@@ -2090,7 +2383,10 @@ class AlignEyeDeviceService {
                 "result=${decoded['result'] ?? decoded['calibResult'] ?? decoded['calibrationResult']} "
                 "elap=${decoded['c_elap']}/${decoded['c_tot']}",
               );
-              final reading = PostureReading.fromJson(decoded, current: currentReading.value);
+              final reading = PostureReading.fromJson(
+                decoded,
+                current: currentReading.value,
+              );
               _updateTherapyCache(reading);
               _emitReading(reading, throttle: false);
               break;
@@ -2122,7 +2418,9 @@ class AlignEyeDeviceService {
 
               final combined = [systemDefault, ...profiles];
               _lastKnownProfiles = combined;
-              _profileListController.add(combined); // always emit, even if empty
+              _profileListController.add(
+                combined,
+              ); // always emit, even if empty
               debugPrint('📋 PROFILE LIST => ${combined.length} profiles');
               break;
 
@@ -2149,9 +2447,7 @@ class AlignEyeDeviceService {
       _connectionRetryCount = 0;
 
       // Save state: user has connected again
-      _saveConnectionState(
-        lastConnectedDeviceId: _device?.remoteId.toString(),
-      );
+      _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
 
       // Verify connection is actually working
       _verifyConnection().then((isValid) {
@@ -2381,8 +2677,7 @@ class AlignEyeDeviceService {
         );
       }
       if (reading.therapyCurrentPatternIndex >= 0) {
-        latestTherapyCurrentPatternIndex =
-            reading.therapyCurrentPatternIndex;
+        latestTherapyCurrentPatternIndex = reading.therapyCurrentPatternIndex;
       }
       if (reading.therapyTotalPatterns > 0) {
         latestTherapyTotalPatterns = reading.therapyTotalPatterns;
@@ -2394,7 +2689,8 @@ class AlignEyeDeviceService {
         latestTherapyTotalDurationSeconds = reading.therapyTotalDurationSeconds;
       }
       if (reading.therapyPatternDurationSeconds > 0) {
-        latestTherapyPatternDurationSeconds = reading.therapyPatternDurationSeconds;
+        latestTherapyPatternDurationSeconds =
+            reading.therapyPatternDurationSeconds;
       }
       final pattName = reading.therapyPattern.trim();
       if (pattName.isNotEmpty) {

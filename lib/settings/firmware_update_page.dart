@@ -20,9 +20,10 @@ enum _UpdateStep {
   checkingServer, // fetching manifest
   upToDate,       // nothing to install
   updateAvailable,// newer version ready
-  preflightFailed,// battery / device mismatch / no internet
+  preflightFailed,// device mismatch / no internet
   downloading,    // downloading ZIP
   verifying,      // SHA256 check
+  downloaded,      // ZIP downloaded + verified, waiting for install tap
   enteringDfu,    // waiting for ENTER_DFU ack + 5 s reboot
   transferring,   // Nordic DFU in progress
   reconnecting,   // waiting for device to come back
@@ -71,7 +72,9 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       _deviceInfo = bgService.deviceInfo;
       _localZipPath = bgService.localZipPath;
       if (bgState == FirmwareUpdateState.ready) {
-        _set(_UpdateStep.updateAvailable);
+        _set(_localZipPath == null
+            ? _UpdateStep.updateAvailable
+            : _UpdateStep.downloaded);
       } else {
         _set(_UpdateStep.upToDate);
       }
@@ -127,30 +130,40 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       return;
     }
 
+    if (await _restoreDownloadedFirmwareIfPresent(manifest)) {
+      return;
+    }
+
     _set(_UpdateStep.updateAvailable);
   }
 
-  Future<void> _startUpdate() async {
+  Future<bool> _restoreDownloadedFirmwareIfPresent(
+    FirmwareManifest manifest,
+  ) async {
+    final cachedPath =
+        await _downloadService.cachedDownloadPath(manifest.firmwareUrl);
+    if (cachedPath == null) return false;
+
+    try {
+      await _downloadService.verifySha256(cachedPath, manifest.sha256);
+    } catch (_) {
+      return false;
+    }
+
+    if (!mounted) return true;
+    setState(() {
+      _localZipPath = cachedPath;
+      _downloadProgress = 1;
+      _step = _UpdateStep.downloaded;
+    });
+    return true;
+  }
+
+  Future<void> _downloadUpdate() async {
     final manifest = _manifest;
     if (manifest == null) return;
 
     HapticFeedback.mediumImpact();
-
-    // Pre-flight: battery check
-    final battery = _deviceInfo?.batteryPercent ??
-        (BluetoothServiceManager()
-                .deviceService
-                .currentReading
-                .value
-                ?.batteryPercentage ??
-            0);
-
-    if (battery > 0 && battery < manifest.minBatteryPercent) {
-      _prefail(
-        'Battery is at $battery%. Charge to at least ${manifest.minBatteryPercent}% before updating.',
-      );
-      return;
-    }
 
     // Pre-flight: device model match
     if (_deviceInfo != null &&
@@ -164,10 +177,18 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
     }
 
     String? zipPath = _localZipPath;
-    if (zipPath == null || !await File(zipPath).exists()) {
+    if (zipPath != null && await File(zipPath).exists()) {
+      debugPrint('FirmwareUpdatePage: reusing cached ZIP $zipPath');
+    } else {
       _set(_UpdateStep.downloading);
       setState(() => _downloadProgress = 0);
       try {
+        zipPath = await _downloadService.download(
+          manifest.firmwareUrl,
+          onProgress: (p) {
+            if (mounted) setState(() => _downloadProgress = p);
+          },
+        );
         zipPath = await _downloadService.download(
           manifest.firmwareUrl,
           onProgress: (p) {
@@ -178,8 +199,6 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
         _fail('Download failed: $e');
         return;
       }
-    } else {
-      debugPrint('FirmwareUpdatePage: reusing cached ZIP $zipPath');
     }
 
     // SHA256 verify
@@ -190,6 +209,38 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       _fail('Firmware verification failed. Please try again.');
       return;
     }
+    if (!mounted) return;
+    setState(() {
+      _localZipPath = zipPath;
+      _downloadProgress = 1;
+      _step = _UpdateStep.downloaded;
+    });
+  }
+
+  String _incrementMacAddress(String mac) {
+    final parts = mac.split(':');
+    if (parts.length != 6) return mac;
+    try {
+      int lastByte = int.parse(parts[5], radix: 16);
+      lastByte = (lastByte + 1) & 0xFF;
+      parts[5] = lastByte.toRadixString(16).padLeft(2, '0').toUpperCase();
+      return parts.join(':');
+    } catch (_) {
+      return mac;
+    }
+  }
+
+  Future<void> _installUpdate() async {
+    final manifest = _manifest;
+    final zipPath = _localZipPath;
+    if (manifest == null) return;
+    if (zipPath == null || !await File(zipPath).exists()) {
+      _fail('Firmware file is not downloaded yet. Download it first.');
+      return;
+    }
+
+    HapticFeedback.mediumImpact();
+
     // ENTER_DFU
     _set(_UpdateStep.enteringDfu);
     final deviceService = BluetoothServiceManager().deviceService;
@@ -201,9 +252,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
       switch (result) {
         case EnterDfuResult.lowBattery:
-          _prefail(
-            'Please charge your Align Pod to at least ${manifest.minBatteryPercent}% before updating.',
-          );
+          _fail('Device rejected the update request. Please reconnect and try again.');
           return;
         case EnterDfuResult.sessionActive:
           _prefail('Stop your active session before updating firmware.');
@@ -227,11 +276,13 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
     _set(_UpdateStep.transferring);
     setState(() => _dfuPercent = 0);
 
-    final deviceAddress = deviceService.device?.remoteId.str ?? '';
-    if (deviceAddress.isEmpty) {
+    final rawAddress = deviceService.device?.remoteId.str ?? '';
+    if (rawAddress.isEmpty) {
       _fail('Failed to enter DFU mode. Device address unavailable — reconnect and try again.');
       return;
     }
+
+    final deviceAddress = Platform.isAndroid ? _incrementMacAddress(rawAddress) : rawAddress;
 
     _dfuService.startDfu(
       deviceAddress: deviceAddress,
@@ -243,6 +294,14 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
         if (!mounted) return;
         _set(_UpdateStep.reconnecting);
         await Future<void>.delayed(const Duration(seconds: 4));
+        if (!mounted) return;
+
+        // Reconnect to the device in application mode
+        try {
+          await deviceService.connect();
+        } catch (e) {
+          debugPrint('Failed to reconnect after DFU completion: $e');
+        }
         if (!mounted) return;
 
         // Verify the firmware version actually changed.
@@ -374,21 +433,20 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
                           onRetry: _retry,
                         ),
                       ),
-                      const SizedBox(height: 18),
-                      _FadeSlide(
-                        controller: _entryController,
-                        delay: 0.2,
-                        child: _BatteryCard(
-                          deviceInfo: _deviceInfo,
-                          minBattery: _manifest?.minBatteryPercent ?? 70,
-                        ),
-                      ),
                       if (_step == _UpdateStep.updateAvailable) ...[
                         const SizedBox(height: 28),
                         _FadeSlide(
                           controller: _entryController,
                           delay: 0.3,
-                          child: _InstallButton(onTap: _startUpdate),
+                          child: _DownloadButton(onTap: _downloadUpdate),
+                        ),
+                      ],
+                      if (_step == _UpdateStep.downloaded) ...[
+                        const SizedBox(height: 28),
+                        _FadeSlide(
+                          controller: _entryController,
+                          delay: 0.3,
+                          child: _InstallButton(onTap: _installUpdate),
                         ),
                       ],
                       if (_step == _UpdateStep.failed ||
@@ -553,6 +611,8 @@ class _StatusCard extends StatelessWidget {
         );
       case _UpdateStep.verifying:
         return _Spinner(label: 'Verifying firmware integrity…');
+      case _UpdateStep.downloaded:
+        return _DownloadedReady(manifest: manifest!);
       case _UpdateStep.enteringDfu:
         return _Spinner(label: 'Preparing device for update…\nDo not close the app.');
       case _UpdateStep.transferring:
@@ -819,7 +879,7 @@ class _UpdateAvailable extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   const Text(
-                    'New firmware improvements are ready to install.',
+                    'New firmware improvements are ready to download.',
                     style: TextStyle(
                       color: AppTheme.textMuted,
                       fontSize: 12,
@@ -858,6 +918,57 @@ class _UpdateAvailable extends StatelessWidget {
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _DownloadedReady extends StatelessWidget {
+  final FirmwareManifest manifest;
+  const _DownloadedReady({required this.manifest});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppTheme.successBg,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.download_done_rounded,
+            color: AppTheme.successText,
+            size: 20,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Firmware Downloaded',
+                style: TextStyle(
+                  color: AppTheme.successText,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Version ${manifest.latestVersion} is verified and ready to install.',
+                style: const TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -958,6 +1069,7 @@ class _ErrorRow extends StatelessWidget {
 
 // ── Battery Card ─────────────────────────────────────────────────────────────
 
+// ignore: unused_element
 class _BatteryCard extends StatelessWidget {
   final DeviceInfo? deviceInfo;
   final int minBattery;
@@ -1066,6 +1178,21 @@ class _BatteryCard extends StatelessWidget {
 
 // ── Buttons ────────────────────────────────────────────────────────────────
 
+class _DownloadButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _DownloadButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionButton(
+      label: 'Download Update',
+      gradient: AppTheme.brandGradient,
+      icon: Icons.file_download_rounded,
+      onTap: onTap,
+    );
+  }
+}
+
 class _InstallButton extends StatelessWidget {
   final VoidCallback onTap;
   const _InstallButton({required this.onTap});
@@ -1075,7 +1202,7 @@ class _InstallButton extends StatelessWidget {
     return _ActionButton(
       label: 'Install Update',
       gradient: AppTheme.brandGradient,
-      icon: Icons.download_rounded,
+      icon: Icons.system_update_alt_rounded,
       onTap: onTap,
     );
   }

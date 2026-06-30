@@ -58,6 +58,36 @@ class FirmwareManifestService {
     defaultValue: 'https://cdn.aligneye.com/firmware/manifest.json',
   );
 
+  Future<FirmwareManifest?> fetchLatestForDeviceFromSupabase({
+    required String deviceModel,
+    required String hardwareRevision,
+  }) async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('firmware_releases')
+          .select()
+          .eq('active', true)
+          .order('build_number', ascending: false)
+          .limit(20);
+
+      for (final row in rows) {
+        final manifest = FirmwareManifest.fromJson(row);
+        final modelMatches =
+            manifest.deviceModel.isEmpty || manifest.deviceModel == deviceModel;
+        final hardwareMatches =
+            manifest.hardwareRevision.isEmpty ||
+            manifest.hardwareRevision == hardwareRevision;
+        if (modelMatches && hardwareMatches) {
+          return manifest;
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Supabase device manifest fetch error: $e');
+      return null;
+    }
+  }
+
   Future<FirmwareManifest?> fetchManifest() async {
     // 1. Try Supabase first
     try {
