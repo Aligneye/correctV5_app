@@ -91,8 +91,13 @@ class FirmwareUpdateService {
       debugPrint('FirmwareUpdateService: downloaded to $zipPath');
 
       // Step 5: SHA256 verify
-      // TODO: re-enable when real firmware ZIP is uploaded with correct sha256
-      // await _downloadService.verifySha256(zipPath, manifest.sha256);
+      try {
+        await _downloadService.verifySha256(zipPath, manifest.sha256);
+      } catch (e) {
+        debugPrint('FirmwareUpdateService: SHA256 verification failed: $e');
+        _state.value = FirmwareUpdateState.error;
+        return;
+      }
       _localZipPath = zipPath;
 
       debugPrint('FirmwareUpdateService: state → ready, showing popup');
