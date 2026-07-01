@@ -438,21 +438,39 @@ class _DeviceInfoCard extends StatelessWidget {
           const SizedBox(height: 14),
           ValueListenableBuilder<PostureReading?>(
             valueListenable:
-            BluetoothServiceManager().deviceService.currentReading,
+                BluetoothServiceManager().deviceService.currentReading,
             builder: (context, reading, _) {
-              final profile =
-              (reading?.profile.isNotEmpty ?? false)
+              final profile = (reading?.profile.isNotEmpty ?? false)
                   ? reading!.profile
                   : '-';
               return _InfoRow(label: 'Active Profile', value: profile);
             },
           ),
           const SizedBox(height: 14),
-          _InfoRow(label: 'Firmware Version', value: 'v2.4.1'),
-          const SizedBox(height: 14),
-          _InfoRow(label: 'Hardware Revision', value: 'Rev B'),
-          const SizedBox(height: 14),
-          _InfoRow(label: 'Serial Number', value: 'AE2024120301'),
+          ValueListenableBuilder<DeviceInfo?>(
+            valueListenable:
+                BluetoothServiceManager().deviceService.deviceInfo,
+            builder: (context, info, _) {
+              return Column(
+                children: [
+                  _InfoRow(
+                    label: 'Firmware Version',
+                    value: info != null ? 'v${info.firmwareVersion}' : '-',
+                  ),
+                  const SizedBox(height: 14),
+                  _InfoRow(
+                    label: 'Hardware Revision',
+                    value: info?.hardwareRevision ?? '-',
+                  ),
+                  const SizedBox(height: 14),
+                  _InfoRow(
+                    label: 'Serial Number',
+                    value: info?.serial ?? '-',
+                  ),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );
@@ -551,6 +569,7 @@ class _FirmwareUpdateCard extends StatelessWidget {
             gradient: AppTheme.trackingGradient,
             onTap: () {
               HapticFeedback.selectionClick();
+              BluetoothServiceManager().deviceService.getDeviceInfo();
               Navigator.of(context).push(
                 PageRouteBuilder(
                   transitionDuration: const Duration(milliseconds: 320),

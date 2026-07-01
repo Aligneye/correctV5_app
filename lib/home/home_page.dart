@@ -253,9 +253,22 @@ class _HomeDashboardState extends State<HomeDashboard>
   final ValueNotifier<int> difficultyDegNotifier = ValueNotifier<int>(25);
 
   _ModeControlType _selectedMode = _ModeControlType.track;
-  DateTime? _ignoreModeFromDeviceUntil;
   _PostureTimingType _selectedPostureTiming = _PostureTimingType.instant;
   int _selectedDifficulty = 25;
+
+  // Per-field pending-command guards.
+  // When user taps a value, we store it here and ignore device readings for
+  // that field until the device echoes back the same value (confirmation) or
+  // the safety timer fires (4 s). This prevents BLE packets that arrive
+  // slightly after a tap from snapping the UI back to the old value.
+  _ModeControlType? _pendingMode;
+  Timer? _pendingModeTimer;
+  _PostureTimingType? _pendingPostureTiming;
+  Timer? _pendingPostureTimingTimer;
+  int? _pendingDifficulty;
+  Timer? _pendingDifficultyTimer;
+
+  static const _kPendingTimeout = Duration(seconds: 4);
   int _therapyDurationMinutes = 10;
   Timer? _therapyCountdownTimer;
   final _therapyRemainingSeconds = ValueNotifier<int>(0);
@@ -394,8 +407,6 @@ class _HomeDashboardState extends State<HomeDashboard>
       _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
       final newMode = _modeFromDevice(reading.mode);
       final newTiming = _postureTimingFromDevice(reading.subMode);
-      final modeOrTimingChanged =
-          _selectedMode != newMode || _selectedPostureTiming != newTiming;
       // setState(() {
       //   // _syncBannerDismissed = false;
       //
@@ -432,18 +443,44 @@ class _HomeDashboardState extends State<HomeDashboard>
       // this entire 6000-line widget tree and is the main cause of jank.
       bool needsRebuild = false;
 
-      final ignoreModeNow =
-          _ignoreModeFromDeviceUntil != null &&
-          DateTime.now().isBefore(_ignoreModeFromDeviceUntil!);
+      // --- Per-field confirmation checks ---
+      // Each field has an optional _pending* value set when the user taps.
+      // We ignore incoming device values for that field until the device
+      // echoes back our selection (confirmation), then we clear the guard.
+      // A safety Timer cancels the guard after _kPendingTimeout either way.
 
-      if (modeOrTimingChanged && !ignoreModeNow) {
+      if (_pendingMode != null && newMode == _pendingMode) {
+        _pendingMode = null;
+        _pendingModeTimer?.cancel();
+        _pendingModeTimer = null;
+      }
+      if (_pendingPostureTiming != null && newTiming == _pendingPostureTiming) {
+        _pendingPostureTiming = null;
+        _pendingPostureTimingTimer?.cancel();
+        _pendingPostureTimingTimer = null;
+      }
+      final incomingDifficulty = reading.difficultyDeg;
+      if (_pendingDifficulty != null && incomingDifficulty == _pendingDifficulty) {
+        _pendingDifficulty = null;
+        _pendingDifficultyTimer?.cancel();
+        _pendingDifficultyTimer = null;
+      }
+
+      // Apply each field independently — only skip the field that has a live
+      // pending guard; the others update freely.
+      if (_pendingMode == null && _selectedMode != newMode) {
         _selectedMode = newMode;
+        needsRebuild = true;
+      }
+      if (_pendingPostureTiming == null && _selectedPostureTiming != newTiming) {
         _selectedPostureTiming = newTiming;
         _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
-
-        if (_kDifficultyOptions.contains(reading.difficultyDeg)) {
-          _selectedDifficulty = reading.difficultyDeg;
-        }
+        needsRebuild = true;
+      }
+      if (_pendingDifficulty == null &&
+          _kDifficultyOptions.contains(incomingDifficulty) &&
+          _selectedDifficulty != incomingDifficulty) {
+        _selectedDifficulty = incomingDifficulty;
         needsRebuild = true;
       }
       final isIdle = reading.mode.trim().toUpperCase() == 'IDLE';
@@ -529,12 +566,13 @@ class _HomeDashboardState extends State<HomeDashboard>
       _handleConnectionStatusChanged,
     );
 
-    // 🔥 FIX: Timers ko cancel karne ke sath-sath unhe 'null' zaroor karein
     _therapyCountdownTimer?.cancel();
     _therapyCountdownTimer = null;
-
     _liveSessionTicker?.cancel();
     _liveSessionTicker = null;
+    _pendingModeTimer?.cancel();
+    _pendingPostureTimingTimer?.cancel();
+    _pendingDifficultyTimer?.cancel();
 
     postureAngleNotifier.dispose();
 
@@ -2035,45 +2073,21 @@ class _HomeDashboardState extends State<HomeDashboard>
                   selectedMode: _selectedMode,
                   selectedPostureTiming: _selectedPostureTiming,
                   selectedDifficulty: _selectedDifficulty,
-                  // onModeSelected: (mode) {
-                  //   setState(() => _selectedMode = mode);
-                  //   if (mode == _ModeControlType.therapy) {
-                  //     _startTherapyCountdown(_therapyDurationMinutes);
-                  //   } else {
-                  //     _stopTherapyCountdown();
-                  //   }
-                  //   unawaited(
-                  //     _syncModeControlToDevice(
-                  //       mode: mode,
-                  //       postureTiming: _selectedPostureTiming,
-                  //       therapyDurationMinutes: _therapyDurationMinutes,
-                  //       difficultyDegrees: _selectedDifficulty,
-                  //     ),
-                  //   );
-                  //   // Therapy button inside Default Mode should also surface
-                  //   // the immersive ongoing-therapy screen using the current
-                  //   // defaults. The MODE=THERAPY command was just sent above,
-                  //   // so the device is already configured.
-                  //   // if (mode == _ModeControlType.therapy) {
-                  //   //   unawaited(_openOngoingTherapyWithDefaults());
-                  //   // }
-                  //   if (mode == _ModeControlType.therapy) {
-                  //     widget.onOpenTherapy();
-                  //   }
-                  // },
                   onModeSelected: (mode) {
-                    if (mode == _ModeControlType.therapy) {
-                      widget.onOpenTherapy();
-                      return;
-                    }
-                    if (mode == _ModeControlType.posture) {
-                      widget.onOpenTraining();
-                      return;
-                    }
                     setState(() => _selectedMode = mode);
-                    _ignoreModeFromDeviceUntil = DateTime.now().add(
-                      const Duration(seconds: 1),
-                    );
+                    _pendingMode = mode;
+                    _pendingModeTimer?.cancel();
+                    // IDLE guard has no timer: device won't confirm IDLE while a
+                    // live session is active, so we hold the guard until the user
+                    // explicitly picks a different mode (which overwrites _pendingMode).
+                    // For posture/therapy, a 4s safety timer is enough because those
+                    // modes are actually confirmed by the device quickly.
+                    if (mode != _ModeControlType.track) {
+                      _pendingModeTimer = Timer(_kPendingTimeout, () {
+                        _pendingMode = null;
+                        _pendingModeTimer = null;
+                      });
+                    }
                     _stopTherapyCountdown();
                     unawaited(
                       _syncModeControlToDevice(
@@ -2086,6 +2100,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                   },
                   onPostureTimingSelected: (timing) {
                     setState(() => _selectedPostureTiming = timing);
+                    _pendingPostureTiming = timing;
+                    _pendingPostureTimingTimer?.cancel();
+                    _pendingPostureTimingTimer = Timer(_kPendingTimeout, () {
+                      _pendingPostureTiming = null;
+                      _pendingPostureTimingTimer = null;
+                    });
                     unawaited(
                       _syncModeControlToDevice(
                         mode: _selectedMode,
@@ -2097,6 +2117,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                   },
                   onDifficultySelected: (difficulty) {
                     setState(() => _selectedDifficulty = difficulty);
+                    _pendingDifficulty = difficulty;
+                    _pendingDifficultyTimer?.cancel();
+                    _pendingDifficultyTimer = Timer(_kPendingTimeout, () {
+                      _pendingDifficulty = null;
+                      _pendingDifficultyTimer = null;
+                    });
                     unawaited(
                       _syncModeControlToDevice(
                         mode: _selectedMode,
