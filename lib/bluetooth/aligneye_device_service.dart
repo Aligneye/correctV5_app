@@ -36,6 +36,28 @@ class _ScanCandidate {
   final bool isBonded;
 }
 
+// Translates an app-side mode string to the BLE text-protocol command value.
+// Firmware applyMode() (bluetooth.cpp) recognises only: TRACKING, TRAINING,
+// POSTURE, THERAPY.  "IDLE" has no case in applyMode() and is silently ignored
+// by the firmware, so we map it to TRACKING (= no-alert training mode, the
+// closest BLE-reachable standby state).  JSON {"cmd":"SET_MODE"} does NOT exist
+// in firmware — mode control is text-only.
+String wireModeCommand(String appMode) {
+  final normalized = appMode.trim().toUpperCase();
+  switch (normalized) {
+    case 'IDLE':
+    case 'TRACKING':
+      return 'TRACKING'; // firmware standby: NoAlerts training submode
+    case 'THERAPY':
+      return 'THERAPY';
+    case 'TRAINING':
+    case 'POSTURE':
+      return 'TRAINING';
+    default:
+      return 'TRACKING';
+  }
+}
+
 String normalizeDeviceMode(dynamic value, {String fallback = 'IDLE'}) {
   final raw = value?.toString().trim().toUpperCase();
 
@@ -645,8 +667,6 @@ enum EnterDfuResult { success, lowBattery, sessionActive, timeout, error }
 
 void _bleConsoleLog(String message) {
   debugPrint(message);
-  // ignore: avoid_print
-  print(message);
 }
 
 class AlignEyeDeviceService {
@@ -671,6 +691,7 @@ class AlignEyeDeviceService {
     DeviceConnectionStatus.disconnected,
   );
   final currentReading = ValueNotifier<PostureReading?>(null);
+  final deviceInfo = ValueNotifier<DeviceInfo?>(null);
   String _lastKnownMode = 'IDLE';
   String _lastKnownSubMode = 'INSTANT';
   String _lastKnownProfile = '';
@@ -844,13 +865,8 @@ class AlignEyeDeviceService {
       return;
     }
 
-    final cleanMode = normalizeDeviceMode(mode);
-    final payload =
-        'MODE=$cleanMode;'
-        'POSTURE_TIMING=${postureTiming.toUpperCase()};'
-        'POSTURE_DELAY_SEC=$postureDelaySeconds;'
-        'THERAPY_DURATION_MIN=$therapyDurationMinutes;'
-        'DIFFICULTY_DEG=$difficultyDegrees';
+    final cleanMode = wireModeCommand(mode);
+    final payload = '{"cmd":"SET_MODE","mode":"$cleanMode"}';
 
     try {
       await characteristic.write(
@@ -1634,6 +1650,7 @@ class AlignEyeDeviceService {
       Future.delayed(const Duration(milliseconds: 500), () {
         if (connectionStatus.value == DeviceConnectionStatus.connected) {
           getProfiles().then((_) => debugPrint('GET_PROFILES sent on connect'));
+          // GET_DEVICE_INFO is handled by home_page after 5s (with firmware check)
         }
       });
 
@@ -1693,7 +1710,8 @@ class AlignEyeDeviceService {
 
     _device = null;
     _notifyCharacteristic = null;
-    currentReading.value = null; // Clear current reading on disconnect
+    currentReading.value = null;
+    deviceInfo.value = null;
     connectionStatus.value = DeviceConnectionStatus.disconnected;
 
     debugPrint('Disconnect completed');
@@ -1757,6 +1775,7 @@ class AlignEyeDeviceService {
     await _cleanupScan();
     connectionStatus.dispose();
     currentReading.dispose();
+    deviceInfo.dispose();
   }
 
   Future<void> _ensureBluetoothOn() async {
@@ -2245,6 +2264,7 @@ class AlignEyeDeviceService {
                 'build=${info.firmwareBuildDate}, '
                 'serial=${info.serial}',
               );
+              deviceInfo.value = info;
               break;
 
             case 'L':
