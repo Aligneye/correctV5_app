@@ -97,7 +97,7 @@ class _CalibrationPageState extends State<CalibrationPage>
     _readingSubscription = widget.deviceService.readings.listen(_onReading);
     _ticker = Timer.periodic(
       const Duration(milliseconds: 100),
-          (_) => _onTick(),
+      (_) => _onTick(),
     );
 
     if (widget.autoStart) {
@@ -121,7 +121,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   bool get _isConnected =>
       widget.deviceService.connectionStatus.value ==
-          DeviceConnectionStatus.connected;
+      DeviceConnectionStatus.connected;
 
   Future<void> _startCalibration() async {
     if (!_isConnected) {
@@ -193,7 +193,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     // Transition to getReady when device starts calibrating and phase is GET_READY
     if ((_stage == _CalibrationStage.starting ||
-        _stage == _CalibrationStage.intro) &&
+            _stage == _CalibrationStage.intro) &&
         reading.isCalibrating &&
         (reading.calibrationPhase == 'GET_READY' ||
             reading.calibrationPhase.isEmpty)) {
@@ -214,7 +214,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
     // Calibration cancelled from device
     if ((_stage == _CalibrationStage.getReady ||
-        _stage == _CalibrationStage.holdStill) &&
+            _stage == _CalibrationStage.holdStill) &&
         !reading.isCalibrating &&
         reading.calibrationResult.isEmpty) {
       _cancelMissCount++;
@@ -342,7 +342,8 @@ class _CalibrationPageState extends State<CalibrationPage>
   }
 
   void _cancelCalibrationOnExit() {
-    final inProgress = _stage == _CalibrationStage.starting ||
+    final inProgress =
+        _stage == _CalibrationStage.starting ||
         _stage == _CalibrationStage.getReady ||
         _stage == _CalibrationStage.holdStill;
     if (inProgress && _isConnected) {
@@ -423,7 +424,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   double _getHoldStillProgress() {
     final elapsedMs =
-    _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
+        _devicePhase == 'HOLD_STILL' && _deviceElapsedMs > _deviceHoldStartMs
         ? _deviceElapsedMs - _deviceHoldStartMs
         : _holdStillWallElapsedMs;
     return (elapsedMs / _holdStillMs).clamp(0.0, 1.0);
@@ -509,7 +510,7 @@ class _CalibrationPageState extends State<CalibrationPage>
           color: const Color(0xFF14B8A6),
           title: 'Calibration Complete',
           message:
-          'Your ideal posture has been saved.\nPosture tracking started.',
+              'Your ideal posture has been saved.\nPosture tracking started.',
           subText: _calibrationQuality > 0
               ? 'Quality: ${_qualityLabel(_calibrationQuality)} ($_calibrationQuality%)'
               : 'Auto return → Training Screen',
@@ -591,9 +592,7 @@ class _IntroScreenState extends State<_IntroScreen> {
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
           child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: constraints.maxHeight - 60,
-            ),
+            constraints: BoxConstraints(minHeight: constraints.maxHeight - 60),
             child: IntrinsicHeight(
               child: Column(
                 children: [
@@ -624,7 +623,9 @@ class _IntroScreenState extends State<_IntroScreen> {
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.04),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
                     ),
                     child: Column(
                       children: [
@@ -663,20 +664,34 @@ class _IntroScreenState extends State<_IntroScreen> {
                     controller: _nameController,
                     style: const TextStyle(color: Colors.white, fontSize: 16),
                     maxLength: 23,
-                    buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+                    buildCounter:
+                        (
+                          context, {
+                          required currentLength,
+                          required isFocused,
+                          maxLength,
+                        }) => null,
                     decoration: InputDecoration(
                       hintText: 'Enter name (e.g. Office)',
                       hintStyle: const TextStyle(color: Colors.white30),
                       filled: true,
                       fillColor: Colors.white.withValues(alpha: 0.05),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                        borderSide: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.12),
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF008090), width: 1.5),
+                        borderSide: const BorderSide(
+                          color: Color(0xFF008090),
+                          width: 1.5,
+                        ),
                       ),
                     ),
                   ),
@@ -692,19 +707,28 @@ class _IntroScreenState extends State<_IntroScreen> {
                           onTap: () {
                             HapticFeedback.selectionClick();
                             _nameController.text = name;
-                            _nameController.selection = TextSelection.fromPosition(
-                              TextPosition(offset: name.length),
-                            );
+                            _nameController.selection =
+                                TextSelection.fromPosition(
+                                  TextPosition(offset: name.length),
+                                );
                           },
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               gradient: isSelected
                                   ? const LinearGradient(
-                                colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-                              )
+                                      colors: [
+                                        Color(0xFFA855F7),
+                                        Color(0xFFEC4899),
+                                      ],
+                                    )
                                   : null,
-                              color: isSelected ? null : Colors.white.withValues(alpha: 0.06),
+                              color: isSelected
+                                  ? null
+                                  : Colors.white.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
                                 color: isSelected
@@ -715,9 +739,13 @@ class _IntroScreenState extends State<_IntroScreen> {
                             child: Text(
                               name,
                               style: TextStyle(
-                                color: isSelected ? Colors.white : Colors.white70,
+                                color: isSelected
+                                    ? Colors.white
+                                    : Colors.white70,
                                 fontSize: 13,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
                               ),
                             ),
                           ),
@@ -800,6 +828,8 @@ class _StatusScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       key: key,
+      width: double.infinity,
+      height: double.infinity,
       padding: const EdgeInsets.fromLTRB(28, 48, 28, 36),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -852,8 +882,18 @@ class _GetReadyScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cue = countdown >= 3
+        ? 'Find your natural upright posture'
+        : countdown == 2
+        ? 'Relax your shoulders'
+        : countdown == 1
+        ? 'Tiny movements are okay. Big shifts are not.'
+        : 'Starting now';
+
     return Container(
       key: key,
+      width: double.infinity,
+      height: double.infinity,
       padding: const EdgeInsets.fromLTRB(28, 48, 28, 36),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -868,7 +908,7 @@ class _GetReadyScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Adjust your posture.\nCalibration will begin shortly.',
+            'Sit how you want AlignEye to remember you.\nThis becomes your posture baseline.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
@@ -876,11 +916,19 @@ class _GetReadyScreen extends StatelessWidget {
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 36),
+          const SizedBox(height: 28),
+          _CalibrationCoachCard(
+            icon: Icons.self_improvement_rounded,
+            label: 'Before we measure',
+            message: cue,
+            color: const Color(0xFFF59E0B),
+          ),
+          const SizedBox(height: 28),
           ScaleTransition(
-            scale: Tween<double>(begin: 0.97, end: 1.03).animate(
-              CurvedAnimation(parent: pulse, curve: Curves.easeInOut),
-            ),
+            scale: Tween<double>(
+              begin: 0.97,
+              end: 1.03,
+            ).animate(CurvedAnimation(parent: pulse, curve: Curves.easeInOut)),
             child: Container(
               width: 140,
               height: 140,
@@ -918,18 +966,16 @@ class _GetReadyScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          Text(
-            countdown == 3
-                ? '(3…2…1)'
-                : countdown == 2
-                ? '(2…1)'
-                : countdown == 1
-                ? '(1)'
-                : '',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.white.withValues(alpha: 0.5),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 250),
+            child: Text(
+              countdown > 0 ? 'Measuring in $countdown' : 'Here we go',
+              key: ValueKey(countdown),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Colors.white.withValues(alpha: 0.68),
+              ),
             ),
           ),
         ],
@@ -950,8 +996,21 @@ class _HoldStillScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final progressPercent = (progress.clamp(0.0, 1.0) * 100).round();
+    final cue = progress < 0.25
+        ? 'Stay easy. No need to freeze.'
+        : progress < 0.50
+        ? 'Soft jaw, relaxed shoulders.'
+        : progress < 0.75
+        ? 'Nice. Keep your neck in the same spot.'
+        : progress < 1.0
+        ? 'Almost saved. Hold this posture.'
+        : 'Saving your baseline.';
+
     return Container(
       key: key,
+      width: double.infinity,
+      height: double.infinity,
       padding: const EdgeInsets.fromLTRB(28, 48, 28, 36),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -966,7 +1025,7 @@ class _HoldStillScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Keep your neck steady.\nDo not move during calibration.',
+            'AlignEye is learning your neutral angle.\nBreathe normally and keep your head steady.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
@@ -974,11 +1033,19 @@ class _HoldStillScreen extends StatelessWidget {
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 28),
+          _CalibrationCoachCard(
+            icon: Icons.tips_and_updates_rounded,
+            label: 'Calibration cue',
+            message: cue,
+            color: const Color(0xFF22C55E),
+          ),
+          const SizedBox(height: 28),
           ScaleTransition(
-            scale: Tween<double>(begin: 0.98, end: 1.02).animate(
-              CurvedAnimation(parent: pulse, curve: Curves.easeInOut),
-            ),
+            scale: Tween<double>(
+              begin: 0.98,
+              end: 1.02,
+            ).animate(CurvedAnimation(parent: pulse, curve: Curves.easeInOut)),
             child: SizedBox(
               width: 220,
               height: 220,
@@ -1012,6 +1079,15 @@ class _HoldStillScreen extends StatelessWidget {
                           color: Colors.white.withValues(alpha: 0.8),
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$progressPercent%',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white.withValues(alpha: 0.55),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -1019,6 +1095,77 @@ class _HoldStillScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CalibrationCoachCard extends StatelessWidget {
+  const _CalibrationCoachCard({
+    required this.icon,
+    required this.label,
+    required this.message,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String message;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      child: Container(
+        key: ValueKey(message),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.055),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.26)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color.withValues(alpha: 0.14),
+              ),
+              child: Icon(icon, color: color, size: 21),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: color.withValues(alpha: 0.95),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    message,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      height: 1.25,
+                      color: Colors.white.withValues(alpha: 0.86),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
