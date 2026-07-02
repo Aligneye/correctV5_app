@@ -1,4 +1,4 @@
-package com.example.correctv1
+package com.alignpod.app
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
