@@ -394,8 +394,8 @@ class _HomeDashboardState extends State<HomeDashboard>
       final postureText = reading.posture.trim();
       postureStatusNotifier.value =
           postureText.isNotEmpty && postureText.toUpperCase() != 'UNKNOWN'
-              ? postureText
-              : (reading.isBadPosture ? 'BAD POSTURE' : 'GOOD POSTURE');
+          ? postureText
+          : (reading.isBadPosture ? 'BAD POSTURE' : 'GOOD POSTURE');
 
       final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
       final isLiveMode =
@@ -460,7 +460,8 @@ class _HomeDashboardState extends State<HomeDashboard>
         _pendingPostureTimingTimer = null;
       }
       final incomingDifficulty = reading.difficultyDeg;
-      if (_pendingDifficulty != null && incomingDifficulty == _pendingDifficulty) {
+      if (_pendingDifficulty != null &&
+          incomingDifficulty == _pendingDifficulty) {
         _pendingDifficulty = null;
         _pendingDifficultyTimer?.cancel();
         _pendingDifficultyTimer = null;
@@ -472,7 +473,8 @@ class _HomeDashboardState extends State<HomeDashboard>
         _selectedMode = newMode;
         needsRebuild = true;
       }
-      if (_pendingPostureTiming == null && _selectedPostureTiming != newTiming) {
+      if (_pendingPostureTiming == null &&
+          _selectedPostureTiming != newTiming) {
         _selectedPostureTiming = newTiming;
         _therapyDurationMinutes = _therapyMinutesFromDevice(reading.subMode);
         needsRebuild = true;
@@ -677,9 +679,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         'url=${manifest.firmwareUrl}',
       );
     } else {
-      _printDeviceInfoLog(
-        'Firmware is latest: ${info.firmwareVersion}',
-      );
+      _printDeviceInfoLog('Firmware is latest: ${info.firmwareVersion}');
     }
   }
 
@@ -1480,13 +1480,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       isScrollControlled: true,
       builder: (ctx) => _ConnectedDeviceSheet(
         batteryLevel: _batteryLevel.value,
-        profile:
-            BluetoothServiceManager()
-                .deviceService
-                .currentReading
-                .value
-                ?.profile ??
-            '',
+        profile: _deviceService.activeProfileName.value,
         onDisconnect: () async {
           Navigator.of(ctx).pop();
           await BluetoothServiceManager.instance.disconnectByUser();
@@ -1976,20 +1970,22 @@ class _HomeDashboardState extends State<HomeDashboard>
                         return ValueListenableBuilder<String?>(
                           valueListenable: _deviceManager.activeSessionId,
                           builder: (context, activeSessionId, child) {
-                            return _TopHeaderBar(
-                              status: connectionStatus,
-                              isFindingDevice: _isFindingDevice,
-                              isSyncing: isSyncing,
-                              isLive: activeSessionId != null,
-                              batteryLevel: _batteryLevel.value,
-                              profile:
-                                  BluetoothServiceManager()
-                                      .deviceService
-                                      .currentReading
-                                      .value
-                                      ?.profile ??
-                                  '',
-                              onTap: _handleDeviceStatusTap,
+                            return ValueListenableBuilder<String>(
+                              valueListenable: _deviceService.activeProfileName,
+                              builder: (context, profile, child) {
+                                return _TopHeaderBar(
+                                  status: connectionStatus,
+                                  isFindingDevice: _isFindingDevice,
+                                  isSyncing: isSyncing,
+                                  isLive:
+                                      connectionStatus ==
+                                          DeviceConnectionStatus.connected &&
+                                      activeSessionId != null,
+                                  batteryLevel: _batteryLevel.value,
+                                  profile: profile,
+                                  onTap: _handleDeviceStatusTap,
+                                );
+                              },
                             );
                           },
                         );
@@ -2051,15 +2047,17 @@ class _HomeDashboardState extends State<HomeDashboard>
 
                                     builder: (context, status, _) =>
                                         ValueListenableBuilder<int>(
-                                          valueListenable: difficultyDegNotifier,
+                                          valueListenable:
+                                              difficultyDegNotifier,
 
-                                          builder: (context, diff, _) => _PostureGaugeCard(
-                                            postureAngle: angle,
-                                            postureStatus: status,
-                                            isBadPosture: isBad,
-                                            difficultyDeg: diff,
-                                            controller: _controller,
-                                          ),
+                                          builder: (context, diff, _) =>
+                                              _PostureGaugeCard(
+                                                postureAngle: angle,
+                                                postureStatus: status,
+                                                isBadPosture: isBad,
+                                                difficultyDeg: diff,
+                                                controller: _controller,
+                                              ),
                                         ),
                                   ),
                             ),
@@ -2476,7 +2474,7 @@ class _TopHeaderBarState extends State<_TopHeaderBar>
       accentColor = const Color(0xFF3B82F6);
       statusIcon = Icons.sync_rounded;
       statusLabel = 'Syncing';
-    } else if (widget.isLive) {
+    } else if (isConnected && widget.isLive) {
       accentColor = const Color(0xFFEF4444);
       statusIcon = Icons.sensors_rounded;
       statusLabel = 'Live';
@@ -2798,7 +2796,10 @@ class _PostureGaugeCard extends StatelessWidget {
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [accentColor.withValues(alpha: 0.9), accentColor],
@@ -2973,8 +2974,10 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
     }
     final anchoredRemaining = widget.deviceService.therapyRemainingSecondsNow;
     final anchoredElapsed = widget.deviceService.therapyElapsedSecondsNow;
-    final anchoredPatternRemaining = widget.deviceService.therapyPatternRemainingSecondsNow;
-    final anchoredPatternElapsed = widget.deviceService.therapyPatternElapsedSecondsNow;
+    final anchoredPatternRemaining =
+        widget.deviceService.therapyPatternRemainingSecondsNow;
+    final anchoredPatternElapsed =
+        widget.deviceService.therapyPatternElapsedSecondsNow;
 
     setState(() {
       if (anchoredRemaining >= 0) {
@@ -3020,7 +3023,9 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
       _frameRemainingSeconds = remaining;
       _totalElapsedSeconds = elapsed;
       _totalRemainingSeconds = remaining;
-      final firmwareTotal = reading.therapyTotalDurationSeconds > 0 ? reading.therapyTotalDurationSeconds : (elapsed + remaining);
+      final firmwareTotal = reading.therapyTotalDurationSeconds > 0
+          ? reading.therapyTotalDurationSeconds
+          : (elapsed + remaining);
       if (firmwareTotal > 0) {
         _totalDurationSeconds = firmwareTotal;
       }
@@ -3037,7 +3042,8 @@ class _MiniOngoingTherapyCardState extends State<_MiniOngoingTherapyCard>
         _lastPatternStartElapsed = elapsed;
       }
 
-      if (reading.therapyPatternRemainingSeconds > 0 || reading.therapyPatternElapsedSeconds > 0) {
+      if (reading.therapyPatternRemainingSeconds > 0 ||
+          reading.therapyPatternElapsedSeconds > 0) {
         _patternElapsedSecondsState = reading.therapyPatternElapsedSeconds;
         _patternRemainingSecondsState = reading.therapyPatternRemainingSeconds;
         _hasPatternProgress = true;

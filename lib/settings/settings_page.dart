@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
@@ -44,6 +45,7 @@ class _SettingsPageState extends State<SettingsPage>
     _controller.dispose();
     super.dispose();
   }
+
   Future<void> _confirmLogout(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -67,6 +69,7 @@ class _SettingsPageState extends State<SettingsPage>
       await AuthService.signOut();
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -256,37 +259,34 @@ class _SettingsHeader extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: avatarUrl == null ? AppTheme.brandGradient : null,
-            border: Border.all(
-              color: scheme.outline,
-              width: 1.5,
-            ),
+            border: Border.all(color: scheme.outline, width: 1.5),
           ),
           clipBehavior: Clip.antiAlias,
           child: avatarUrl != null
               ? Image.network(
-            avatarUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Center(
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          )
+                  avatarUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Center(
+                    child: Text(
+                      initials,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                )
               : Center(
-            child: Text(
-              initials,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+                  child: Text(
+                    initials,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
         ),
         const Spacer(),
         Text(
@@ -304,10 +304,7 @@ class _SettingsHeader extends StatelessWidget {
           height: 38,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(
-              color: scheme.outline,
-              width: 1.5,
-            ),
+            border: Border.all(color: scheme.outline, width: 1.5),
           ),
           child: Icon(
             Icons.help_outline_rounded,
@@ -332,8 +329,38 @@ class _SettingsHeader extends StatelessWidget {
 
 // ── Device Info Card ────────────────────────────────────────────────────────
 
-class _DeviceInfoCard extends StatelessWidget {
+class _DeviceInfoCard extends StatefulWidget {
   const _DeviceInfoCard();
+
+  @override
+  State<_DeviceInfoCard> createState() => _DeviceInfoCardState();
+}
+
+class _DeviceInfoCardState extends State<_DeviceInfoCard> {
+  String _appVersion = 'Loading...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = 'v${packageInfo.version}';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _appVersion = 'v1.0.0';
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -363,7 +390,7 @@ class _DeviceInfoCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Align Pro',
+                      'Align Pod',
                       style: TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 16,
@@ -372,7 +399,7 @@ class _DeviceInfoCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'AE-2024-X01',
+                      _appVersion,
                       style: TextStyle(
                         color: _kMutedText,
                         fontSize: 13,
@@ -384,7 +411,7 @@ class _DeviceInfoCard extends StatelessWidget {
               ),
               ValueListenableBuilder<DeviceConnectionStatus>(
                 valueListenable:
-                BluetoothServiceManager().deviceService.connectionStatus,
+                    BluetoothServiceManager().deviceService.connectionStatus,
                 builder: (context, status, _) {
                   final isConnected =
                       status == DeviceConnectionStatus.connected;
@@ -415,9 +442,7 @@ class _DeviceInfoCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          isConnected
-                              ? 'Connected'
-                              : 'Disconnected',
+                          isConnected ? 'Connected' : 'Disconnected',
                           style: TextStyle(
                             color: isConnected
                                 ? AppTheme.successText
@@ -436,20 +461,19 @@ class _DeviceInfoCard extends StatelessWidget {
           const SizedBox(height: 18),
           Divider(height: 1, thickness: 1, color: AppTheme.border),
           const SizedBox(height: 14),
-          ValueListenableBuilder<PostureReading?>(
+          ValueListenableBuilder<String>(
             valueListenable:
-                BluetoothServiceManager().deviceService.currentReading,
-            builder: (context, reading, _) {
-              final profile = (reading?.profile.isNotEmpty ?? false)
-                  ? reading!.profile
-                  : '-';
-              return _InfoRow(label: 'Active Profile', value: profile);
+                BluetoothServiceManager().deviceService.activeProfileName,
+            builder: (context, profile, _) {
+              return _InfoRow(
+                label: 'Active Profile',
+                value: profile.isNotEmpty ? profile : '-',
+              );
             },
           ),
           const SizedBox(height: 14),
           ValueListenableBuilder<DeviceInfo?>(
-            valueListenable:
-                BluetoothServiceManager().deviceService.deviceInfo,
+            valueListenable: BluetoothServiceManager().deviceService.deviceInfo,
             builder: (context, info, _) {
               return Column(
                 children: [
@@ -463,10 +487,7 @@ class _DeviceInfoCard extends StatelessWidget {
                     value: info?.hardwareRevision ?? '-',
                   ),
                   const SizedBox(height: 14),
-                  _InfoRow(
-                    label: 'Serial Number',
-                    value: info?.serial ?? '-',
-                  ),
+                  _InfoRow(label: 'Serial Number', value: info?.serial ?? '-'),
                 ],
               );
             },
@@ -574,22 +595,24 @@ class _FirmwareUpdateCard extends StatelessWidget {
                 PageRouteBuilder(
                   transitionDuration: const Duration(milliseconds: 320),
                   reverseTransitionDuration: const Duration(milliseconds: 260),
-                  pageBuilder: (_, animation, __) =>
-                      const FirmwareUpdatePage(),
+                  pageBuilder: (_, animation, __) => const FirmwareUpdatePage(),
                   transitionsBuilder: (_, animation, __, child) =>
                       FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0.04, 0),
-                        end: Offset.zero,
-                      ).animate(CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOutCubic,
-                      )),
-                      child: child,
-                    ),
-                  ),
+                        opacity: animation,
+                        child: SlideTransition(
+                          position:
+                              Tween<Offset>(
+                                begin: const Offset(0.04, 0),
+                                end: Offset.zero,
+                              ).animate(
+                                CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                ),
+                              ),
+                          child: child,
+                        ),
+                      ),
                 ),
               );
             },
@@ -678,7 +701,7 @@ class _AlignmentCalibrationCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Sit in your ideal posture position before calibrating. '
-                        'This will set your baseline reference angle.',
+                    'This will set your baseline reference angle.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 13,
@@ -707,23 +730,25 @@ class _AlignmentCalibrationCard extends StatelessWidget {
                 PageRouteBuilder(
                   transitionDuration: const Duration(milliseconds: 320),
                   reverseTransitionDuration: const Duration(milliseconds: 260),
-                  pageBuilder: (_, animation, __) => CalibrationManagerPage(
-                    deviceService: deviceService,
-                  ),
+                  pageBuilder: (_, animation, __) =>
+                      CalibrationManagerPage(deviceService: deviceService),
                   transitionsBuilder: (_, animation, __, child) =>
                       FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0.04, 0),
-                        end: Offset.zero,
-                      ).animate(CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOutCubic,
-                      )),
-                      child: child,
-                    ),
-                  ),
+                        opacity: animation,
+                        child: SlideTransition(
+                          position:
+                              Tween<Offset>(
+                                begin: const Offset(0.04, 0),
+                                end: Offset.zero,
+                              ).animate(
+                                CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                ),
+                              ),
+                          child: child,
+                        ),
+                      ),
                 ),
               );
             },
@@ -742,8 +767,7 @@ class _BatteryTemperatureRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<PostureReading?>(
-      valueListenable:
-      BluetoothServiceManager().deviceService.currentReading,
+      valueListenable: BluetoothServiceManager().deviceService.currentReading,
       builder: (context, reading, _) {
         final battery = reading?.batteryPercentage ?? 0;
         final batteryColor = battery > 30
@@ -795,11 +819,10 @@ class _BatteryTemperatureRow extends StatelessWidget {
                       child: LinearProgressIndicator(
                         value: battery / 100,
                         minHeight: 6,
-                        backgroundColor:
-                        AppTheme.brandPrimary.withValues(alpha: 0.15),
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          batteryColor,
+                        backgroundColor: AppTheme.brandPrimary.withValues(
+                          alpha: 0.15,
                         ),
+                        valueColor: AlwaysStoppedAnimation<Color>(batteryColor),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -925,11 +948,7 @@ class _ConnectionSettingsCard extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: AppTheme.border,
-            ),
+            child: Divider(height: 1, thickness: 1, color: AppTheme.border),
           ),
           _ToggleRow(
             label: 'Vibration Alerts',
@@ -970,10 +989,7 @@ class _ToggleRow extends StatelessWidget {
           ),
           Transform.scale(
             scale: 0.85,
-            child: Switch.adaptive(
-              value: value,
-              onChanged: onChanged,
-            ),
+            child: Switch.adaptive(value: value, onChanged: onChanged),
           ),
         ],
       ),

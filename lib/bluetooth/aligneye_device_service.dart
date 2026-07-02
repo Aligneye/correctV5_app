@@ -36,25 +36,22 @@ class _ScanCandidate {
   final bool isBonded;
 }
 
-// Translates an app-side mode string to the BLE text-protocol command value.
-// Firmware applyMode() (bluetooth.cpp) recognises only: TRACKING, TRAINING,
-// POSTURE, THERAPY.  "IDLE" has no case in applyMode() and is silently ignored
-// by the firmware, so we map it to TRACKING (= no-alert training mode, the
-// closest BLE-reachable standby state).  JSON {"cmd":"SET_MODE"} does NOT exist
-// in firmware — mode control is text-only.
+// Translates an app-side mode string to the JSON SET_MODE command value.
+// New firmware accepts IDLE/TRAINING/THERAPY; legacy app labels collapse to
+// the nearest supported mode.
 String wireModeCommand(String appMode) {
   final normalized = appMode.trim().toUpperCase();
   switch (normalized) {
     case 'IDLE':
-    case 'TRACKING':
-      return 'TRACKING'; // firmware standby: NoAlerts training submode
+      return 'IDLE';
     case 'THERAPY':
       return 'THERAPY';
     case 'TRAINING':
     case 'POSTURE':
+    case 'TRACKING':
       return 'TRAINING';
     default:
-      return 'TRACKING';
+      return 'IDLE';
   }
 }
 
@@ -522,7 +519,8 @@ class DeviceInfo {
 
     return DeviceInfo(
       deviceName: json['device_name']?.toString() ?? '',
-      model: json['device_model']?.toString() ?? json['model']?.toString() ?? '',
+      model:
+          json['device_model']?.toString() ?? json['model']?.toString() ?? '',
       hardwareRevision: json['hw']?.toString() ?? '',
       firmwareVersion: json['fw']?.toString() ?? '',
       firmwareBuildDate: json['fw_build_date']?.toString() ?? '',
@@ -679,6 +677,7 @@ class AlignEyeDeviceService {
       StreamController<List<FirmwareProfile>>.broadcast();
   final _therapyCompletionController =
       StreamController<TherapyCompletion>.broadcast();
+  final _ackController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<List<FirmwareProfile>> get profileListStream =>
       _profileListController.stream;
   Stream<TherapyCompletion> get therapyCompletions =>
@@ -687,11 +686,24 @@ class AlignEyeDeviceService {
   List<FirmwareProfile> get lastKnownProfiles =>
       List.unmodifiable(_lastKnownProfiles);
 
+  String _profileNameFromList(List<FirmwareProfile> profiles) {
+    FirmwareProfile? active;
+    FirmwareProfile? defaultProfile;
+
+    for (final profile in profiles) {
+      if (profile.isActive) active ??= profile;
+      if (profile.isDefault) defaultProfile ??= profile;
+    }
+
+    return (defaultProfile ?? active)?.name ?? '';
+  }
+
   final connectionStatus = ValueNotifier<DeviceConnectionStatus>(
     DeviceConnectionStatus.disconnected,
   );
   final currentReading = ValueNotifier<PostureReading?>(null);
   final deviceInfo = ValueNotifier<DeviceInfo?>(null);
+  final activeProfileName = ValueNotifier<String>('');
   String _lastKnownMode = 'IDLE';
   String _lastKnownSubMode = 'INSTANT';
   String _lastKnownProfile = '';
@@ -786,6 +798,7 @@ class AlignEyeDeviceService {
   Timer? _reconnectTimer;
   int _connectionRetryCount = 0;
   DateTime? _lastTherapyPlanRequestedAt;
+  int _commandSeq = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
   static const int _maxRetries = 1;
   static const Duration _connectionTimeout = Duration(seconds: 30);
   static const Duration _serviceDiscoveryTimeout = Duration(seconds: 8);
@@ -843,6 +856,12 @@ class AlignEyeDeviceService {
   int get currentLiveSessionElapsedSeconds =>
       currentReading.value?.liveSessionElapsedSeconds ?? 0;
 
+  int _nextCommandSeq() {
+    _commandSeq = (_commandSeq + 1) & 0x7fffffff;
+    if (_commandSeq == 0) _commandSeq = 1;
+    return _commandSeq;
+  }
+
   Future<void> sendModeControl({
     required String mode,
     required String postureTiming,
@@ -854,28 +873,18 @@ class AlignEyeDeviceService {
       return;
     }
 
-    final characteristic = _notifyCharacteristic;
-    if (characteristic == null) {
-      return;
-    }
-
-    if (!characteristic.properties.write &&
-        !characteristic.properties.writeWithoutResponse) {
-      debugPrint('Mode control skipped: characteristic is not writable');
-      return;
-    }
-
     final cleanMode = wireModeCommand(mode);
-    final payload = '{"cmd":"SET_MODE","mode":"$cleanMode"}';
+    final seq = _nextCommandSeq();
+    final command = {'seq': seq, 'cmd': 'SET_MODE', 'mode': cleanMode};
+    final ack = await _writeJsonCommandAndWaitForAck(
+      command,
+      timeout: const Duration(seconds: 2),
+    );
 
-    try {
-      await characteristic.write(
-        utf8.encode(payload),
-        withoutResponse: characteristic.properties.writeWithoutResponse,
-      );
-      debugPrint('Mode control sent: $payload');
-    } catch (e) {
-      debugPrint('Failed to send mode control: $e');
+    if (ack == null) {
+      debugPrint('Mode control ACK timed out: $command');
+    } else if (ack['ok'] == false) {
+      debugPrint('Mode control rejected: $ack');
     }
   }
 
@@ -1024,6 +1033,41 @@ class AlignEyeDeviceService {
 
   Future<bool> _writeJsonCommand(Map<String, dynamic> command) async {
     return _writeTextCommand(jsonEncode(command));
+  }
+
+  Future<Map<String, dynamic>?> _writeJsonCommandAndWaitForAck(
+    Map<String, dynamic> command, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    final seq = command['seq'];
+    final cmd = command['cmd']?.toString().toUpperCase();
+    if (seq == null || cmd == null || cmd.isEmpty) {
+      final written = await _writeJsonCommand(command);
+      return written ? <String, dynamic>{'ok': true} : null;
+    }
+
+    final completer = Completer<Map<String, dynamic>?>();
+    late StreamSubscription<Map<String, dynamic>> sub;
+    sub = _ackController.stream.listen((ack) {
+      final ackCmd = ack['cmd']?.toString().toUpperCase();
+      final ackSeq = ack['seq']?.toString();
+      if (ackSeq == seq.toString() && ackCmd == cmd && !completer.isCompleted) {
+        completer.complete(ack);
+      }
+    });
+
+    final written = await _writeJsonCommand(command);
+    if (!written) {
+      await sub.cancel();
+      return null;
+    }
+
+    final result = await completer.future.timeout(
+      timeout,
+      onTimeout: () => null,
+    );
+    await sub.cancel();
+    return result;
   }
 
   /// Sends a JSON command (e.g. {"cmd":"GET_INFO"}) and waits up to
@@ -1712,6 +1756,7 @@ class AlignEyeDeviceService {
     _notifyCharacteristic = null;
     currentReading.value = null;
     deviceInfo.value = null;
+    activeProfileName.value = '';
     connectionStatus.value = DeviceConnectionStatus.disconnected;
 
     debugPrint('Disconnect completed');
@@ -1759,6 +1804,7 @@ class AlignEyeDeviceService {
     _device = null;
     _notifyCharacteristic = null;
     currentReading.value = null;
+    activeProfileName.value = '';
     connectionStatus.value = DeviceConnectionStatus.disconnected;
 
     debugPrint('Device forgotten successfully');
@@ -1772,10 +1818,12 @@ class AlignEyeDeviceService {
     await _readingController.close();
     await _profileListController.close();
     await _therapyCompletionController.close();
+    await _ackController.close();
     await _cleanupScan();
     connectionStatus.dispose();
     currentReading.dispose();
     deviceInfo.dispose();
+    activeProfileName.dispose();
   }
 
   Future<void> _ensureBluetoothOn() async {
@@ -2438,6 +2486,7 @@ class AlignEyeDeviceService {
 
               final combined = [systemDefault, ...profiles];
               _lastKnownProfiles = combined;
+              activeProfileName.value = _profileNameFromList(combined);
               _profileListController.add(
                 combined,
               ); // always emit, even if empty
@@ -2447,6 +2496,11 @@ class AlignEyeDeviceService {
             case 'ACK':
               // Command acknowledgement only.
               // Do not emit fake posture reading.
+              _ackController.add(Map<String, dynamic>.unmodifiable(decoded));
+              debugPrint(
+                'Command ACK received: '
+                'seq=${decoded['seq']} cmd=${decoded['cmd']} ok=${decoded['ok']}',
+              );
               break;
           }
         }
