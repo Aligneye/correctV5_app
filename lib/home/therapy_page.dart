@@ -209,13 +209,7 @@ class _TherapyPageState extends State<TherapyPage>
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFFF1F2), Colors.white, Color(0xFFFDF2F8)],
-          ),
-        ),
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: SafeArea(
           bottom: false,
           child: ListView(
@@ -506,11 +500,7 @@ class _BodyMap extends StatelessWidget {
       height: 229,
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFFFF1F2), Color(0xFFFDF2F8)],
-          ),
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(11),
         ),
         child: AnimatedBuilder(
@@ -628,6 +618,7 @@ class _PointButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: isSelected ? 54 : 52,
       child: Material(
@@ -650,7 +641,7 @@ class _PointButton extends StatelessWidget {
                       colors: [Color(0xFFFF1F5B), Color(0xFFED2CA6)],
                     )
                   : null,
-              color: isSelected ? null : const Color(0xFFFFF1F2),
+              color: isSelected ? null : scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(10),
               boxShadow: isSelected
                   ? [
@@ -668,7 +659,7 @@ class _PointButton extends StatelessWidget {
                 Text(
                   point.name,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : const Color(0xFF374151),
+                    color: isSelected ? Colors.white : scheme.onSurface,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                     height: 1.2,
@@ -680,7 +671,7 @@ class _PointButton extends StatelessWidget {
                   style: TextStyle(
                     color: isSelected
                         ? const Color(0xFFFFE4E6)
-                        : const Color(0xFF6B7280),
+                        : scheme.onSurfaceVariant,
                     fontSize: 11,
                     fontWeight: FontWeight.w400,
                     height: 1.2,
@@ -708,6 +699,7 @@ class _DurationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: 46,
       child: Material(
@@ -728,11 +720,11 @@ class _DurationButton extends StatelessWidget {
                       colors: [Color(0xFFF43F5E), Color(0xFFEC4899)],
                     )
                   : null,
-              color: isSelected ? null : Colors.white.withValues(alpha: 0.60),
+              color: isSelected ? null : scheme.surface.withValues(alpha: 0.60),
               borderRadius: BorderRadius.circular(11),
               border: isSelected
                   ? null
-                  : Border.all(color: const Color(0xFFE5E7EB)),
+                  : Border.all(color: scheme.outline),
               boxShadow: isSelected
                   ? [
                       BoxShadow(
@@ -746,7 +738,7 @@ class _DurationButton extends StatelessWidget {
             child: Text(
               '$minutes min',
               style: TextStyle(
-                color: isSelected ? Colors.white : const Color(0xFF4B5563),
+                color: isSelected ? Colors.white : scheme.onSurface,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -779,13 +771,7 @@ class _BenefitsCard extends StatelessWidget {
                 width: double.infinity,
                 constraints: const BoxConstraints(minHeight: 126),
                 padding: const EdgeInsets.fromLTRB(20, 21, 20, 20),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFFFFE4E6), Color(0xFFFCE7F3)],
-                  ),
-                ),
+                color: Theme.of(context).colorScheme.surface,
                 child: child,
               ),
               Positioned(
@@ -808,38 +794,43 @@ class _BenefitsCard extends StatelessWidget {
             ],
           );
         },
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        child: Builder(
+          builder: (context) {
+            final scheme = Theme.of(context).colorScheme;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.favorite_border_rounded,
-                  color: Color(0xFFE11D48),
-                  size: 20,
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.favorite_border_rounded,
+                      color: Color(0xFFE11D48),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 13),
+                    Text(
+                      'Therapy Benefits',
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(width: 13),
+                const SizedBox(height: 10),
                 Text(
-                  'Therapy Benefits',
+                  'Relieves muscle tension, improves circulation, and promotes relaxation through targeted vibration therapy.',
                   style: TextStyle(
-                    color: Color(0xFF374151),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 13,
+                    height: 1.45,
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
               ],
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Relieves muscle tension, improves circulation, and promotes relaxation through targeted vibration therapy.',
-              style: TextStyle(
-                color: Color(0xFF4B5563),
-                fontSize: 13,
-                height: 1.45,
-                fontWeight: FontWeight.w400,
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -919,12 +910,13 @@ class _GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
+        border: Border.all(color: scheme.surface.withValues(alpha: 0.72)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x15000000),

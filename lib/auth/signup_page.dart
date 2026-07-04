@@ -293,12 +293,12 @@ class _SignupPageState extends State<SignupPage> {
                         FilledButton(
                           onPressed: _isLoading ? null : _signUp,
                           child: _isLoading
-                              ? const SizedBox(
+                              ? SizedBox(
                                   width: 20,
                                   height: 20,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: Colors.white,
+                                    color: scheme.onPrimary,
                                   ),
                                 )
                               : const Text('Create account'),

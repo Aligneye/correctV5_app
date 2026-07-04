@@ -10,12 +10,12 @@ import 'package:correctv1/auth/auth_service.dart';
 import 'package:correctv1/settings/firmware_update_page.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
 import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
+import 'package:correctv1/services/theme_service.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
 const _kInnerSpacing = SizedBox(height: 16);
 const _kPrimaryBlue = AppTheme.brandPrimary;
-const _kMutedText = AppTheme.textSecondary;
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -143,6 +143,14 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
                 _kSectionSpacing,
 
+                // ── Appearance Card ─────────────────────────────────
+                _StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 550,
+                  child: const _AppearanceCard(),
+                ),
+                _kSectionSpacing,
+
                 // ── Logout Button ───────────────────────────────────
                 _StaggeredFadeSlide(
                   controller: _controller,
@@ -176,25 +184,37 @@ class _SurfaceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.60),
+        color: isDark ? scheme.surface : Colors.white.withValues(alpha: 0.60),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.glassBorder),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0D000000),
-            blurRadius: 24,
-            offset: Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Color(0x05000000),
-            blurRadius: 12,
-            offset: Offset(0, 2),
-          ),
-        ],
+        border: Border.all(
+          color: isDark ? scheme.outline : AppTheme.glassBorder,
+        ),
+        boxShadow: isDark
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.30),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : const [
+                BoxShadow(
+                  color: Color(0x0D000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Color(0x05000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 2),
+                ),
+              ],
       ),
       child: child,
     );
@@ -364,6 +384,7 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -392,7 +413,7 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
                     Text(
                       'Align Pod',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: scheme.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -401,7 +422,7 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
                     Text(
                       _appVersion,
                       style: TextStyle(
-                        color: _kMutedText,
+                        color: scheme.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -459,7 +480,7 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
             ],
           ),
           const SizedBox(height: 18),
-          Divider(height: 1, thickness: 1, color: AppTheme.border),
+          Divider(height: 1, thickness: 1, color: scheme.outline),
           const SizedBox(height: 14),
           ValueListenableBuilder<String>(
             valueListenable:
@@ -506,21 +527,22 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: const TextStyle(
-            color: _kMutedText,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
             fontSize: 14,
             fontWeight: FontWeight.w500,
           ),
         ),
         Text(
           value,
-          style: const TextStyle(
-            color: AppTheme.textPrimary,
+          style: TextStyle(
+            color: scheme.onSurface,
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
@@ -537,6 +559,7 @@ class _FirmwareUpdateCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -565,7 +588,7 @@ class _FirmwareUpdateCard extends StatelessWidget {
                     Text(
                       'Firmware Update',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: scheme.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -574,7 +597,7 @@ class _FirmwareUpdateCard extends StatelessWidget {
                     Text(
                       'Check for latest updates',
                       style: TextStyle(
-                        color: _kMutedText,
+                        color: scheme.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -630,6 +653,7 @@ class _AlignmentCalibrationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -658,7 +682,7 @@ class _AlignmentCalibrationCard extends StatelessWidget {
                     Text(
                       'Alignment Calibration',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: scheme.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -667,7 +691,7 @@ class _AlignmentCalibrationCard extends StatelessWidget {
                     Text(
                       'Reset posture baseline',
                       style: TextStyle(
-                        color: _kMutedText,
+                        color: scheme.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -703,7 +727,7 @@ class _AlignmentCalibrationCard extends StatelessWidget {
                     'Sit in your ideal posture position before calibrating. '
                     'This will set your baseline reference angle.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: scheme.onSurfaceVariant,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       height: 1.4,
@@ -769,6 +793,7 @@ class _BatteryTemperatureRow extends StatelessWidget {
     return ValueListenableBuilder<PostureReading?>(
       valueListenable: BluetoothServiceManager().deviceService.currentReading,
       builder: (context, reading, _) {
+        final scheme = Theme.of(context).colorScheme;
         final battery = reading?.batteryPercentage ?? 0;
         final batteryColor = battery > 30
             ? AppTheme.successText
@@ -808,7 +833,7 @@ class _BatteryTemperatureRow extends StatelessWidget {
                     Text(
                       'Battery',
                       style: TextStyle(
-                        color: _kMutedText,
+                        color: scheme.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -829,7 +854,7 @@ class _BatteryTemperatureRow extends StatelessWidget {
                     Text(
                       battery > 0 ? '$battery% remaining' : 'Not connected',
                       style: TextStyle(
-                        color: AppTheme.textMuted,
+                        color: scheme.onSurfaceVariant,
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
                       ),
@@ -863,7 +888,7 @@ class _BatteryTemperatureRow extends StatelessWidget {
                     Text(
                       '23°C',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: scheme.onSurface,
                         fontSize: 26,
                         fontWeight: FontWeight.w700,
                       ),
@@ -872,7 +897,7 @@ class _BatteryTemperatureRow extends StatelessWidget {
                     Text(
                       'Temperature',
                       style: TextStyle(
-                        color: _kMutedText,
+                        color: scheme.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -927,6 +952,7 @@ class _ConnectionSettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _SurfaceCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -937,7 +963,7 @@ class _ConnectionSettingsCard extends StatelessWidget {
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textPrimary,
+              color: scheme.onSurface,
             ),
           ),
           const SizedBox(height: 20),
@@ -948,7 +974,7 @@ class _ConnectionSettingsCard extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Divider(height: 1, thickness: 1, color: AppTheme.border),
+            child: Divider(height: 1, thickness: 1, color: scheme.outline),
           ),
           _ToggleRow(
             label: 'Vibration Alerts',
@@ -974,6 +1000,7 @@ class _ToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -981,8 +1008,8 @@ class _ToggleRow extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(
-              color: AppTheme.textPrimary,
+            style: TextStyle(
+              color: scheme.onSurface,
               fontSize: 15,
               fontWeight: FontWeight.w500,
             ),
@@ -992,6 +1019,160 @@ class _ToggleRow extends StatelessWidget {
             child: Switch.adaptive(value: value, onChanged: onChanged),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Appearance Card ─────────────────────────────────────────────────────────
+
+class _AppearanceCard extends StatelessWidget {
+  const _AppearanceCard();
+
+  static const _options = [
+    (ThemeMode.system, 'System', Icons.brightness_auto_rounded),
+    (ThemeMode.light, 'Light', Icons.light_mode_rounded),
+    (ThemeMode.dark, 'Dark', Icons.dark_mode_rounded),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return _SurfaceCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF818CF8), Color(0xFF3B82F6)],
+                  ),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                ),
+                child: const Icon(
+                  Icons.palette_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Appearance',
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Choose your preferred theme',
+                      style: TextStyle(
+                        color: scheme.onSurfaceVariant,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Divider(height: 1, thickness: 1, color: scheme.outline),
+          const SizedBox(height: 14),
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: ThemeService.instance.themeMode,
+            builder: (context, currentMode, _) {
+              return Row(
+                children: [
+                  for (final option in _options) ...[
+                    Expanded(
+                      child: _ThemeModeChip(
+                        label: option.$2,
+                        icon: option.$3,
+                        isSelected: currentMode == option.$1,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          ThemeService.instance.setMode(option.$1);
+                        },
+                      ),
+                    ),
+                    if (option.$1 != ThemeMode.dark) const SizedBox(width: 8),
+                  ],
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeModeChip extends StatelessWidget {
+  const _ThemeModeChip({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          gradient: isSelected
+              ? const LinearGradient(
+                  colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                )
+              : null,
+          color: isSelected ? null : scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          border: Border.all(
+            color: isSelected ? Colors.transparent : scheme.outline,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? Colors.white : scheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white : scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -169,7 +169,6 @@ class _TrainingPageState extends State<TrainingPage>
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -185,15 +184,12 @@ class _TrainingPageState extends State<TrainingPage>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFAF5FF), Colors.white, Color(0xFFEFF6FF)],
-          ),
+        decoration: BoxDecoration(
+          color: scheme.surface,
         ),
         child: SafeArea(
           bottom: false,
@@ -252,10 +248,10 @@ class _TrainingPageState extends State<TrainingPage>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'Sensitivity',
                             style: TextStyle(
-                              color: Color(0xFF374151),
+                              color: scheme.onSurface,
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                             ),
@@ -296,13 +292,13 @@ class _TrainingPageState extends State<TrainingPage>
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Row(
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
                             '0°',
                             style: TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -310,7 +306,7 @@ class _TrainingPageState extends State<TrainingPage>
                           Text(
                             '90°',
                             style: TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -318,26 +314,26 @@ class _TrainingPageState extends State<TrainingPage>
                         ],
                       ),
                       const SizedBox(height: 12),
-                      const Row(
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _LegendDot(color: Color(0xFF22C55E)),
-                          SizedBox(width: 6),
+                          const _LegendDot(color: Color(0xFF22C55E)),
+                          const SizedBox(width: 6),
                           Text(
                             'Good posture',
                             style: TextStyle(
-                              color: Color(0xFF6B7280),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                          SizedBox(width: 18),
-                          _LegendDot(color: Color(0xFFEF4444)),
-                          SizedBox(width: 6),
+                          const SizedBox(width: 18),
+                          const _LegendDot(color: Color(0xFFEF4444)),
+                          const SizedBox(width: 6),
                           Text(
                             'Bad posture',
                             style: TextStyle(
-                              color: Color(0xFF6B7280),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
@@ -420,10 +416,10 @@ class _TrainingPageState extends State<TrainingPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Live Posture Graph',
                         style: TextStyle(
-                          color: Color(0xFF374151),
+                          color: scheme.onSurface,
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
@@ -435,13 +431,13 @@ class _TrainingPageState extends State<TrainingPage>
                         difficultyDeg: widget.deviceService.currentReading.value?.difficultyDeg.toDouble() ?? _sensitivity,
                       ),
                       const SizedBox(height: 10),
-                      const Row(
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
                             'Past',
                             style: TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
@@ -449,7 +445,7 @@ class _TrainingPageState extends State<TrainingPage>
                           Text(
                             'Real-time',
                             style: TextStyle(
-                              color: Color(0xFF9CA3AF),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
@@ -485,6 +481,7 @@ class _TrainingHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -494,7 +491,7 @@ class _TrainingHeader extends StatelessWidget {
             onBack();
           },
           icon: const Icon(Icons.arrow_back_rounded),
-          color: const Color(0xFF4B5563),
+          color: scheme.onSurfaceVariant,
           padding: EdgeInsets.zero,
           alignment: Alignment.centerLeft,
           constraints: const BoxConstraints(minWidth: 40, minHeight: 34),
@@ -515,12 +512,14 @@ class _TrainingHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        const Text(
-          'Build your posture awareness',
-          style: TextStyle(
-            color: Color(0xFF667085),
-            fontSize: 13,
-            fontWeight: FontWeight.w400,
+        Builder(
+          builder: (context) => Text(
+            'Build your posture awareness',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: FontWeight.w400,
+            ),
           ),
         ),
       ],
@@ -536,13 +535,14 @@ class _OptionSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
-            color: Color(0xFF374151),
+          style: TextStyle(
+            color: scheme.onSurface,
             fontSize: 14,
             fontWeight: FontWeight.w500,
           ),
@@ -571,6 +571,7 @@ class _ChoiceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: 46,
       child: Material(
@@ -590,11 +591,11 @@ class _ChoiceButton extends StatelessWidget {
                       colors: selectedGradient,
                     )
                   : null,
-              color: isSelected ? null : Colors.white.withValues(alpha: 0.64),
+              color: isSelected ? null : scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(11),
               border: isSelected
                   ? null
-                  : Border.all(color: const Color(0xFFE5E7EB)),
+                  : Border.all(color: scheme.outline),
               boxShadow: isSelected
                   ? [
                       BoxShadow(
@@ -610,7 +611,7 @@ class _ChoiceButton extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  color: isSelected ? Colors.white : const Color(0xFF374151),
+                  color: isSelected ? Colors.white : scheme.onSurface,
                   fontSize: fontSize,
                   fontWeight: FontWeight.w500,
                 ),
@@ -790,6 +791,7 @@ class _DelayChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(999),
@@ -805,16 +807,16 @@ class _DelayChip extends StatelessWidget {
                     colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
                   )
                 : null,
-            color: isSelected ? null : const Color(0xFFF8FAFC),
+            color: isSelected ? null : scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(999),
             border: isSelected
                 ? null
-                : Border.all(color: const Color(0xFFE5E7EB)),
+                : Border.all(color: scheme.outline),
           ),
           child: Text(
             '${seconds}s',
             style: TextStyle(
-              color: isSelected ? Colors.white : const Color(0xFF374151),
+              color: isSelected ? Colors.white : scheme.onSurface,
               fontSize: 14,
               fontWeight: FontWeight.w600,
             ),
@@ -838,17 +840,14 @@ class _LiveGraph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: 126,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFFAF5FF), Colors.white],
-            ),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
           ),
           child: AnimatedBuilder(
             animation: pulseController,
@@ -1021,12 +1020,13 @@ class _GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
+        border: Border.all(color: scheme.outline.withValues(alpha: 0.20)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x15000000),
@@ -1126,6 +1126,7 @@ class _DelayPickerSheetState extends State<_DelayPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SafeArea(
       top: false,
       child: Padding(
@@ -1139,19 +1140,19 @@ class _DelayPickerSheetState extends State<_DelayPickerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Choose alert delay',
               style: TextStyle(
-                color: Color(0xFF111827),
+                color: scheme.onSurface,
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Pick how long poor posture should continue before vibration starts.',
               style: TextStyle(
-                color: Color(0xFF667085),
+                color: scheme.onSurfaceVariant,
                 fontSize: 13,
                 height: 1.35,
               ),

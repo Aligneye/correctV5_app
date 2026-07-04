@@ -354,6 +354,21 @@ class _CalibrationPageState extends State<CalibrationPage>
   int get _getReadyMs => _fallbackGetReadyMs;
   int get _holdStillMs => _fallbackHoldStillMs;
 
+  int? get _currentStep {
+    switch (_stage) {
+      case _CalibrationStage.intro:
+        return 1;
+      case _CalibrationStage.starting:
+        return 2;
+      case _CalibrationStage.getReady:
+        return 3;
+      case _CalibrationStage.holdStill:
+        return 4;
+      default:
+        return null;
+    }
+  }
+
   String _buildFailMessage(String reason) {
     switch (reason) {
       case 'MOVEMENT_TOO_HIGH':
@@ -432,6 +447,7 @@ class _CalibrationPageState extends State<CalibrationPage>
 
   @override
   Widget build(BuildContext context) {
+    final step = _currentStep;
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
@@ -442,11 +458,18 @@ class _CalibrationPageState extends State<CalibrationPage>
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1A1D),
         body: SafeArea(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            child: _buildStage(context),
+          child: Column(
+            children: [
+              if (step != null) _CalibrationStepBar(currentStep: step),
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: _buildStage(context),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -530,6 +553,136 @@ class _CalibrationPageState extends State<CalibrationPage>
     }
   }
 }
+
+// ── Step indicator bar ──────────────────────────────────────────────────────
+
+class _CalibrationStepBar extends StatelessWidget {
+  const _CalibrationStepBar({required this.currentStep});
+
+  final int currentStep; // 1-based, max 4
+
+  static const _labels = ['Setup', 'Connecting', 'Get Ready', 'Hold Still'];
+  static const _totalSteps = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              for (int i = 1; i <= _totalSteps; i++) ...[
+                _StepDot(index: i, currentStep: currentStep),
+                if (i < _totalSteps)
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      height: 2,
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        gradient: i < currentStep
+                            ? const LinearGradient(
+                                colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                              )
+                            : null,
+                        color: i >= currentStep
+                            ? Colors.white.withValues(alpha: 0.12)
+                            : null,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                'Step $currentStep of $_totalSteps',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white.withValues(alpha: 0.5),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '— ${_labels[currentStep - 1]}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFA855F7),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepDot extends StatelessWidget {
+  const _StepDot({required this.index, required this.currentStep});
+
+  final int index;
+  final int currentStep;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone = index < currentStep;
+    final isActive = index == currentStep;
+
+    final bg = isDone
+        ? const Color(0xFFA855F7)
+        : isActive
+            ? Colors.white.withValues(alpha: 0.12)
+            : Colors.white.withValues(alpha: 0.06);
+    final border = isActive
+        ? const Color(0xFFA855F7)
+        : Colors.transparent;
+    final size = isActive ? 24.0 : 20.0;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: bg,
+        border: Border.all(color: border, width: 2),
+      ),
+      child: isDone
+          ? const Icon(Icons.check_rounded, size: 13, color: Colors.white)
+          : isActive
+              ? Center(
+                  child: Text(
+                    '$index',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFA855F7),
+                    ),
+                  ),
+                )
+              : Center(
+                  child: Text(
+                    '$index',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withValues(alpha: 0.3),
+                    ),
+                  ),
+                ),
+    );
+  }
+}
+
+// ── Calibration screens ─────────────────────────────────────────────────────
 
 class _IntroScreen extends StatefulWidget {
   const _IntroScreen({

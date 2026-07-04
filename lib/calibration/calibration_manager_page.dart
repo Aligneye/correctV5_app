@@ -232,6 +232,7 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
   }
 
   Widget _buildHeader() {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(6, 10, 16, 4),
       child: Row(
@@ -242,7 +243,7 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
               Navigator.of(context).pop(false);
             },
             icon: const Icon(Icons.arrow_back_rounded),
-            color: AppTheme.textPrimary,
+            color: scheme.onSurface,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
@@ -251,10 +252,10 @@ class _CalibrationManagerPageState extends State<CalibrationManagerPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Calibrations',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: scheme.onSurface,
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                     letterSpacing: -0.3,
@@ -430,6 +431,7 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isDefault = widget.profile.isDefault;
     final isActive = widget.profile.isActive;
 
@@ -449,12 +451,12 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
         decoration: BoxDecoration(
           color: isDefault
               ? AppTheme.brandPrimary.withValues(alpha: 0.06)
-              : Colors.white,
+              : scheme.surface,
           borderRadius: BorderRadius.circular(AppTheme.radiusLg),
           border: Border.all(
             color: isDefault
                 ? AppTheme.brandPrimary.withValues(alpha: 0.35)
-                : AppTheme.border,
+                : scheme.outline,
             width: isDefault ? 1.5 : 1,
           ),
           boxShadow: [
@@ -498,8 +500,8 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
               child: _isEditing
                   ? TextField(
                       controller: _nameController,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
+                      style: TextStyle(
+                        color: scheme.onSurface,
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
                       ),
@@ -526,7 +528,7 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
                               child: Text(
                                 widget.profile.name,
                                 style: TextStyle(
-                                  color: AppTheme.textPrimary,
+                                  color: scheme.onSurface,
                                   fontSize: 15,
                                   fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
                                 ),
@@ -842,8 +844,9 @@ class _DeleteDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Dialog(
-      backgroundColor: Colors.white,
+      backgroundColor: scheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -861,10 +864,10 @@ class _DeleteDialog extends StatelessWidget {
                   color: AppTheme.destructive, size: 28),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Delete Calibration?',
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: scheme.onSurface,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -874,8 +877,8 @@ class _DeleteDialog extends StatelessWidget {
               'Are you sure you want to delete "$profileName"?'
                   '${isDefault ? '\n\nThe next calibration will become the default.' : ''}',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
                 fontSize: 14,
                 height: 1.5,
               ),
@@ -887,8 +890,8 @@ class _DeleteDialog extends StatelessWidget {
                   child: OutlinedButton(
                     onPressed: () => Navigator.of(context).pop(false),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      side: BorderSide(color: AppTheme.border),
+                      foregroundColor: scheme.onSurfaceVariant,
+                      side: BorderSide(color: scheme.outline),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                       padding: const EdgeInsets.symmetric(vertical: 14),

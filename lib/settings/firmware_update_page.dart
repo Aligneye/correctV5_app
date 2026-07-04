@@ -368,6 +368,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
@@ -389,16 +390,16 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
                         Navigator.of(context).pop();
                       },
                       icon: const Icon(Icons.arrow_back_rounded),
-                      color: AppTheme.textPrimary,
+                      color: scheme.onSurface,
                       padding: EdgeInsets.zero,
                       constraints:
                           const BoxConstraints(minWidth: 40, minHeight: 40),
                     ),
                     const SizedBox(width: 6),
-                    const Text(
+                    Text(
                       'Firmware Update',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: scheme.onSurface,
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.2,
@@ -478,6 +479,7 @@ class _DeviceInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _Card(
       child: Row(
         children: [
@@ -497,8 +499,8 @@ class _DeviceInfoCard extends StatelessWidget {
               children: [
                 Text(
                   info?.model.isNotEmpty == true ? info!.model : 'Align Pod',
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
+                  style: TextStyle(
+                    color: scheme.onSurface,
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                   ),
@@ -508,8 +510,8 @@ class _DeviceInfoCard extends StatelessWidget {
                   info != null
                       ? 'HW: ${info!.hardwareRevision}  ·  FW: ${info!.firmwareVersion}'
                       : 'Reading device…',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
                     fontSize: 13,
                   ),
                 ),
@@ -562,14 +564,15 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Update Status',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: scheme.onSurface,
               fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
@@ -644,6 +647,7 @@ class _Spinner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -659,8 +663,8 @@ class _Spinner extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
               fontSize: 14,
               fontWeight: FontWeight.w500,
               height: 1.4,
@@ -684,6 +688,7 @@ class _ProgressRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -704,8 +709,8 @@ class _ProgressRow extends StatelessWidget {
             const SizedBox(width: 14),
             Text(
               label,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -818,6 +823,7 @@ class _UpdateAvailable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -848,10 +854,10 @@ class _UpdateAvailable extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Text(
+                      Text(
                         'Update Available',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: scheme.onSurface,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1087,11 +1093,12 @@ class _BatteryCard extends StatelessWidget {
         final isConnected = battery > 0;
         final isEnough = battery >= minBattery;
 
+        final scheme = Theme.of(context).colorScheme;
         final Color statusColor;
         final Color statusBg;
         if (!isConnected) {
           statusColor = AppTheme.textMuted;
-          statusBg = const Color(0xFFF3F4F6);
+          statusBg = scheme.surfaceContainerHighest;
         } else if (isEnough) {
           statusColor = AppTheme.successText;
           statusBg = AppTheme.successBg;
@@ -1125,10 +1132,10 @@ class _BatteryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Battery Requirement',
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: scheme.onSurface,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1231,6 +1238,7 @@ class _BulletItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(top: 5),
       child: Row(
@@ -1248,8 +1256,8 @@ class _BulletItem extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
                 fontSize: 12,
                 height: 1.4,
               ),
@@ -1267,11 +1275,12 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.60),
+        color: scheme.surface.withValues(alpha: 0.90),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         border: Border.all(color: AppTheme.glassBorder),
         boxShadow: const [

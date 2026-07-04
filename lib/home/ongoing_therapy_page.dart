@@ -704,15 +704,12 @@ class _OngoingTherapyPageState extends State<OngoingTherapyPage>
         ? _totalRemainingSeconds
         : _totalDurationSeconds;
 
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFFF1F2), Colors.white, Color(0xFFFDF2F8)],
-          ),
+        decoration: BoxDecoration(
+          color: scheme.surface,
         ),
         child: SafeArea(
           child: Stack(
@@ -824,19 +821,10 @@ class _StartingOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final dots = '.' * dotCount;
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFFFFF1F2).withOpacity(0.97),
-            Colors.white.withOpacity(0.97),
-            const Color(0xFFFDF2F8).withOpacity(0.97),
-          ],
-        ),
-      ),
+      color: scheme.surface.withOpacity(0.97),
       child: SafeArea(
         child: Center(
           child: Column(
@@ -877,8 +865,8 @@ class _StartingOverlay extends StatelessWidget {
               const SizedBox(height: 28),
               Text(
                 'Starting Therapy$dots',
-                style: const TextStyle(
-                  color: Color(0xFF1F2937),
+                style: TextStyle(
+                  color: scheme.onSurface,
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
                   letterSpacing: -0.3,
@@ -889,7 +877,7 @@ class _StartingOverlay extends StatelessWidget {
                 'Connecting to device and loading your therapy pattern...',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: const Color(0xFF6B7280),
+                  color: scheme.onSurfaceVariant,
                   fontSize: 14,
                   height: 1.5,
                 ),
@@ -902,9 +890,9 @@ class _StartingOverlay extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
                     minHeight: 4,
-                    backgroundColor: const Color(0xFFE5E7EB),
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      const Color(0xFFFB7185),
+                    backgroundColor: scheme.outline,
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Color(0xFFFB7185),
                     ),
                   ),
                 ),
@@ -930,6 +918,7 @@ class _OngoingHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       children: [
         IconButton(
@@ -938,7 +927,7 @@ class _OngoingHeader extends StatelessWidget {
             onClose();
           },
           icon: const Icon(Icons.close_rounded),
-          color: const Color(0xFF4B5563),
+          color: scheme.onSurfaceVariant,
           padding: EdgeInsets.zero,
           alignment: Alignment.centerLeft,
           constraints: const BoxConstraints(minWidth: 40, minHeight: 34),
@@ -1128,6 +1117,7 @@ class _RelaxingOrb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxSide = math.min(constraints.maxWidth, constraints.maxHeight);
@@ -1177,20 +1167,20 @@ class _RelaxingOrb extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       formatTime(sessionRemainingSeconds),
-                      style: const TextStyle(
-                        color: Color(0xFF1F2937),
+                      style: TextStyle(
+                        color: scheme.onSurface,
                         fontSize: 54,
                         fontWeight: FontWeight.w300,
                         height: 1.0,
                         letterSpacing: -1.3,
-                        fontFeatures: [FontFeature.tabularFigures()],
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'of ${totalMinutes}m',
-                      style: const TextStyle(
-                        color: Color(0xFF9CA3AF),
+                      style: TextStyle(
+                        color: scheme.onSurfaceVariant,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w500,
                         letterSpacing: 0.2,
@@ -1215,10 +1205,10 @@ class _RelaxingOrb extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'current pattern',
                       style: TextStyle(
-                        color: Color(0xFF9CA3AF),
+                        color: scheme.onSurfaceVariant,
                         fontSize: 10.5,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 1.2,
@@ -1705,6 +1695,7 @@ class _PatternInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final patternName = data.name;
     final patternDescription = data.description;
     final badgeLabel = data.badge;
@@ -1727,12 +1718,12 @@ class _PatternInfoCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 2),
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: data.isLive
               ? const Color(0xFFFF2B62).withValues(alpha: 0.35)
-              : Colors.white.withValues(alpha: 0.72),
+              : scheme.outline.withValues(alpha: 0.30),
           width: data.isLive ? 1.2 : 1,
         ),
         boxShadow: const [
@@ -1790,8 +1781,8 @@ class _PatternInfoCard extends StatelessWidget {
                   children: [
                     Text(
                       patternName,
-                      style: const TextStyle(
-                        color: Color(0xFF1F2937),
+                      style: TextStyle(
+                        color: scheme.onSurface,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.1,
@@ -1830,8 +1821,8 @@ class _PatternInfoCard extends StatelessWidget {
             patternDescription,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFF4B5563),
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
               fontSize: 12.5,
               height: 1.45,
               fontWeight: FontWeight.w400,
@@ -1956,6 +1947,7 @@ class _MetaChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -1970,8 +1962,8 @@ class _MetaChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
-              color: Color(0xFF4B5563),
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -2074,13 +2066,14 @@ class _PrimaryButton extends StatelessWidget {
 class _StopConfirmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 40),
       child: Container(
         padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
@@ -2101,20 +2094,20 @@ class _StopConfirmDialog extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'End session?',
               style: TextStyle(
-                color: Color(0xFF1F2937),
+                color: scheme.onSurface,
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Your current therapy session will stop on the device.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Color(0xFF6B7280),
+                color: scheme.onSurfaceVariant,
                 fontSize: 13,
                 height: 1.4,
                 fontWeight: FontWeight.w400,
@@ -2128,15 +2121,15 @@ class _StopConfirmDialog extends StatelessWidget {
                     onPressed: () => Navigator.of(context).pop(false),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 13),
-                      backgroundColor: const Color(0xFFF3F4F6),
+                      backgroundColor: scheme.surfaceContainerHighest,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Keep going',
                       style: TextStyle(
-                        color: Color(0xFF4B5563),
+                        color: scheme.onSurfaceVariant,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
