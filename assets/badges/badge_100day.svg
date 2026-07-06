@@ -1,0 +1,48 @@
+<svg width="210" height="250" viewBox="0 0 210 250" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring100c" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A"/>
+      <stop offset="45%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#92400E"/>
+    </linearGradient>
+    <linearGradient id="face100c" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ribbon tails -->
+  <path d="M77 175 L62 244 L105 220 L105 175 Z" fill="#92400E"/>
+  <path d="M133 175 L148 244 L105 220 L105 175 Z" fill="#B45309"/>
+
+  <!-- fluted / scalloped coin edge (outer) -->
+  <polygon points="105.0,27.0 122.4,39.0 143.2,35.7 153.6,54.0 173.8,60.1 175.3,81.2 190.8,95.4 183.0,115.0 190.8,134.6 175.3,148.8 173.8,169.9 153.6,176.0 143.2,194.3 122.4,191.0 105.0,203.0 87.6,191.0 66.8,194.3 56.4,176.0 36.2,169.9 34.7,148.8 19.2,134.6 27.0,115.0 19.2,95.4 34.7,81.2 36.2,60.1 56.4,54.0 66.8,35.7 87.6,39.0"
+           fill="url(#ring100c)" stroke="#FFFBEB" stroke-width="2"/>
+
+  <!-- fluted inner face -->
+  <polygon points="105.0,39.0 119.7,50.7 138.0,46.5 146.2,63.4 164.4,67.6 164.5,86.4 179.1,98.1 171.0,115.0 179.1,131.9 164.5,143.6 164.4,162.4 146.2,166.6 138.0,183.5 119.7,179.3 105.0,191.0 90.3,179.3 72.0,183.5 63.8,166.6 45.6,162.4 45.5,143.6 30.9,131.9 39.0,115.0 30.9,98.1 45.5,86.4 45.6,67.6 63.8,63.4 72.0,46.5 90.3,50.7"
+           fill="url(#face100c)" stroke="#FFFBEB" stroke-width="4"/>
+
+  <!-- big Roman numeral C watermark -->
+  <text x="105" y="150" text-anchor="middle" font-family="Georgia, serif" font-size="90"
+        fill="#FFFBEB" opacity="0.3" font-weight="bold">C</text>
+
+  <!-- laurel sprigs -->
+  <g fill="#FFFBEB" opacity="0.95">
+    <ellipse cx="62" cy="96" rx="6" ry="12" transform="rotate(-30 62 96)"/>
+    <ellipse cx="55" cy="114" rx="6" ry="12" transform="rotate(-8 55 114)"/>
+    <ellipse cx="60" cy="132" rx="6" ry="12" transform="rotate(18 60 132)"/>
+    <ellipse cx="148" cy="96" rx="6" ry="12" transform="rotate(30 148 96)"/>
+    <ellipse cx="155" cy="114" rx="6" ry="12" transform="rotate(8 155 114)"/>
+    <ellipse cx="150" cy="132" rx="6" ry="12" transform="rotate(-18 150 132)"/>
+  </g>
+
+  <!-- trophy cup -->
+  <g fill="#FFFBEB">
+    <path d="M89 84 h32 v18 c0 10 -7 16 -16 16 s-16 -6 -16 -16 z"/>
+    <path d="M89 87 c-8 0 -13 4 -13 11 c0 7 5 12 12 13 l1 -6 c-4 -1 -6 -3 -6 -6 c0 -4 3 -6 7 -6 z"/>
+    <path d="M121 87 c8 0 13 4 13 11 c0 7 -5 12 -12 13 l-1 -6 c4 -1 6 -3 6 -6 c0 -4 -3 -6 -7 -6 z"/>
+    <rect x="99" y="117" width="12" height="9"/>
+    <rect x="91" y="126" width="28" height="7" rx="2"/>
+  </g>
+</svg>

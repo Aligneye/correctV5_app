@@ -98,8 +98,8 @@ class _PodDisconnectedDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Dialog(
-      backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       elevation: 0,
       child: Padding(
@@ -124,11 +124,11 @@ class _PodDisconnectedDialog extends StatelessWidget {
             const SizedBox(height: 18),
 
             // Title
-            const Text(
+            Text(
               'Align Pod is Disconnected',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: scheme.onSurface,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
                 letterSpacing: -0.3,
@@ -140,8 +140,8 @@ class _PodDisconnectedDialog extends StatelessWidget {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
                 fontSize: 14,
                 height: 1.45,
               ),
@@ -197,10 +197,10 @@ class _PodDisconnectedDialog extends StatelessWidget {
               height: 44,
               child: TextButton(
                 style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.textSecondary,
+                  foregroundColor: scheme.onSurfaceVariant,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
-                    side: const BorderSide(color: AppTheme.border),
+                    side: BorderSide(color: scheme.outline),
                   ),
                 ),
                 onPressed: () {

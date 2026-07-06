@@ -179,12 +179,13 @@ const _kAngleChartPurple = Color(0xFF8A56FF);
 const _kAngleInsightBg = Color(0xFFF8F5FF);
 const _kAngleInsightText = Color(0xFF4A5568);
 
-BoxDecoration _cardDecoration({double radius = 16}) => BoxDecoration(
-  color: _kCard,
-  borderRadius: BorderRadius.circular(radius),
-  border: Border.all(color: _kBorder, width: 0.5),
-  boxShadow: _kCardShadow,
-);
+BoxDecoration _cardDecoration(ColorScheme scheme, {double radius = 16}) =>
+    BoxDecoration(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: scheme.outline, width: 0.5),
+      boxShadow: _kCardShadow,
+    );
 
 // ─── Analytics Screen ────────────────────────────────────────────────────────
 
@@ -379,6 +380,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final sessions = _sessions ?? const <SessionData>[];
     final visibleSessions = _showAllRecentSessions
         ? sessions
@@ -387,7 +389,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final isSyncing = _deviceManager.isSyncing.value;
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: null,
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -434,6 +436,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildRecentSessionsToggle(int hiddenSessionCount) {
+    final scheme = Theme.of(context).colorScheme;
     final label = _showAllRecentSessions
         ? 'Show less'
         : 'View all $hiddenSessionCount more';
@@ -449,7 +452,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           style: OutlinedButton.styleFrom(
             foregroundColor: _kBlue,
             side: BorderSide(color: _kBlue.withValues(alpha: 0.22)),
-            backgroundColor: Colors.white,
+            backgroundColor: scheme.surface,
             padding: const EdgeInsets.symmetric(vertical: 13),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -508,10 +511,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildEmptyState() {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F8FC),
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -526,7 +530,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             child: const Icon(Icons.history_rounded, size: 18, color: _kBlue),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -535,15 +539,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: scheme.onSurface,
                   ),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
                   'Start a posture or therapy session and it shows up here.',
                   style: TextStyle(
                     fontSize: 11.5,
-                    color: AppTheme.textSecondary,
+                    color: scheme.onSurfaceVariant,
                     height: 1.3,
                   ),
                 ),
@@ -558,6 +562,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ── Recent Sessions Section ──────────────────────────────────────────────────
 
   Widget _buildRecentSessionsSection(List<SessionData> sessions) {
+    final scheme = Theme.of(context).colorScheme;
     final liveSessions = sessions.where((s) => s.isLive).toList();
     final finishedSessions = sessions.where((s) => !s.isLive).toList();
 
@@ -567,12 +572,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
+            Text(
               'Recent Sessions',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
+                color: scheme.onSurface,
               ),
             ),
             TextButton(
@@ -666,6 +671,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ── Header ──────────────────────────────────────────────────────────────────
 
   Widget _buildHeader() {
+    final scheme = Theme.of(context).colorScheme;
     final score = _todayScoreText();
     final delta = _todayDeltaText();
 
@@ -677,12 +683,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => Navigator.maybePop(context),
-            child: const Padding(
-              padding: EdgeInsets.only(bottom: 24),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 24),
               child: Icon(
                 Icons.arrow_back_rounded,
                 size: 24,
-                color: Color(0xFF4B5563),
+                color: scheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -697,11 +703,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
+          Text(
             'Track your posture progress',
             style: TextStyle(
               fontSize: 14,
-              color: Color(0xFF667085),
+              color: scheme.onSurfaceVariant,
               height: 1.2,
             ),
           ),
@@ -834,6 +840,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildPeriodSelector() {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       children: List.generate(_periodLabels.length, (i) {
         final active = _period == i;
@@ -852,10 +859,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 height: 37,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: active ? const Color(0xFF2F7BFF) : Colors.white,
+                  color: active ? const Color(0xFF2F7BFF) : scheme.surface,
                   borderRadius: BorderRadius.circular(11),
                   border: Border.all(
-                    color: active ? const Color(0xFF2F7BFF) : _kBorder,
+                    color: active ? const Color(0xFF2F7BFF) : scheme.outline,
                     width: 1,
                   ),
                   boxShadow: active
@@ -873,7 +880,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
-                    color: active ? Colors.white : const Color(0xFF344054),
+                    color: active ? Colors.white : scheme.onSurface,
                     height: 1,
                   ),
                 ),
@@ -886,11 +893,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildWeeklyStreak() {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 15),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
           BoxShadow(
@@ -941,7 +949,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           const SizedBox(height: 14),
           Text(
             '${_streakStats?.currentStreak ?? 0} consecutive days — keep it up!',
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 13,
               color: Color(0xFF9AA0AA),
               fontWeight: FontWeight.w400,
@@ -1003,18 +1011,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   // ── Section label ───────────────────────────────────────────────────────────
 
-  Widget _sectionLabel(String text) => Padding(
-    padding: const EdgeInsets.only(top: 20, bottom: 10, left: 2),
-    child: Text(
-      text.toUpperCase(),
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        color: _kTextHint,
-        letterSpacing: 1.0,
+  Widget _sectionLabel(String text) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 10, left: 2),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurfaceVariant,
+          letterSpacing: 1.0,
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 // ─── Stat Card ───────────────────────────────────────────────────────────────
@@ -1033,66 +1044,69 @@ class _StatCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 136,
-    padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x14000000),
-          blurRadius: 18,
-          offset: Offset(0, 8),
-        ),
-        BoxShadow(
-          color: Color(0x08000000),
-          blurRadius: 4,
-          offset: Offset(0, 2),
-        ),
-      ],
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: iconBg,
-            borderRadius: BorderRadius.circular(10),
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      height: 136,
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
           ),
-          child: Icon(icon, size: 18, color: iconColor),
-        ),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w400,
-                color: Color(0xFF344054),
-                height: 1.05,
-                letterSpacing: -0.3,
-              ),
+          BoxShadow(
+            color: Color(0x08000000),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFF667085),
-                fontWeight: FontWeight.w400,
-                height: 1.1,
+            child: Icon(icon, size: 18, color: iconColor),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w400,
+                  color: scheme.onSurface,
+                  height: 1.05,
+                  letterSpacing: -0.3,
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w400,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _StreakDayBadge extends StatelessWidget {
@@ -1102,27 +1116,30 @@ class _StreakDayBadge extends StatelessWidget {
   const _StreakDayBadge({required this.day, required this.isComplete});
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 32,
-    height: 32,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: isComplete ? const Color(0xFF5046C7) : Colors.white,
-      shape: BoxShape.circle,
-      border: Border.all(color: const Color(0xFF5046C7), width: 1.1),
-    ),
-    child: isComplete
-        ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
-        : Text(
-            day,
-            style: const TextStyle(
-              fontSize: 11,
-              color: Color(0xFF5046C7),
-              fontWeight: FontWeight.w600,
-              height: 1,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 32,
+      height: 32,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: isComplete ? const Color(0xFF5046C7) : scheme.surface,
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFF5046C7), width: 1.1),
+      ),
+      child: isComplete
+          ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
+          : Text(
+              day,
+              style: const TextStyle(
+                fontSize: 11,
+                color: Color(0xFF5046C7),
+                fontWeight: FontWeight.w600,
+                height: 1,
+              ),
             ),
-          ),
-  );
+    );
+  }
 }
 
 // ─── Daily Score Trend Card ───────────────────────────────────────────────────
@@ -1149,11 +1166,12 @@ class _DailyScoreTrendCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(22, 24, 22, 26),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
           BoxShadow(
@@ -1171,12 +1189,12 @@ class _DailyScoreTrendCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Daily Score Trend',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF344054),
+              color: scheme.onSurface,
               height: 1,
             ),
           ),
@@ -1269,11 +1287,12 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
           BoxShadow(
@@ -1291,12 +1310,12 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Angle Deviation Throughout Day',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF344054),
+              color: scheme.onSurface,
               height: 1,
             ),
           ),
@@ -1389,7 +1408,7 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
                     _hasRealData
                         ? 'Avg deviation today: ${_avgDeviation.toStringAsFixed(1)}°  •  Max: ${_maxDeviation.toStringAsFixed(1)}°  •  Ref angle: ${_angleService.referenceAngle.toStringAsFixed(1)}°'
                         : 'Your posture tends to worsen in the afternoon. Consider setting more frequent reminders during 2-6 PM.',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       color: _kAngleInsightText,
@@ -1628,97 +1647,100 @@ class _HeatmapCard extends StatelessWidget {
   Color _cell(int v) => _heatColors[v.clamp(0, 4)];
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-    margin: const EdgeInsets.only(bottom: 2),
-    decoration: _cardDecoration(),
-    child: Column(
-      children: [
-        // Day-of-week header
-        Row(
-          children: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-              .map(
-                (d) => Expanded(
-                  child: Center(
-                    child: Text(
-                      d,
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: _kTextHint,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.2,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      margin: const EdgeInsets.only(bottom: 2),
+      decoration: _cardDecoration(scheme),
+      child: Column(
+        children: [
+          // Day-of-week header
+          Row(
+            children: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+                .map(
+                  (d) => Expanded(
+                    child: Center(
+                      child: Text(
+                        d,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 6),
+          // Grid — aspect ratio 1 keeps cells square
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cellSize = (constraints.maxWidth - 6 * 4) / 7;
+              return Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: List.generate(
+                  heatmapData.length,
+                  (i) => SizedBox(
+                    width: cellSize,
+                    height: cellSize,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _cell(heatmapData[i]),
+                        borderRadius: BorderRadius.circular(5),
                       ),
                     ),
                   ),
                 ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 6),
-        // Grid — aspect ratio 1 keeps cells square
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final cellSize = (constraints.maxWidth - 6 * 4) / 7;
-            return Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: List.generate(
-                heatmapData.length,
-                (i) => SizedBox(
-                  width: cellSize,
-                  height: cellSize,
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          // Legend
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                'less',
+                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(width: 5),
+              ...[
+                Color(0xFFF3F4F6),
+                Color(0xFFBFDBFE),
+                Color(0xFF2563EB),
+                Color(0xFF1D4ED8),
+              ].map(
+                (c) => Padding(
+                  padding: const EdgeInsets.only(left: 3),
                   child: Container(
+                    width: 10,
+                    height: 10,
                     decoration: BoxDecoration(
-                      color: _cell(heatmapData[i]),
-                      borderRadius: BorderRadius.circular(5),
+                      color: c,
+                      borderRadius: BorderRadius.circular(3),
+                      border: c == const Color(0xFFF3F4F6)
+                          ? Border.all(color: scheme.outline, width: 0.5)
+                          : null,
                     ),
                   ),
                 ),
               ),
-            );
-          },
-        ),
-        const SizedBox(height: 10),
-        // Legend
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            const Text(
-              'less',
-              style: TextStyle(fontSize: 10, color: _kTextHint),
-            ),
-            const SizedBox(width: 5),
-            ...[
-              Color(0xFFF3F4F6),
-              Color(0xFFBFDBFE),
-              Color(0xFF2563EB),
-              Color(0xFF1D4ED8),
-            ].map(
-              (c) => Padding(
-                padding: const EdgeInsets.only(left: 3),
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: c,
-                    borderRadius: BorderRadius.circular(3),
-                    border: c == const Color(0xFFF3F4F6)
-                        ? Border.all(color: _kBorder, width: 0.5)
-                        : null,
-                  ),
-                ),
+              const SizedBox(width: 5),
+              Text(
+                'more',
+                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
               ),
-            ),
-            const SizedBox(width: 5),
-            const Text(
-              'more',
-              style: TextStyle(fontSize: 10, color: _kTextHint),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─── Analytics Disconnected Banner ─────────────────────────────────────────
@@ -1839,6 +1861,7 @@ class _AnalyticsLiveSessionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isPosture = session.type == SessionType.posture;
     final modeGradient = isPosture
         ? AppTheme.goodPostureGradient
@@ -1900,10 +1923,10 @@ class _AnalyticsLiveSessionRow extends StatelessWidget {
                         Flexible(
                           child: Text(
                             session.name,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
-                              color: AppTheme.textPrimary,
+                              color: scheme.onSurface,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1917,9 +1940,9 @@ class _AnalyticsLiveSessionRow extends StatelessWidget {
                       session.duration == '0s'
                           ? 'Just started · live now'
                           : 'In progress · ${session.duration}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11.5,
-                        color: AppTheme.textSecondary,
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1960,8 +1983,6 @@ class _AnalyticsSessionItem extends StatelessWidget {
 
   const _AnalyticsSessionItem({required this.session, required this.onTap});
 
-  static const _kItemText = Color(0xFF1A1A2E);
-  static const _kItemTextHint = Color(0xFFBBBBCC);
   static const _kItemBlue = AppTheme.brandPrimary;
 
   @override
@@ -1987,15 +2008,16 @@ class _AnalyticsSessionItem extends StatelessWidget {
         ? null
         : therapyPatternName(lastPatternIndex);
 
+    final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.fromLTRB(13, 13, 10, 13),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFEEEEF0), width: 0.5),
+          border: Border.all(color: scheme.outline, width: 0.5),
           boxShadow: const [
             BoxShadow(
               color: Color(0x14000000),
@@ -2042,10 +2064,10 @@ class _AnalyticsSessionItem extends StatelessWidget {
                       Expanded(
                         child: Text(
                           session.name,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w600,
-                            color: _kItemText,
+                            color: scheme.onSurface,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -2066,9 +2088,9 @@ class _AnalyticsSessionItem extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         session.time,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
-                          color: _kItemTextHint,
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -2084,12 +2106,12 @@ class _AnalyticsSessionItem extends StatelessWidget {
                       ),
                       if (isPosture && postureEventCount != null)
                         _AnalyticsMiniStat(
-                          value: '${postureEventCount}',
+                          value: '$postureEventCount',
                           label: 'Slouches',
                         ),
                       if (isPosture && correctionCount != null)
                         _AnalyticsMiniStat(
-                          value: '${correctionCount}',
+                          value: '$correctionCount',
                           label: 'Corrected',
                         ),
                       if (isPosture && (session.wrongDurSec ?? 0) > 0)
@@ -2099,7 +2121,7 @@ class _AnalyticsSessionItem extends StatelessWidget {
                         ),
                       if (!isPosture && therapyPatternCount != null)
                         _AnalyticsMiniStat(
-                          value: '${therapyPatternCount}',
+                          value: '$therapyPatternCount',
                           label: 'Patterns',
                         ),
                       if (!isPosture && lastPatternName != null)
@@ -2154,28 +2176,31 @@ class _AnalyticsMiniStat extends StatelessWidget {
   const _AnalyticsMiniStat({required this.value, required this.label});
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        value,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-          height: 1.2,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+            height: 1.2,
+          ),
         ),
-      ),
-      Text(
-        label,
-        style: const TextStyle(
-          fontSize: 10,
-          color: Color(0xFFBBBBCC),
-          height: 1.3,
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: scheme.onSurfaceVariant,
+            height: 1.3,
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 // ─── Analytics Live Pill ─────────────────────────────────────────────────────
@@ -2254,11 +2279,12 @@ class SessionDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isPosture = session.type == SessionType.posture;
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: null,
       appBar: AppBar(
-        backgroundColor: _kCard,
+        backgroundColor: scheme.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: GestureDetector(
@@ -2280,7 +2306,7 @@ class SessionDetailScreen extends StatelessWidget {
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(0.5),
-          child: Container(height: 0.5, color: _kBorder),
+          child: Container(height: 0.5, color: scheme.outline),
         ),
       ),
       body: _SessionDetailBody(session: session),
@@ -2303,10 +2329,11 @@ Future<void> showSessionDetailSheet(
         minChildSize: 0.45,
         maxChildSize: 0.94,
         builder: (_, scrollController) {
+          final scheme = Theme.of(sheetContext).colorScheme;
           return Container(
-            decoration: const BoxDecoration(
-              color: _kBg,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
             ),
             child: Column(
               children: [
@@ -2315,7 +2342,7 @@ Future<void> showSessionDetailSheet(
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Color(0xFFD8DDE8),
+                    color: scheme.outline,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -2326,17 +2353,17 @@ Future<void> showSessionDetailSheet(
                       Expanded(
                         child: Text(
                           isPosture ? 'Posture session' : 'Therapy session',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
-                            color: _kText,
+                            color: scheme.onSurface,
                           ),
                         ),
                       ),
                       IconButton(
                         onPressed: () => Navigator.of(sheetContext).pop(),
                         icon: const Icon(Icons.close_rounded),
-                        color: _kTextMuted,
+                        color: scheme.onSurfaceVariant,
                         tooltip: 'Close',
                       ),
                     ],
@@ -2484,7 +2511,7 @@ class _SessionDetailBody extends StatelessWidget {
           ],
 
           const SizedBox(height: 14),
-          _label('Session details'),
+          _label('Session details', context),
           Column(
             children: [
               Row(
@@ -2550,12 +2577,12 @@ class _SessionDetailBody extends StatelessWidget {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _label('Session timeline'),
+                    _label('Session timeline', context),
                     _PostureTimelineCard(
                       session: session,
                       precomputedEvents: postureEvents,
                     ),
-                    _label('Slouch events'),
+                    _label('Slouch events', context),
                     _PostureEventsList(
                       session: session,
                       precomputedEvents: postureEvents,
@@ -2565,7 +2592,7 @@ class _SessionDetailBody extends StatelessWidget {
               },
             ),
           ] else ...[
-            _label('Patterns played'),
+            _label('Patterns played', context),
             _TherapyPatternsCard(session: session, accent: accent),
           ],
         ],
@@ -2573,18 +2600,21 @@ class _SessionDetailBody extends StatelessWidget {
     );
   }
 
-  Widget _label(String text) => Padding(
-    padding: const EdgeInsets.only(top: 18, bottom: 10, left: 2),
-    child: Text(
-      text.toUpperCase(),
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        color: _kTextHint,
-        letterSpacing: 1.0,
+  Widget _label(String text, BuildContext ctx) {
+    final scheme = Theme.of(ctx).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 10, left: 2),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurfaceVariant,
+          letterSpacing: 1.0,
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   static String _formatBadDuration(SessionData session) {
     final wrong = session.wrongDurSec ?? 0;
@@ -2686,13 +2716,14 @@ class _PostureTimelineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final events = precomputedEvents;
     final hasExactEvents = session.postureEvents?.isNotEmpty ?? false;
     final durationSec = session.durationSec.clamp(1, 1 << 30).toInt();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(scheme),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2715,13 +2746,13 @@ class _PostureTimelineCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 '0:00',
-                style: TextStyle(fontSize: 10.5, color: _kTextHint),
+                style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
               ),
               Text(
                 _formatMinSec(durationSec),
-                style: const TextStyle(fontSize: 10.5, color: _kTextHint),
+                style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -2732,29 +2763,29 @@ class _PostureTimelineCard extends StatelessWidget {
               const SizedBox(width: 6),
               Text(
                 'Good ${_formatMinSec((durationSec - (session.wrongDurSec ?? 0)).clamp(0, durationSec).toInt())}',
-                style: const TextStyle(fontSize: 11.5, color: _kTextMuted),
+                style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
               ),
               const SizedBox(width: 16),
               const _LegendDot(color: _kRed),
               const SizedBox(width: 6),
               Text(
                 'Bad ${_formatMinSec(session.wrongDurSec ?? 0)}',
-                style: const TextStyle(fontSize: 11.5, color: _kTextMuted),
+                style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
           if (!hasExactEvents && events.isNotEmpty) ...[
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'Timeline estimated from the saved slouch summary.',
-              style: TextStyle(fontSize: 12, color: _kTextMuted, height: 1.4),
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant, height: 1.4),
             ),
           ] else if (events.isEmpty) ...[
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'No slouch events recorded — your posture stayed within range '
               'the entire session.',
-              style: TextStyle(fontSize: 12, color: _kTextMuted, height: 1.4),
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant, height: 1.4),
             ),
           ],
         ],
@@ -2825,23 +2856,24 @@ class _PostureEventsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final events = precomputedEvents;
     final hasExactEvents = session.postureEvents?.isNotEmpty ?? false;
 
     if (events.isEmpty) {
       return Container(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
-        decoration: _cardDecoration(),
+        decoration: _cardDecoration(scheme),
         child: Row(
-          children: const [
-            Icon(Icons.shield_rounded, size: 22, color: _kGreen),
-            SizedBox(width: 12),
+          children: [
+            const Icon(Icons.shield_rounded, size: 22, color: _kGreen),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 'Zero slouch alerts. Picture-perfect posture.',
                 style: TextStyle(
                   fontSize: 13,
-                  color: _kText,
+                  color: scheme.onSurface,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -2853,7 +2885,7 @@ class _PostureEventsList extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(scheme),
       child: Column(
         children: [
           for (var i = 0; i < events.length; i++)
@@ -2912,6 +2944,7 @@ class _PostureEventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final corrected = event.wasCorrected;
     final dur = event.durationSec;
     return Container(
@@ -2919,7 +2952,7 @@ class _PostureEventRow extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: isLast ? Colors.transparent : _kBorder,
+            color: isLast ? Colors.transparent : scheme.outline,
             width: 0.5,
           ),
         ),
@@ -2957,10 +2990,10 @@ class _PostureEventRow extends StatelessWidget {
                       : corrected
                       ? 'Slouched at ${_formatMinSec(event.slouchSec)} → corrected at ${_formatMinSec(event.correctionSec)}'
                       : 'Slouched at ${_formatMinSec(event.slouchSec)} (still bad at end)',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
-                    color: _kText,
+                    color: scheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -2968,7 +3001,7 @@ class _PostureEventRow extends StatelessWidget {
                   corrected
                       ? 'Bad posture for ${_formatMinSec(dur)}'
                       : 'Open-ended slouch',
-                  style: const TextStyle(fontSize: 11, color: _kTextMuted),
+                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -3005,6 +3038,7 @@ class _TherapyPatternsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final events =
         session.therapyPatternEvents ?? const <TherapyPatternEvent>[];
     final patternName = session.pattern == null
@@ -3017,7 +3051,7 @@ class _TherapyPatternsCard extends StatelessWidget {
     if (events.isEmpty) {
       return Container(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
-        decoration: _cardDecoration(),
+        decoration: _cardDecoration(scheme),
         child: Row(
           children: [
             Icon(Icons.vibration_rounded, size: 22, color: accent),
@@ -3027,9 +3061,9 @@ class _TherapyPatternsCard extends StatelessWidget {
                 session.pattern != null
                     ? '$patternName ran for ${session.duration}. ${patternDescription ?? ''}'
                     : 'No pattern data captured for this session.',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
-                  color: _kText,
+                  color: scheme.onSurface,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -3041,16 +3075,16 @@ class _TherapyPatternsCard extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(scheme),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             '${events.length} pattern${events.length == 1 ? '' : 's'} '
             'in this ${session.duration} session',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12.5,
-              color: _kTextMuted,
+              color: scheme.onSurfaceVariant,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -3086,6 +3120,7 @@ class _TherapyPatternEventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final startClock = _formatClockAt(sessionStart, event.startOffsetSec);
     final endClock = _formatClockAt(sessionStart, event.endOffsetSec);
     final description = therapyPatternDescription(event.patternIndex);
@@ -3094,7 +3129,7 @@ class _TherapyPatternEventRow extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: isLast ? Colors.transparent : _kBorder,
+            color: isLast ? Colors.transparent : scheme.outline,
             width: 0.5,
           ),
         ),
@@ -3126,18 +3161,18 @@ class _TherapyPatternEventRow extends StatelessWidget {
               children: [
                 Text(
                   therapyPatternName(event.patternIndex),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: _kText,
+                    color: scheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
-                    color: _kTextMuted,
+                    color: scheme.onSurfaceVariant,
                     height: 1.3,
                   ),
                 ),
@@ -3146,9 +3181,9 @@ class _TherapyPatternEventRow extends StatelessWidget {
                   startClock == null
                       ? '${_formatMinSec(event.startOffsetSec)} to ${_formatMinSec(event.endOffsetSec)}'
                       : '$startClock to ${endClock ?? 'end'}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
-                    color: _kTextMuted,
+                    color: scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -3203,27 +3238,33 @@ class _DetailStat extends StatelessWidget {
   const _DetailStat({required this.value, required this.label});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-    decoration: _cardDecoration(radius: 14),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w700,
-            color: _kText,
-            height: 1.2,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: _cardDecoration(scheme, radius: 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
+              height: 1.2,
+            ),
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(label, style: const TextStyle(fontSize: 11, color: _kTextHint)),
-      ],
-    ),
-  );
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -1,0 +1,28 @@
+<svg width="200" height="240" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring250" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E0F2FE"/>
+      <stop offset="50%" stop-color="#7DD3FC"/>
+      <stop offset="100%" stop-color="#1E3A8A"/>
+    </linearGradient>
+  </defs>
+  <path d="M74 176 L58 232 L100 214 L100 176 Z" fill="#1E3A8A"/>
+  <path d="M126 176 L142 232 L100 214 L100 176 Z" fill="#1D4ED8"/>
+
+  <!-- gem outline -->
+  <polygon points="100,14 152,60 178,66 132,150 100,196 68,150 22,66 48,60" fill="url(#ring250)" stroke="#F0F9FF" stroke-width="3"/>
+
+  <!-- facets -->
+  <g stroke="#F0F9FF" stroke-width="2.5" opacity="0.85" fill="none">
+    <polyline points="48,60 100,66 152,60"/>
+    <polyline points="22,66 100,66 178,66"/>
+    <polyline points="68,150 100,66 132,150"/>
+    <line x1="100" y1="66" x2="100" y2="196"/>
+    <polyline points="22,66 68,150"/>
+    <polyline points="178,66 132,150"/>
+  </g>
+
+  <!-- sparkle -->
+  <path d="M100 30 L104 42 L116 46 L104 50 L100 62 L96 50 L84 46 L96 42 Z" fill="#FFFFFF"/>
+  <path d="M146 96 L149 104 L157 107 L149 110 L146 118 L143 110 L135 107 L143 104 Z" fill="#FFFFFF" opacity="0.85"/>
+</svg>

@@ -268,12 +268,12 @@ class _LoginPageState extends State<LoginPage> {
                                   ? null
                                   : _signInWithEmail,
                               child: _isLoading
-                                  ? const SizedBox(
+                                  ? SizedBox(
                                       width: 20,
                                       height: 20,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: Colors.white,
+                                        color: scheme.onPrimary,
                                       ),
                                     )
                                   : const Text('Login'),

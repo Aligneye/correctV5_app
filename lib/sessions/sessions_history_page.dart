@@ -1,17 +1,10 @@
 import 'package:flutter/material.dart';
-
 import 'package:correctv1/analytics/analytics_screen.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/theme/app_theme.dart';
 
-const _kBg = Color(0xFFF7F8FC);
-const _kCard = Colors.white;
-const _kBorder = Color(0xFFEEEEF0);
-const _kText = Color(0xFF1A1A2E);
-const _kTextMuted = Color(0xFF6B7280);
-const _kTextHint = Color(0xFFBBBBCC);
 const _kBlue = AppTheme.brandPrimary;
 const _kBlueLight = Color(0xFFEFF6FF);
 const _kGreen = AppTheme.successText;
@@ -110,7 +103,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
     final isSyncing = _deviceManager.isSyncing.value;
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: null,
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -142,6 +135,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
   }
 
   Widget _buildHeader() {
+    final scheme = Theme.of(context).colorScheme;
     final total = _sessions.length;
     final postureCount = _sessions
         .where((s) => s.type == SessionType.posture)
@@ -150,7 +144,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-      color: _kBg,
+      color: scheme.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -159,23 +153,23 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => Navigator.of(context).maybePop(),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                   child: Icon(
                     Icons.arrow_back_rounded,
-                    color: Color(0xFF4B5563),
+                    color: scheme.onSurfaceVariant,
                     size: 24,
                   ),
                 ),
               ),
               const SizedBox(width: 10),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'All sessions',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
-                    color: _kText,
+                    color: scheme.onSurface,
                     letterSpacing: -0.2,
                   ),
                 ),
@@ -192,7 +186,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
                   color: _kBlue,
                 ),
               ),
-              Container(width: 1, height: 28, color: _kBorder),
+              Container(width: 1, height: 28, color: scheme.outline),
               Expanded(
                 child: _SummaryStat(
                   value: '$postureCount',
@@ -200,7 +194,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
                   color: _kBlue,
                 ),
               ),
-              Container(width: 1, height: 28, color: _kBorder),
+              Container(width: 1, height: 28, color: scheme.outline),
               Expanded(
                 child: _SummaryStat(
                   value: '$therapyCount',
@@ -216,6 +210,8 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
   }
 
   Widget _buildFilterRow() {
+    final scheme = Theme.of(context).colorScheme;
+
     Widget chip(String label, _Filter value, {IconData? icon}) {
       final selected = _filter == value;
       return GestureDetector(
@@ -226,10 +222,10 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             gradient: selected ? AppTheme.trainingGradient : null,
-            color: selected ? null : Colors.white,
+            color: selected ? null : scheme.surface,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected ? Colors.transparent : _kBorder,
+              color: selected ? Colors.transparent : scheme.outline,
               width: 1,
             ),
             boxShadow: selected
@@ -251,7 +247,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
                 Icon(
                   icon,
                   size: 14,
-                  color: selected ? Colors.white : _kTextMuted,
+                  color: selected ? Colors.white : scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
               ],
@@ -260,7 +256,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
-                  color: selected ? Colors.white : _kTextMuted,
+                  color: selected ? Colors.white : scheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -288,6 +284,13 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
   }
 
   Widget _buildEmpty() {
+    final scheme = Theme.of(context).colorScheme;
+    final filterLabel = switch (_filter) {
+      _Filter.posture => 'posture',
+      _Filter.therapy => 'therapy',
+      _Filter.all => null,
+    };
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
@@ -296,31 +299,83 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
           margin: const EdgeInsets.symmetric(horizontal: 24),
           padding: const EdgeInsets.all(28),
           decoration: BoxDecoration(
-            color: _kCard,
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _kBorder, width: 0.5),
+            border: Border.all(color: scheme.outline, width: 0.5),
           ),
           child: Column(
-            children: const [
-              Icon(Icons.history_rounded, size: 44, color: _kTextHint),
-              SizedBox(height: 12),
-              Text(
-                'No sessions yet',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: _kText,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.trainingGradient,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  Icons.history_rounded,
+                  size: 36,
+                  color: Colors.white,
                 ),
               ),
-              SizedBox(height: 6),
+              const SizedBox(height: 16),
               Text(
-                'Wear your Align Pod and start a posture or therapy '
-                'session — it’ll show up here automatically.',
+                filterLabel == null
+                    ? 'No sessions yet'
+                    : 'No $filterLabel sessions',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                filterLabel == null
+                    ? 'Wear your Align Pod and start a posture or therapy '
+                        'session — it will show up here automatically.'
+                    : 'Your $filterLabel sessions will appear here once you '
+                        'complete one with your Align Pod.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 12.5,
-                  color: _kTextMuted,
-                  height: 1.4,
+                  fontSize: 13,
+                  color: scheme.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+
+
+
+
+              SizedBox(
+                width: double.infinity,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: AppTheme.trainingGradient,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(
+                      Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      'Start a session',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -444,16 +499,17 @@ class _DayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
       child: Row(
         children: [
           Text(
             group.formatHeader(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: _kText,
+              color: scheme.onSurface,
               letterSpacing: -0.1,
             ),
           ),
@@ -464,9 +520,9 @@ class _DayHeader extends StatelessWidget {
               color: _kBlueLight,
               borderRadius: BorderRadius.circular(999),
             ),
-            child: Text(
-              '${group.sessions.length}',
-              style: const TextStyle(
+            child: const Text(
+              '',
+              style: TextStyle(
                 fontSize: 10,
                 color: _kBlue,
                 fontWeight: FontWeight.w700,
@@ -476,9 +532,9 @@ class _DayHeader extends StatelessWidget {
           const Spacer(),
           Text(
             group.formatTotalDuration(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11.5,
-              color: _kTextMuted,
+              color: scheme.onSurfaceVariant,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -501,6 +557,7 @@ class _SummaryStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       children: [
         Text(
@@ -516,9 +573,9 @@ class _SummaryStat extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
-            color: _kTextMuted,
+            color: scheme.onSurfaceVariant,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -535,6 +592,7 @@ class _SessionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isPosture = session.type == SessionType.posture;
     final postureEventCount = session.postureEvents?.length ?? session.alerts;
     final correctionCount = session.postureEvents
@@ -545,7 +603,7 @@ class _SessionTile extends StatelessWidget {
         .toList(growable: false);
     final therapyPatternCount =
         playedTherapyEvents?.length ??
-        session.therapyPatterns?.length ??
+        session.therapyPatternEvents?.length ??
         (session.pattern == null ? null : 1);
     final lastPatternIndex =
         playedTherapyEvents?.lastOrNull?.patternIndex ??
@@ -562,9 +620,9 @@ class _SessionTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(13, 13, 10, 13),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFEEEEF0), width: 0.5),
+          border: Border.all(color: scheme.outline, width: 0.5),
           boxShadow: const [
             BoxShadow(
               color: Color(0x14000000),
@@ -611,10 +669,10 @@ class _SessionTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           session.name,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w600,
-                            color: _kText,
+                            color: scheme.onSurface,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -635,7 +693,7 @@ class _SessionTile extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         session.time,
-                        style: const TextStyle(fontSize: 10, color: _kTextHint),
+                        style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                       ),
                     ],
                   ),
@@ -681,7 +739,7 @@ class _SessionTile extends StatelessWidget {
                       borderRadius: BorderRadius.circular(3),
                       child: LinearProgressIndicator(
                         value: session.score! / 100,
-                        backgroundColor: const Color(0xFFEEEEF8),
+                        backgroundColor: scheme.surfaceContainerHighest,
                         valueColor: const AlwaysStoppedAnimation<Color>(_kBlue),
                         minHeight: 3.5,
                       ),
@@ -691,9 +749,9 @@ class _SessionTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            const Icon(
+            Icon(
               Icons.chevron_right_rounded,
-              color: Color(0xFFCCCCDD),
+              color: scheme.onSurfaceVariant,
               size: 20,
             ),
           ],
@@ -717,28 +775,31 @@ class _SessionMiniStat extends StatelessWidget {
   const _SessionMiniStat({required this.value, required this.label});
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        value,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
-          height: 1.2,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+            height: 1.2,
+          ),
         ),
-      ),
-      Text(
-        label,
-        style: const TextStyle(
-          fontSize: 10,
-          color: Color(0xFFBBBBCC),
-          height: 1.3,
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: scheme.onSurfaceVariant,
+            height: 1.3,
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _LivePill extends StatelessWidget {

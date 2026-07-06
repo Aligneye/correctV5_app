@@ -496,12 +496,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                           ? _verifyOtpAndResetPassword
                                           : _sendResetLink),
                                 child: _isLoading
-                                    ? const SizedBox(
+                                    ?  SizedBox(
                                         width: 20,
                                         height: 20,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          color: Colors.white,
+                                          color: scheme.onPrimary,
                                         ),
                                       )
                                     : Text(_otpSent ? 'Reset password' : 'Send OTP'),

@@ -1,0 +1,33 @@
+<svg width="210" height="250" viewBox="0 0 210 250" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring50b" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="45%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+    <linearGradient id="face50b" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ribbon tails -->
+  <path d="M78 188 L63 244 L105 224 L105 188 Z" fill="#475569"/>
+  <path d="M132 188 L147 244 L105 224 L105 188 Z" fill="#334155"/>
+
+  <!-- 5-point star outer -->
+  <polygon points="105.0,23.0 128.5,82.6 192.5,86.6 143.0,127.4 159.1,189.4 105.0,155.0 50.9,189.4 67.0,127.4 17.5,86.6 81.5,82.6"
+           fill="url(#ring50b)" stroke="#F8FAFC" stroke-width="2"/>
+
+  <!-- 5-point star inner face -->
+  <polygon points="105.0,37.0 123.8,89.1 179.2,90.9 135.4,124.9 150.8,178.1 105.0,147.0 59.2,178.1 74.6,124.9 30.8,90.9 86.2,89.1"
+           fill="url(#face50b)" stroke="#F8FAFC" stroke-width="4"/>
+
+  <!-- circular badge plate in center, sheriff-star style -->
+  <circle cx="105" cy="112" r="34" fill="none" stroke="#F8FAFC" stroke-width="2.5" opacity="0.8"/>
+  <circle cx="105" cy="112" r="27" fill="none" stroke="#F8FAFC" stroke-width="1.5" stroke-dasharray="3 4" opacity="0.6"/>
+
+  <!-- "50" numerals engraved -->
+  <text x="105" y="126" text-anchor="middle" font-family="Arial, sans-serif" font-size="34"
+        fill="#F8FAFC" font-weight="800">50</text>
+</svg>

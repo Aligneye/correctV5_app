@@ -90,12 +90,12 @@ class AppTheme {
 
   // ── Dark Palette ────────────────────────────────────────────────────
 
-  static const Color _dkBg = Color(0xFF0F172A);
-  static const Color _dkSurface = Color(0xFF1E293B);
-  static const Color _dkBorder = Color(0xFF334155);
-  static const Color _dkTextPrimary = Color(0xFFF1F5F9);
-  static const Color _dkTextSecondary = Color(0xFF94A3B8);
-  static const Color _dkInput = Color(0xFF1E293B);
+  static const Color _dkBg = Color(0xFF121418);
+  static const Color _dkSurface = Color(0xFF1C1F26);
+  static const Color _dkBorder = Color(0xFF2A2D35);
+  static const Color _dkTextPrimary = Color(0xFFE8E8E8);
+  static const Color _dkTextSecondary = Color(0xFF9CA3AF);
+  static const Color _dkInput = Color(0xFF1C1F26);
 
   // ── Radii (rounded-2xl = 16, rounded-3xl = 24) ─────────────────────
 
@@ -112,7 +112,7 @@ class AppTheme {
       return const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [_dkBg, Color(0xFF131B2E), _dkBg],
+        colors: [_dkBg, Color(0xFF161A22), _dkBg],
       );
     }
     return const LinearGradient(
@@ -182,12 +182,12 @@ class AppTheme {
     onError: Color(0xFFFFFFFF),
     surface: _dkSurface,
     onSurface: _dkTextPrimary,
-    surfaceContainerHighest: Color(0xFF334155),
+    surfaceContainerHighest: Color(0xFF252830),
     onSurfaceVariant: _dkTextSecondary,
     outline: _dkBorder,
-    outlineVariant: Color(0xFF1E293B),
+    outlineVariant: Color(0xFF1C1F26),
     inverseSurface: Color(0xFFF1F5F9),
-    onInverseSurface: Color(0xFF0F172A),
+    onInverseSurface: Color(0xFF121418),
   );
 
   // ── Theme Builder ───────────────────────────────────────────────────
@@ -258,11 +258,16 @@ class AppTheme {
 
       cardTheme: CardThemeData(
         color: scheme.surface,
-        elevation: 0,
-        shadowColor: Colors.black.withValues(alpha: 0.08),
+        elevation: isDark ? 0 : 0,
+        shadowColor: isDark
+            ? Colors.black.withValues(alpha: 0.40)
+            : Colors.black.withValues(alpha: 0.08),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusMd),
-          side: BorderSide(color: isDark ? scheme.outline : glassBorder),
+          side: BorderSide(
+            color: isDark ? scheme.outline : glassBorder,
+            width: isDark ? 1 : 1,
+          ),
         ),
       ),
 

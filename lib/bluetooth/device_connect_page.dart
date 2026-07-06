@@ -10,25 +10,6 @@ import 'package:correctv1/theme/app_theme.dart';
 
 const _kPodPrefix = 'align pod';
 
-// ── Surface card decoration matching the home page ──────────────────────────
-BoxDecoration _surfaceDecoration({double radius = 20}) => BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: const Color(0xFFEEEEF0), width: 0.5),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x14000000),
-          blurRadius: 18,
-          offset: Offset(0, 8),
-        ),
-        BoxShadow(
-          color: Color(0x08000000),
-          blurRadius: 6,
-          offset: Offset(0, 2),
-        ),
-      ],
-    );
-
 class DeviceConnectPage extends StatefulWidget {
   const DeviceConnectPage({super.key});
 
@@ -264,6 +245,29 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     super.dispose();
   }
 
+  // ── Surface decoration ────────────────────────────────────────────────────
+
+  BoxDecoration _surfaceDecoration({double radius = 20}) {
+    final scheme = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: scheme.outlineVariant, width: 0.5),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x14000000),
+          blurRadius: 18,
+          offset: Offset(0, 8),
+        ),
+        BoxShadow(
+          color: Color(0x08000000),
+          blurRadius: 6,
+          offset: Offset(0, 2),
+        ),
+      ],
+    );
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -299,6 +303,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   // ── App bar ────────────────────────────────────────────────────────────────
 
   Widget _buildAppBar() {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: Row(
@@ -309,9 +314,9 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: scheme.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
+                border: Border.all(color: scheme.outline),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.05),
@@ -320,18 +325,18 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
                   ),
                 ],
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.arrow_back_ios_new_rounded,
                 size: 16,
-                color: AppTheme.textPrimary,
+                color: scheme.onSurface,
               ),
             ),
           ),
           const Spacer(),
-          const Text(
+          Text(
             'Connect Your Pod',
             style: TextStyle(
-              color: AppTheme.textPrimary,
+              color: scheme.onSurface,
               fontSize: 17,
               fontWeight: FontWeight.w700,
               letterSpacing: -0.3,
@@ -347,6 +352,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   // ── Hero area with product image + rings ───────────────────────────────────
 
   Widget _buildHeroArea() {
+    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Stack(
         alignment: Alignment.center,
@@ -363,12 +369,12 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
               ],
             ),
           ),
-          // Product image with light card backing
+          // Product image with card backing
           Container(
             width: 160,
             height: 160,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: scheme.surface,
               borderRadius: BorderRadius.circular(36),
               boxShadow: [
                 BoxShadow(
@@ -446,6 +452,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   // ── Status text ────────────────────────────────────────────────────────────
 
   Widget _buildStatusLabel() {
+    final scheme = Theme.of(context).colorScheme;
     final title = _connecting
         ? 'Connecting to Align Pod'
         : _found.isNotEmpty
@@ -466,8 +473,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       children: [
         Text(
           title,
-          style: const TextStyle(
-            color: AppTheme.textPrimary,
+          style: TextStyle(
+            color: scheme.onSurface,
             fontSize: 17,
             fontWeight: FontWeight.w700,
             letterSpacing: -0.3,
@@ -477,8 +484,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         Text(
           sub,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
             fontSize: 13,
           ),
         ),
@@ -503,6 +510,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   }
 
   Widget _buildDeviceListBody() {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -511,7 +519,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
             Text(
               'NEARBY PODS',
               style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.6),
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.4,
@@ -554,6 +562,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   }
 
   Widget _buildEmptyBody() {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -573,8 +582,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         const SizedBox(height: 16),
         Text(
           _scanning ? 'Looking for your pod…' : 'No pods detected',
-          style: const TextStyle(
-            color: AppTheme.textPrimary,
+          style: TextStyle(
+            color: scheme.onSurface,
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -583,8 +592,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         Text(
           'Power on your Align Pod and\nkeep it within 2 metres',
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
             fontSize: 13,
             height: 1.5,
           ),
@@ -623,6 +632,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   }
 
   Widget _buildConnectingBody() {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -636,18 +646,18 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           ),
         ),
         const SizedBox(height: 20),
-        const Text(
+        Text(
           'Connecting',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: scheme.onSurface,
             fontSize: 16,
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 6),
-        const Text(
+        Text(
           'Pairing with your Align Pod…',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
         ),
       ],
     );
@@ -696,10 +706,11 @@ class _DeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFF),
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: AppTheme.brandPrimary.withValues(alpha: 0.15),
@@ -712,9 +723,9 @@ class _DeviceCard extends StatelessWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: scheme.surface,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
+              border: Border.all(color: scheme.outline),
             ),
             child: Padding(
               padding: const EdgeInsets.all(8),
@@ -729,8 +740,8 @@ class _DeviceCard extends StatelessWidget {
               children: [
                 Text(
                   name,
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
+                  style: TextStyle(
+                    color: scheme.onSurface,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -747,7 +758,7 @@ class _DeviceCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: active
                               ? AppTheme.brandPrimary
-                              : const Color(0xFFE5E7EB),
+                              : scheme.outline,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       );
@@ -759,8 +770,8 @@ class _DeviceCard extends StatelessWidget {
                           : bars == 2
                               ? 'Good signal'
                               : 'Weak signal',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
+                      style: TextStyle(
+                        color: scheme.onSurfaceVariant,
                         fontSize: 11,
                       ),
                     ),

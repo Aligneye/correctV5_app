@@ -1,0 +1,24 @@
+<svg width="200" height="240" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring150" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7DD3FC"/>
+      <stop offset="50%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#0C4A6E"/>
+    </linearGradient>
+    <linearGradient id="face150" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+  </defs>
+  <path d="M70 172 L55 232 L100 212 L100 172 Z" fill="#0C4A6E"/>
+  <path d="M130 172 L145 232 L100 212 L100 172 Z" fill="#0369A1"/>
+
+  <!-- hexagon outer -->
+  <polygon points="100,8 178,54 178,146 100,192 22,146 22,54" fill="url(#ring150)"/>
+  <!-- hexagon inner -->
+  <polygon points="100,26 164,63 164,137 100,174 36,137 36,63" fill="url(#face150)"
+           stroke="#F0F9FF" stroke-width="4"/>
+
+  <!-- lightning bolt -->
+  <path d="M108 44 L74 108 H96 L88 158 L128 92 H104 Z" fill="#F0F9FF"/>
+</svg>

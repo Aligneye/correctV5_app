@@ -118,13 +118,7 @@ class _MeditationPageState extends State<MeditationPage>
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFEFF6FF), Colors.white, Color(0xFFFAF5FF)],
-          ),
-        ),
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: SafeArea(
           bottom: false,
           child: ListView(
@@ -193,6 +187,7 @@ class _MeditationHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     const gradient = LinearGradient(
       colors: [Color(0xFF6366F1), Color(0xFF3B82F6)],
     );
@@ -226,10 +221,10 @@ class _MeditationHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'Rhythmic breathing guidance',
           style: TextStyle(
-            color: Color(0xFF6B7280),
+            color: scheme.onSurfaceVariant,
             fontSize: 14,
             fontWeight: FontWeight.w400,
           ),
@@ -339,6 +334,7 @@ class _HapticSyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _GlassPanel(
       padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
       child: Column(
@@ -346,11 +342,11 @@ class _HapticSyncCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Haptic Sync',
                   style: TextStyle(
-                    color: Color(0xFF1F2937),
+                    color: scheme.onSurface,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
@@ -360,10 +356,10 @@ class _HapticSyncCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Device vibrates gently in sync with breathing rhythm to guide your meditation.',
             style: TextStyle(
-              color: Color(0xFF6B7280),
+              color: scheme.onSurfaceVariant,
               fontSize: 13,
               height: 1.45,
               fontWeight: FontWeight.w400,
@@ -383,6 +379,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(999),
@@ -398,13 +395,13 @@ class _StatusPill extends StatelessWidget {
                     colors: [Color(0xFF6366F1), Color(0xFF3B82F6)],
                   )
                 : null,
-            color: active ? null : const Color(0xFFF3F4F6),
+            color: active ? null : scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
             active ? 'Active' : 'Inactive',
             style: TextStyle(
-              color: active ? Colors.white : const Color(0xFF6B7280),
+              color: active ? Colors.white : scheme.onSurfaceVariant,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
@@ -428,26 +425,21 @@ class _BreathingPatternCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFEEF2FF), Color(0xFFDBEAFE)],
-        ),
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFFC7D2FE).withValues(alpha: 0.5),
-        ),
+        border: Border.all(color: scheme.outline.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             '$inhaleSeconds-$holdSeconds-$exhaleSeconds Breathing Pattern',
-            style: const TextStyle(
-              color: Color(0xFF1F2937),
+            style: TextStyle(
+              color: scheme.onSurface,
               fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
@@ -494,6 +486,7 @@ class _PatternRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       children: [
         Container(
@@ -525,8 +518,8 @@ class _PatternRow extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(
-                  color: Color(0xFF1F2937),
+                style: TextStyle(
+                  color: scheme.onSurface,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
@@ -534,8 +527,8 @@ class _PatternRow extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: const TextStyle(
-                  color: Color(0xFF6B7280),
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
                   fontSize: 12,
                   fontWeight: FontWeight.w400,
                 ),
@@ -621,12 +614,13 @@ class _GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
+        border: Border.all(color: scheme.outline.withValues(alpha: 0.3)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x15000000),

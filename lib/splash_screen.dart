@@ -5,6 +5,7 @@ import 'package:correctv1/home/home_page.dart';
 import 'package:correctv1/services/session_database.dart';
 import 'package:correctv1/services/session_sync_service.dart';
 import 'package:correctv1/services/background_service.dart';
+import 'package:correctv1/services/notification_service.dart';
 
 class SplashScreen extends StatefulWidget {
   final String supabaseUrl;
@@ -58,6 +59,7 @@ class _SplashScreenState extends State<SplashScreen>
     await SessionDatabase.instance.initialize();
     SessionSyncService.instance.start();
     await initBackgroundService();
+    await NotificationService.instance.initialize();
   }
 
   void _navigate() {
@@ -81,7 +83,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           Center(
