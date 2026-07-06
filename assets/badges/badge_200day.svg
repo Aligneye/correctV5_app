@@ -1,0 +1,32 @@
+<svg width="200" height="240" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring200" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCA5A5"/>
+      <stop offset="50%" stop-color="#EF4444"/>
+      <stop offset="100%" stop-color="#7F1D1D"/>
+    </linearGradient>
+    <linearGradient id="face200" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F87171"/>
+      <stop offset="100%" stop-color="#B91C1C"/>
+    </linearGradient>
+  </defs>
+  <path d="M70 172 L55 232 L100 212 L100 172 Z" fill="#7F1D1D"/>
+  <path d="M130 172 L145 232 L100 212 L100 172 Z" fill="#991B1B"/>
+
+  <!-- rotated square (rhombus) outer -->
+  <rect x="42" y="42" width="116" height="116" rx="14" fill="url(#ring200)"
+        transform="rotate(45 100 100)"/>
+  <!-- inner rhombus -->
+  <rect x="58" y="58" width="84" height="84" rx="10" fill="url(#face200)"
+        stroke="#FEF2F2" stroke-width="4" transform="rotate(45 100 100)"/>
+
+  <!-- flame -->
+  <path d="M100 56
+           C 92 74, 78 82, 78 102
+           C 78 122, 92 134, 100 134
+           C 108 134, 122 122, 122 102
+           C 122 90, 114 84, 110 74
+           C 110 84, 104 88, 100 82
+           C 96 74, 100 64, 100 56 Z"
+        fill="#FEF2F2"/>
+</svg>

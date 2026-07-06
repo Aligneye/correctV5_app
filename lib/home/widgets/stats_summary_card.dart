@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:correctv1/home/widgets/surface_card.dart';
+import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/svg.dart';
 
 class DisplayValue {
   const DisplayValue(this.value, this.unit);
@@ -38,6 +40,11 @@ class StatsSummaryCard extends StatelessWidget {
   final int streakDays;
   final bool streakTodayActive;
   final Key? streakTileKey;
+  final int freezeTokens;
+  final XpStats? xpStats;
+  final Key? xpTileKey;
+  final VoidCallback? onStreakTap;
+  final VoidCallback? onXpTap;
 
   const StatsSummaryCard({
     super.key,
@@ -45,10 +52,17 @@ class StatsSummaryCard extends StatelessWidget {
     this.streakDays = 0,
     this.streakTodayActive = false,
     this.streakTileKey,
+    this.freezeTokens = 0,
+    this.xpStats,
+    this.xpTileKey,
+    this.onStreakTap,
+    this.onXpTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    // index 0 = streak tile, index 1 = xp tile, index 2+ = stat items
+    final totalCount = items.length + 2;
     return SizedBox(
       height: 156,
       child: ListView.separated(
@@ -56,7 +70,7 @@ class StatsSummaryCard extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.only(right: 24),
-        itemCount: items.length + 1,
+        itemCount: totalCount,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           if (index == 0) {
@@ -66,12 +80,21 @@ class StatsSummaryCard extends StatelessWidget {
               child: _StreakTile(
                 days: streakDays,
                 todayActive: streakTodayActive,
+                freezeTokens: freezeTokens,
+                onTap: onStreakTap,
               ),
+            );
+          }
+          if (index == 1) {
+            return SizedBox(
+              key: xpTileKey,
+              width: 132,
+              child: XpLevelTile(xpStats: xpStats, onTap: onXpTap),
             );
           }
           return SizedBox(
             width: 132,
-            child: _SummaryMetricTile(item: items[index - 1]),
+            child: _SummaryMetricTile(item: items[index - 2]),
           );
         },
       ),
@@ -82,8 +105,15 @@ class StatsSummaryCard extends StatelessWidget {
 class _StreakTile extends StatefulWidget {
   final int days;
   final bool todayActive;
+  final int freezeTokens;
+  final VoidCallback? onTap;
 
-  const _StreakTile({required this.days, this.todayActive = true});
+  const _StreakTile({
+    required this.days,
+    this.todayActive = true,
+    this.freezeTokens = 0,
+    this.onTap,
+  });
 
   @override
   State<_StreakTile> createState() => _StreakTileState();
@@ -96,6 +126,19 @@ class _StreakPalette {
   final Color bgEnd;
   final Color shadow;
 }
+
+const Map<int, ({String label, String compliment, String asset})> _kStreakMilestones = {
+  7:   (label: 'Week Warrior',       compliment: 'Ek hafta solid! Habit ban rahi hai.',              asset: 'assets/badges/badge_7day.svg'),
+  30:  (label: 'Monthly Master',     compliment: 'Poora mahina! Ab yeh lifestyle hai, phase nahi.',   asset: 'assets/badges/badge_30day.svg'),
+  50:  (label: 'Steel Spine',        compliment: '50 din bina rukke — discipline dikh rahi hai.',     asset: 'assets/badges/badge_50day.svg'),
+  75:  (label: 'Iron Will',          compliment: '75 din! Bahut kam log yahan tak pahunchte hain.',   asset: 'assets/badges/badge_75day.svg'),
+  100: (label: 'Century Streak',     compliment: '100 days! Top 1% consistent users mein ho.',        asset: 'assets/badges/badge_100day.svg'),
+  150: (label: 'Unstoppable',        compliment: '150 din — yeh ab habit nahi, identity hai.',         asset: 'assets/badges/badge_150day.svg'),
+  200: (label: 'Elite Streaker',     compliment: '200 din ka streak — legendary level dedication.',    asset: 'assets/badges/badge_200day.svg'),
+  250: (label: 'Diamond Discipline', compliment: '250 din! Bohot kam log yahan tak aate hain.',        asset: 'assets/badges/badge_250day.svg'),
+  300: (label: 'Platinum Streak',    compliment: '300 din — saal ke 300 din khud ko choose kiya.',     asset: 'assets/badges/badge_300day.svg'),
+  365: (label: 'Year of Discipline', compliment: 'Poora saal! Tum ab isse alag insaan ho gaye ho.',    asset: 'assets/badges/badge_365day.svg'),
+};
 
 const List<_StreakPalette> _kStreakPalettes = <_StreakPalette>[
   _StreakPalette(Color(0xFF60A5FA), Color(0xFF3B82F6), Color(0xFF1D4ED8), Color(0xFF3B82F6)),
@@ -182,27 +225,35 @@ class _StreakTileState extends State<_StreakTile>
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (context, child) {
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [palette.bgStart, palette.bgMid, palette.bgEnd],
-              stops: const [0.0, 0.5, 1.0],
-            ),
+        return Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: widget.onTap,
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: palette.shadow.withValues(
-                  alpha: 0.25 + _glowAnim.value * 0.02,
+            splashColor: Colors.white.withValues(alpha: 0.15),
+            highlightColor: Colors.white.withValues(alpha: 0.08),
+            child: Ink(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [palette.bgStart, palette.bgMid, palette.bgEnd],
+                  stops: const [0.0, 0.5, 1.0],
                 ),
-                blurRadius: 16 + _glowAnim.value,
-                offset: const Offset(0, 6),
-                spreadRadius: _glowAnim.value * 0.3,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: palette.shadow.withValues(
+                      alpha: 0.25 + _glowAnim.value * 0.02,
+                    ),
+                    blurRadius: 16 + _glowAnim.value,
+                    offset: const Offset(0, 6),
+                    spreadRadius: _glowAnim.value * 0.3,
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Stack(
+              child: Stack(
             clipBehavior: Clip.hardEdge,
             children: [
               Positioned(
@@ -289,7 +340,45 @@ class _StreakTileState extends State<_StreakTile>
                   ),
                 ),
               ),
+              // Freeze token badge — bottom-left, only when tokens > 0
+              if (widget.freezeTokens > 0)
+                Positioned(
+                  bottom: 10,
+                  left: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.ac_unit_rounded,
+                          size: 10,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          '${widget.freezeTokens}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            height: 1.0,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
+          ),
+            ),
           ),
         );
       },
@@ -443,19 +532,25 @@ class _StreakPopupState extends State<StreakPopup>
     final days = widget.stats.currentStreak;
 
     final isRecord = isIncreased && widget.stats.isNewRecord && days > 1;
+    final milestone = isIncreased ? _kStreakMilestones[days] : null;
     final title = isIncreased
         ? (days <= 1
-              ? 'Streak started!'
-              : isRecord
-              ? 'New personal best!'
-              : '$days-day streak!')
+        ? 'Streak started!'
+        : milestone != null
+        ? '🏅 ${milestone.label}!'
+        : isRecord
+        ? 'New personal best!'
+        : '$days-day streak!')
         : 'Streak reset';
+
     final subtitle = isIncreased
         ? (days <= 1
-              ? 'One session in. Come back tomorrow to grow it.'
-              : isRecord
-              ? 'You just set a new record of $days days. Keep the flame alive.'
-              : 'You showed up ${days == 2 ? '2 days' : '$days days'} in a row. Best so far: ${widget.stats.highestStreak}.')
+        ? 'One session in. Come back tomorrow to grow it.'
+        : milestone != null
+        ? milestone.compliment
+        : isRecord
+        ? 'You just set a new record of $days days. Keep the flame alive.'
+        : 'You showed up ${days == 2 ? '2 days' : '$days days'} in a row. Best so far: ${widget.stats.highestStreak}.')
         : 'You missed a day. Start a new streak today — every day counts.';
 
     return PopScope(
@@ -477,7 +572,7 @@ class _StreakPopupState extends State<StreakPopup>
               builder: (context, child) {
                 return _buildCard(palette, child!);
               },
-              child: _buildCardContent(palette, title, subtitle),
+              child: _buildCardContent(palette, title, subtitle, milestone),
             ),
           ),
         ],
@@ -524,10 +619,11 @@ class _StreakPopupState extends State<StreakPopup>
   }
 
   Widget _buildCardContent(
-    _StreakPalette palette,
-    String title,
-    String subtitle,
-  ) {
+      _StreakPalette palette,
+      String title,
+      String subtitle,
+      ({String label, String compliment, String asset})? milestone,
+      ) {
     final isIncreased = widget.kind == StreakPopupKind.increased;
     final days = widget.stats.currentStreak;
     final scheme = Theme.of(context).colorScheme;
@@ -614,6 +710,15 @@ class _StreakPopupState extends State<StreakPopup>
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
+                if (milestone != null) ...[
+                  const SizedBox(height: 10),
+                  SvgPicture.asset(milestone.asset, width: 84, height: 100),
+                  const SizedBox(height: 6),
+                  Text(
+                    milestone.label,
+                    style: TextStyle(color: palette.bgEnd, fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ],
                 if (widget.stats.highestStreak > 0) ...[
                   const SizedBox(height: 12),
                   Container(

@@ -482,7 +482,7 @@ class CalibrationCard extends StatelessWidget {
                     'Sit in your ideal posture position before calibrating.'
                     'This will set your baseline reference angle.',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.7),
+                      color: scheme.onSurfaceVariant,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       height: 1.4,

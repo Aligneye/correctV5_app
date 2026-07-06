@@ -139,18 +139,12 @@ class SessionRepository {
     );
   }
 
-  /// Current streak: consecutive "streak days" (6 AM boundary) with at least
-  /// one completed session. Sessions between 00:00 and 05:59:59 are credited
-  /// to the previous streak day.
+  /// Current streak with freeze-token support.
   ///
-  /// Returns (currentStreak, todayActive):
-  ///   - currentStreak: number of consecutive active streak days ending at
-  ///     today's (or yesterday's, if today has no activity yet) streak day.
-  ///   - todayActive: whether the current streak day already has a session.
+  /// Returns [StreakStats] with freeze fields populated from Supabase
+  /// (or safe defaults on network failure).
   Future<StreakStats> fetchStreakStats() async {
     final now = DateTime.now();
-    // Pull a generous window — cheap locally, avoids edge cases for long
-    // streaks. 400 days covers >1 year of continuous use.
     final windowStart = DateTime(
       now.year,
       now.month,
@@ -173,27 +167,88 @@ class SessionRepository {
     final todayStreakDay = _streakDayOf(now);
     final todayActive = activeDays.contains(todayStreakDay);
 
-    // Count back from today (or yesterday if today not active yet).
+    // Fetch freeze tokens from Supabase.
+    int freezeTokens = 2;
+    List<DateTime> freezeUsedDays = [];
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId != null) {
+        final existing = await _client
+            .from('user_streaks')
+            .select('freeze_tokens, freeze_used_days')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (existing != null) {
+          freezeTokens = (existing['freeze_tokens'] as num?)?.toInt() ?? 2;
+          final rawDays = existing['freeze_used_days'];
+          if (rawDays is List) {
+            for (final d in rawDays) {
+              final parsed = DateTime.tryParse(d?.toString() ?? '');
+              if (parsed != null) freezeUsedDays.add(parsed);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('SessionRepository: fetchStreakStats freeze fetch failed: $e');
+    }
+
+    final frozenDays = <DateTime>{};
+    final cutoff = todayStreakDay.subtract(const Duration(days: 30));
+
     DateTime cursor = todayActive
         ? todayStreakDay
         : todayStreakDay.subtract(const Duration(days: 1));
     int streak = 0;
-    while (activeDays.contains(cursor)) {
-      streak++;
-      cursor = cursor.subtract(const Duration(days: 1));
+    int tokensRemaining = freezeTokens;
+
+    while (true) {
+      if (activeDays.contains(cursor) || frozenDays.contains(cursor)) {
+        streak++;
+        cursor = cursor.subtract(const Duration(days: 1));
+        continue;
+      }
+      // Missing day — try freeze
+      final alreadyFrozen = freezeUsedDays.any(
+        (d) =>
+            d.year == cursor.year &&
+            d.month == cursor.month &&
+            d.day == cursor.day,
+      );
+      if (!alreadyFrozen &&
+          tokensRemaining > 0 &&
+          cursor.isAfter(cutoff)) {
+        frozenDays.add(cursor);
+        tokensRemaining--;
+        streak++;
+        cursor = cursor.subtract(const Duration(days: 1));
+        continue;
+      }
+      break;
     }
 
-    // Fire-and-forget — Supabase upsert shouldn't block the UI
-    _syncStreakToSupabase(
+    final newFreezeUsedDays = [...freezeUsedDays, ...frozenDays];
+
+    // Replenish +1 token at every 7-day milestone, cap at 5.
+    int newFreezeTokens = tokensRemaining;
+    if (streak > 0 && streak % 7 == 0) {
+      newFreezeTokens = (newFreezeTokens + 1).clamp(0, 5);
+    }
+
+    final highestStreak = await _syncStreakToSupabase(
       currentStreak: streak,
       todayStreakDay: todayStreakDay,
-    ).ignore();
+      freezeTokens: newFreezeTokens,
+      freezeUsedDays: newFreezeUsedDays,
+    );
 
     return StreakStats(
       currentStreak: streak,
-      highestStreak: streak,
+      highestStreak: highestStreak,
       todayActive: todayActive,
       todayStreakDay: todayStreakDay,
+      freezeTokens: newFreezeTokens,
+      freezeUsedDays: newFreezeUsedDays,
     );
   }
 
@@ -203,6 +258,8 @@ class SessionRepository {
   Future<int> _syncStreakToSupabase({
     required int currentStreak,
     required DateTime todayStreakDay,
+    int freezeTokens = 2,
+    List<DateTime> freezeUsedDays = const [],
   }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return currentStreak;
@@ -220,12 +277,21 @@ class SessionRepository {
           ? currentStreak
           : previousHighest;
 
+      final freezeDayStrings = freezeUsedDays
+          .map(
+            (d) =>
+                '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}',
+          )
+          .toList();
+
       await _client.from('user_streaks').upsert({
         'user_id': userId,
         'current_streak': currentStreak,
         'highest_streak': newHighest,
         'last_active_day':
             '${todayStreakDay.year.toString().padLeft(4, '0')}-${todayStreakDay.month.toString().padLeft(2, '0')}-${todayStreakDay.day.toString().padLeft(2, '0')}',
+        'freeze_tokens': freezeTokens,
+        'freeze_used_days': freezeDayStrings,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'user_id');
 
@@ -242,6 +308,150 @@ class SessionRepository {
     final shifted = localTs.subtract(const Duration(hours: 6));
     return DateTime(shifted.year, shifted.month, shifted.day);
   }
+
+  // ── XP System ──────────────────────────────────────────────────────────────
+
+  static int _xpForLevel(int level) => level * level * 100;
+
+  static int _levelFromXp(int totalXp) {
+    int level = 1;
+    while (_xpForLevel(level + 1) <= totalXp) {
+      level++;
+    }
+    return level;
+  }
+
+  Future<XpStats> fetchXpStats() async {
+    final now = DateTime.now();
+    final windowStart = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(days: 400));
+    final rows = await _fetchRowsBetween(
+      windowStart,
+      now.add(const Duration(days: 1)),
+    );
+
+    int totalXp = 0;
+    for (final row in rows) {
+      final dur = _asInt(row['duration_sec']);
+      if (dur <= 0) continue;
+      final type = row['type']?.toString() ?? '';
+      final minutes = dur ~/ 60;
+      int xp;
+      if (type == 'therapy') {
+        xp = minutes * 12;
+      } else {
+        xp = minutes * 8;
+      }
+      if (xp < 5) xp = 5;
+      totalXp += xp;
+    }
+
+    await _syncXpToSupabase(totalXp: totalXp);
+
+    final level = _levelFromXp(totalXp);
+    final xpForCurrent = _xpForLevel(level);
+    final xpForNext = _xpForLevel(level + 1);
+
+    return XpStats(
+      totalXp: totalXp,
+      currentLevel: level,
+      xpForCurrentLevel: xpForCurrent,
+      xpForNextLevel: xpForNext,
+    );
+  }
+
+  Future<void> _syncXpToSupabase({required int totalXp}) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final level = _levelFromXp(totalXp);
+      await _client.from('user_xp').upsert({
+        'user_id': userId,
+        'total_xp': totalXp,
+        'current_level': level,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id');
+    } catch (e) {
+      debugPrint('SessionRepository: _syncXpToSupabase failed: $e');
+    }
+  }
+
+  // ── Streak Calendar ────────────────────────────────────────────────────────
+
+  /// Returns day-states for the last [days] streak-days (oldest first).
+  /// 0 = inactive, 1 = active, 2 = freeze-used.
+  Future<List<int>> fetchStreakCalendar(
+    int days, {
+    List<DateTime> freezeUsedDays = const [],
+  }) async {
+    final now = DateTime.now();
+    final todayStreakDay = _streakDayOf(now);
+    final windowStart = todayStreakDay.subtract(Duration(days: days - 1));
+
+    final rows = await _fetchRowsBetween(
+      windowStart.subtract(const Duration(hours: 6)),
+      now.add(const Duration(days: 1)),
+    );
+
+    final activeDays = <DateTime>{};
+    for (final row in rows) {
+      final dur = _asInt(row['duration_sec']);
+      if (dur <= 0) continue;
+      final ts = _parseTs(row['start_ts'])?.toLocal();
+      if (ts == null) continue;
+      activeDays.add(_streakDayOf(ts));
+    }
+
+    return List<int>.generate(days, (i) {
+      final day = windowStart.add(Duration(days: i));
+      if (activeDays.contains(day)) return 1;
+      final frozen = freezeUsedDays.any(
+        (d) =>
+            d.year == day.year && d.month == day.month && d.day == day.day,
+      );
+      if (frozen) return 2;
+      return 0;
+    });
+  }
+
+  // ── Weekly Recap ───────────────────────────────────────────────────────────
+
+  Future<WeeklyRecap> fetchWeeklyRecap() async {
+    final now = DateTime.now();
+    final weekStart = _startOfWeek(now);
+    final weekEnd = weekStart.add(const Duration(days: 7));
+
+    final rows = await _fetchRowsBetween(weekStart, weekEnd);
+    final activeDaySet = <DateTime>{};
+    int weekXp = 0;
+
+    for (final row in rows) {
+      final dur = _asInt(row['duration_sec']);
+      if (dur <= 0) continue;
+      final ts = _parseTs(row['start_ts'])?.toLocal();
+      if (ts != null) {
+        activeDaySet.add(DateTime(ts.year, ts.month, ts.day));
+      }
+      final type = row['type']?.toString() ?? '';
+      final minutes = dur ~/ 60;
+      int xp = type == 'therapy' ? minutes * 12 : minutes * 8;
+      if (xp < 5) xp = 5;
+      weekXp += xp;
+    }
+
+    return WeeklyRecap(
+      activeDays: activeDaySet.length,
+      totalDays: 7,
+      totalXpThisWeek: weekXp,
+      weekStartDate: weekStart,
+    );
+  }
+
+  // ── Daily good-posture % ───────────────────────────────────────────────────
 
   /// Daily good-posture % for the last [days] calendar days (oldest first).
   Future<List<double>> fetchDailyScores(int days) async {
@@ -277,6 +487,7 @@ class SessionRepository {
       return pct.toDouble();
     });
   }
+
   Future<List<int>> fetchHeatmapData() async {
     const days = 28;
 
@@ -702,18 +913,57 @@ class SessionRepository {
   }
 }
 
+// ── Data classes ───────────────────────────────────────────────────────────────
+
+class XpStats {
+  const XpStats({
+    required this.totalXp,
+    required this.currentLevel,
+    required this.xpForCurrentLevel,
+    required this.xpForNextLevel,
+  });
+
+  final int totalXp;
+  final int currentLevel;
+  final int xpForCurrentLevel;
+  final int xpForNextLevel;
+
+  int get xpProgress => totalXp - xpForCurrentLevel;
+  int get xpNeeded => xpForNextLevel - xpForCurrentLevel;
+  double get levelProgress =>
+      xpNeeded <= 0 ? 1.0 : (xpProgress / xpNeeded).clamp(0.0, 1.0);
+}
+
+class WeeklyRecap {
+  const WeeklyRecap({
+    required this.activeDays,
+    required this.totalDays,
+    required this.totalXpThisWeek,
+    required this.weekStartDate,
+  });
+
+  final int activeDays;
+  final int totalDays;
+  final int totalXpThisWeek;
+  final DateTime weekStartDate;
+}
+
 class StreakStats {
   const StreakStats({
     required this.currentStreak,
     required this.highestStreak,
     required this.todayActive,
     required this.todayStreakDay,
+    this.freezeTokens = 2,
+    this.freezeUsedDays = const [],
   });
 
   final int currentStreak;
   final int highestStreak;
   final bool todayActive;
   final DateTime todayStreakDay;
+  final int freezeTokens;
+  final List<DateTime> freezeUsedDays;
 
   bool get isNewRecord =>
       currentStreak > 0 && currentStreak >= highestStreak;

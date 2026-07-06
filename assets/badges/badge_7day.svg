@@ -1,0 +1,31 @@
+<svg width="200" height="240" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring7" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93C5FD"/>
+      <stop offset="50%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="face7" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ribbon tails -->
+  <path d="M70 150 L55 232 L100 210 L100 150 Z" fill="#1D4ED8"/>
+  <path d="M130 150 L145 232 L100 210 L100 150 Z" fill="#2563EB"/>
+
+  <!-- outer ring -->
+  <circle cx="100" cy="100" r="86" fill="url(#ring7)"/>
+  <!-- inner face -->
+  <circle cx="100" cy="100" r="70" fill="url(#face7)" stroke="#EFF6FF" stroke-width="4"/>
+  <!-- dashed inner trim -->
+  <circle cx="100" cy="100" r="58" fill="none" stroke="#EFF6FF" stroke-width="2" stroke-dasharray="4 6" opacity="0.6"/>
+
+  <!-- star -->
+  <path d="M100 60 L109 84 L135 86 L114 102 L122 127 L100 112 L78 127 L86 102 L65 86 L91 84 Z"
+        fill="#EFF6FF"/>
+
+  <!-- "7" badge text below star -->
+  <text x="100" y="150" text-anchor="middle" font-family="Arial, sans-serif" font-size="0" fill="none"></text>
+</svg>

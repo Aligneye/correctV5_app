@@ -1,0 +1,29 @@
+<svg width="200" height="240" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring300" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="45%" stop-color="#94A3B8"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+    <linearGradient id="face300" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+  </defs>
+  <path d="M70 172 L55 232 L100 212 L100 172 Z" fill="#334155"/>
+  <path d="M130 172 L145 232 L100 212 L100 172 Z" fill="#1E293B"/>
+
+  <!-- wings -->
+  <path d="M28 96 C10 88, 4 70, 8 52 C22 60, 34 66, 44 92 Z" fill="#CBD5E1"/>
+  <path d="M172 96 C190 88, 196 70, 192 52 C178 60, 166 66, 156 92 Z" fill="#CBD5E1"/>
+
+  <!-- octagon outer -->
+  <polygon points="70,16 130,16 172,58 172,118 130,160 70,160 28,118 28,58" fill="url(#ring300)"/>
+  <!-- octagon inner -->
+  <polygon points="74,32 126,32 158,64 158,112 126,144 74,144 42,112 42,64"
+           fill="url(#face300)" stroke="#F8FAFC" stroke-width="4"/>
+
+  <!-- star -->
+  <path d="M100 58 L108 80 L131 82 L112 96 L119 118 L100 105 L81 118 L88 96 L69 82 L92 80 Z"
+        fill="#F8FAFC"/>
+</svg>

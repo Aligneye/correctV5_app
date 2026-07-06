@@ -32,6 +32,11 @@ import 'package:correctv1/home/widgets/connected_device_sheet.dart';
 import 'package:correctv1/home/widgets/mode_control_card.dart';
 import 'package:correctv1/home/widgets/quick_modes_section.dart';
 import 'package:correctv1/home/widgets/stats_summary_card.dart';
+import 'package:correctv1/home/widgets/streak_calendar_widget.dart';
+import 'package:correctv1/home/widgets/streak_detail_sheet.dart';
+import 'package:correctv1/home/widgets/xp_detail_sheet.dart';
+import 'package:correctv1/home/widgets/xp_level_tile.dart';
+import 'package:correctv1/services/notification_service.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
@@ -287,6 +292,11 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool _streakPopupCheckedThisSession = false;
   final GlobalKey _streakTileKey = GlobalKey();
 
+  XpStats? _xpStats;
+  final GlobalKey _xpTileKey = GlobalKey();
+  bool _xpLevelUpCheckedThisSession = false;
+  bool _weeklyRecapShownThisSession = false;
+
   bool _deviceInfoRequestInFlight = false;
   static final List<QuickMode> _quickModes = [
     QuickMode(
@@ -537,6 +547,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       }
     });
     unawaited(_hydrateCachedStreak());
+    unawaited(_hydrateXpCache());
     unawaited(_loadOfflineSessions());
   }
 
@@ -1222,11 +1233,13 @@ class _HomeDashboardState extends State<HomeDashboard>
         ),
         _sessionRepository.fetchTodayStats(),
         _sessionRepository.fetchStreakStats(),
+        _sessionRepository.fetchXpStats(),
       ]);
 
       final List<SessionData> sessions = results[0] as List<SessionData>;
       final TodayStats? todayStats = results[1] as TodayStats?;
       final StreakStats? streakStats = results[2] as StreakStats?;
+      final XpStats? xpStats = results[3] as XpStats?;
 
       if (!mounted) return;
 
@@ -1234,13 +1247,24 @@ class _HomeDashboardState extends State<HomeDashboard>
         _offlineSessions = sessions.take(5).toList(growable: false);
         _todayStats = todayStats;
         _streakStats = streakStats;
+        _xpStats = xpStats;
         _isLoadingOfflineSessions = false;
       });
 
       if (streakStats != null) {
+        unawaited(
+          NotificationService.instance.updateStreakReminderForToday(
+            streakStats.todayActive,
+          ),
+        );
+        await _maybeShowStreakPopup(streakStats);
         unawaited(_persistStreakCache(streakStats));
-        unawaited(_maybeShowStreakPopup(streakStats));
       }
+      if (xpStats != null) {
+        unawaited(_maybeShowLevelUpPopup(xpStats));
+        unawaited(_persistXpCache(xpStats));
+      }
+      unawaited(_maybeShowWeeklyRecap());
     } catch (e) {
       debugPrint('HomeDashboard: _loadOfflineSessions error: $e');
       if (!mounted) return;
@@ -1253,6 +1277,11 @@ class _HomeDashboardState extends State<HomeDashboard>
   static const String _kStreakPrefsLastDay = 'streak_popup_last_day';
   static const String _kStreakPrefsLastValue = 'streak_popup_last_value';
   static const String _kStreakPrefsCachedHighest = 'streak_cached_highest';
+
+  static const String _kXpTotal = 'xp_total';
+  static const String _kXpLevel = 'xp_level';
+  static const String _kXpLastLevel = 'xp_last_level';
+  static const String _kWeeklyRecapLastShownWeek = 'weekly_recap_last_shown_week';
 
   Future<void> _persistStreakCache(StreakStats stats) async {
     try {
@@ -1281,6 +1310,138 @@ class _HomeDashboardState extends State<HomeDashboard>
     } catch (e) {
       debugPrint('HomeDashboard: _hydrateCachedStreak error: $e');
     }
+  }
+
+  Future<void> _persistXpCache(XpStats stats) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kXpTotal, stats.totalXp);
+      await prefs.setInt(_kXpLevel, stats.currentLevel);
+    } catch (e) {
+      debugPrint('HomeDashboard: _persistXpCache error: $e');
+    }
+  }
+
+  Future<void> _hydrateXpCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedLevel = prefs.getInt(_kXpLevel) ?? 1;
+      final cachedTotal = prefs.getInt(_kXpTotal) ?? 0;
+      if (!mounted || _xpStats != null) return;
+      // Reconstruct minimal XpStats from cache
+      final xpForCurrent = cachedLevel * cachedLevel * 100;
+      final xpForNext = (cachedLevel + 1) * (cachedLevel + 1) * 100;
+      setState(() {
+        _xpStats = XpStats(
+          totalXp: cachedTotal,
+          currentLevel: cachedLevel,
+          xpForCurrentLevel: xpForCurrent,
+          xpForNextLevel: xpForNext,
+        );
+      });
+    } catch (e) {
+      debugPrint('HomeDashboard: _hydrateXpCache error: $e');
+    }
+  }
+
+  Future<void> _maybeShowLevelUpPopup(XpStats stats) async {
+    if (_xpLevelUpCheckedThisSession) return;
+    _xpLevelUpCheckedThisSession = true;
+
+    final prefs = await SharedPreferences.getInstance();
+    final lastLevel = prefs.getInt(_kXpLastLevel) ?? 0;
+
+    if (lastLevel == 0) {
+      // First run — just record the level, no popup
+      await prefs.setInt(_kXpLastLevel, stats.currentLevel);
+      return;
+    }
+
+    if (stats.currentLevel <= lastLevel) return;
+
+    await prefs.setInt(_kXpLastLevel, stats.currentLevel);
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.black.withValues(alpha: 0.55),
+        builder: (_) => LevelUpPopup(
+          xpStats: stats,
+          resolveTarget: _resolveXpTileRect,
+        ),
+      );
+    });
+  }
+
+  Rect? _resolveXpTileRect() {
+    final ctx = _xpTileKey.currentContext;
+    if (ctx == null) return null;
+    final box = ctx.findRenderObject();
+    if (box is! RenderBox || !box.attached) return null;
+    final topLeft = box.localToGlobal(Offset.zero);
+    return topLeft & box.size;
+  }
+
+  Future<void> _maybeShowWeeklyRecap() async {
+    if (_weeklyRecapShownThisSession) return;
+
+    final now = DateTime.now();
+    // Only trigger on Mondays
+    if (now.weekday != DateTime.monday) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final lastShownWeek = prefs.getString(_kWeeklyRecapLastShownWeek) ?? '';
+    final thisWeekKey = _isoWeekKey(now);
+
+    if (lastShownWeek == thisWeekKey) return;
+
+    _weeklyRecapShownThisSession = true;
+
+    WeeklyRecap recap;
+    List<int> calendarDays;
+    try {
+      final results = await Future.wait([
+        _sessionRepository.fetchWeeklyRecap(),
+        _sessionRepository.fetchStreakCalendar(
+          35,
+          freezeUsedDays: _streakStats?.freezeUsedDays ?? [],
+        ),
+      ]);
+      recap = results[0] as WeeklyRecap;
+      calendarDays = results[1] as List<int>;
+    } catch (e) {
+      debugPrint('HomeDashboard: _maybeShowWeeklyRecap fetch error: $e');
+      return;
+    }
+
+    await prefs.setString(_kWeeklyRecapLastShownWeek, thisWeekKey);
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (ctx) => _WeeklyRecapSheet(
+          recap: recap,
+          streakDays: _streakStats?.currentStreak ?? 0,
+          calendarDays: calendarDays,
+        ),
+      );
+    });
+  }
+
+  static String _isoWeekKey(DateTime date) {
+    // ISO week: year + week number
+    final dayOfYear = date.difference(DateTime(date.year, 1, 1)).inDays + 1;
+    final weekNumber = ((dayOfYear - date.weekday + 10) / 7).floor();
+    return '${date.year}-W${weekNumber.toString().padLeft(2, '0')}';
   }
 
   Future<void> _maybeShowStreakPopup(StreakStats stats) async {
@@ -1329,6 +1490,26 @@ class _HomeDashboardState extends State<HomeDashboard>
     if (box is! RenderBox || !box.attached) return null;
     final topLeft = box.localToGlobal(Offset.zero);
     return topLeft & box.size;
+  }
+
+  void _showStreakDetailSheet() {
+    final stats = _streakStats;
+    if (stats == null || !mounted) return;
+    showStreakDetailSheet(
+      context,
+      streakStats: stats,
+      repository: _sessionRepository,
+    );
+  }
+
+  void _showXpDetailSheet() {
+    final stats = _xpStats;
+    if (stats == null || !mounted) return;
+    showXpDetailSheet(
+      context,
+      xpStats: stats,
+      repository: _sessionRepository,
+    );
   }
 
   static String _streakDayKey(DateTime d) =>
@@ -2000,6 +2181,15 @@ class _HomeDashboardState extends State<HomeDashboard>
                   streakDays: _streakStats?.currentStreak ?? 0,
                   streakTodayActive: _streakStats?.todayActive ?? false,
                   streakTileKey: _streakTileKey,
+                  freezeTokens: _streakStats?.freezeTokens ?? 0,
+                  xpStats: _xpStats,
+                  xpTileKey: _xpTileKey,
+                  onStreakTap: _streakStats != null
+                      ? () => _showStreakDetailSheet()
+                      : null,
+                  onXpTap: _xpStats != null
+                      ? () => _showXpDetailSheet()
+                      : null,
                   items: [
                     _lastSessionStatItem(
                       _offlineSessions,
@@ -2239,6 +2429,179 @@ class _HomeDashboardState extends State<HomeDashboard>
 /// while staying small enough to sit in the stats column. Tapping anywhere
 /// on the card opens the full immersive page.
 
+
+class _WeeklyRecapSheet extends StatelessWidget {
+  const _WeeklyRecapSheet({
+    required this.recap,
+    required this.streakDays,
+    required this.calendarDays,
+  });
+
+  final WeeklyRecap recap;
+  final int streakDays;
+  final List<int> calendarDays;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Last Week Recap',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                _RecapStat(
+                  label: 'Active Days',
+                  value: '${recap.activeDays}/${recap.totalDays}',
+                  icon: Icons.calendar_today_rounded,
+                  color: const Color(0xFFA855F7),
+                ),
+                const SizedBox(width: 12),
+                _RecapStat(
+                  label: 'XP Earned',
+                  value: '${recap.totalXpThisWeek}',
+                  icon: Icons.star_rounded,
+                  color: const Color(0xFFEC4899),
+                ),
+                const SizedBox(width: 12),
+                _RecapStat(
+                  label: 'Streak',
+                  value: '$streakDays days',
+                  icon: Icons.local_fire_department_rounded,
+                  color: const Color(0xFFF97316),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Activity Heatmap',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            StreakCalendarWidget(dayStates: calendarDays),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 14),
+                      child: Text(
+                        'Keep it up this week!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecapStat extends StatelessWidget {
+  const _RecapStat({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
+            ),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _AllModesSheetItem extends StatelessWidget {
   final String title;
