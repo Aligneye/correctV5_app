@@ -479,7 +479,7 @@ class CalibrationCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Sit in your ideal posture position before calibrating. '
+                    'Sit in your ideal posture position before calibrating.'
                     'This will set your baseline reference angle.',
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.7),
