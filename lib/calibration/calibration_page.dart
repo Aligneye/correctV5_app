@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:lottie/lottie.dart';
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/services/angle_history_service.dart';
 import 'package:flutter/material.dart';
@@ -105,6 +106,7 @@ class _CalibrationPageState extends State<CalibrationPage>
         if (mounted) unawaited(_startCalibration());
       });
     }
+
   }
 
   @override
@@ -1178,7 +1180,7 @@ class _HoldStillScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'AlignEye is learning your neutral angle.\nBreathe normally and keep your head steady.',
+            'Align pod is learning your neutral angle.\nBreathe normally and keep your head steady.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,
@@ -1352,59 +1354,40 @@ class _ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      key: key,
-      padding: const EdgeInsets.fromLTRB(28, 48, 28, 36),
+    return SizedBox.expand(
+      child: Center(
+      child: SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          if (showSuccessBar || showFailedBar) ...[
-            AnimatedBuilder(
-              animation: barProgress!,
-              builder: (context, child) {
-                final t = Curves.easeOutCubic.transform(barProgress!.value);
-                return Container(
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 32),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      return Stack(
-                        children: [
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: constraints.maxWidth * t,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: showSuccessBar
-                                    ? const Color(0xFF22C55E)
-                                    : const Color(0xFFEF4444),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                );
-              },
+          if (showSuccessBar) ...[
+            Lottie.asset(
+              'assets/animations/sucess.json',
+              width: 160,
+              height: 160,
+              repeat: true,
             ),
           ],
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color.withValues(alpha: 0.15),
+          if (showFailedBar) ...[
+            Lottie.asset(
+              'assets/animations/Failed.json',
+              width: 160,
+              height: 160,
+              repeat: true,
             ),
-            child: Icon(icon, color: color, size: 44),
-          ),
+          ],
+          if (!showFailedBar && !showSuccessBar)
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color.withValues(alpha: 0.15),
+              ),
+              child: Icon(icon, color: color, size: 44),
+            ),
           const SizedBox(height: 24),
           Text(
             title,
@@ -1435,7 +1418,7 @@ class _ResultScreen extends StatelessWidget {
               ),
             ),
           ],
-          const Spacer(),
+          const SizedBox(height: 32),
           if (primaryLabel != null && onPrimary != null)
             SizedBox(
               width: double.infinity,
@@ -1461,6 +1444,6 @@ class _ResultScreen extends StatelessWidget {
             ),
         ],
       ),
-    );
+    )));
   }
 }

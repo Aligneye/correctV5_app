@@ -189,18 +189,21 @@ class _QuickModeCard extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: mode.gradient,
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+              Hero(
+                tag: 'mode_icon_${mode.title.toLowerCase()}',
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: mode.gradient,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  borderRadius: BorderRadius.circular(14),
+                  child: Icon(mode.icon, color: Colors.white, size: 24),
                 ),
-                child: Icon(mode.icon, color: Colors.white, size: 24),
               ),
               const SizedBox(height: 12),
               Text(

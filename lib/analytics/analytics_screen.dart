@@ -1144,24 +1144,50 @@ class _StreakDayBadge extends StatelessWidget {
 
 // ─── Daily Score Trend Card ───────────────────────────────────────────────────
 
-class _DailyScoreTrendCard extends StatelessWidget {
+class _DailyScoreTrendCard extends StatefulWidget {
   const _DailyScoreTrendCard({this.goodData, this.loading = false});
 
   /// Seven values (Mon..Sun) of good-posture %, 0..100.
   final List<double>? goodData;
   final bool loading;
 
+  @override
+  State<_DailyScoreTrendCard> createState() => _DailyScoreTrendCardState();
+}
+
+class _DailyScoreTrendCardState extends State<_DailyScoreTrendCard>
+    with SingleTickerProviderStateMixin {
   static const _fallback = [88.0, 94.0, 96.0, 74.0, 98.0, 92.0, 72.0];
 
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
   List<double> get _values {
-    if (loading) return _fallback;
+    if (widget.loading) return _fallback;
     final values = List<double>.filled(7, 0);
-    if (goodData != null) {
-      for (var i = 0; i < 7 && i < goodData!.length; i++) {
-        values[i] = goodData![i].clamp(0, 100).toDouble();
+    if (widget.goodData != null) {
+      for (var i = 0; i < 7 && i < widget.goodData!.length; i++) {
+        values[i] = widget.goodData![i].clamp(0, 100).toDouble();
       }
     }
     return values.any((v) => v > 0) ? values : _fallback;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -1199,44 +1225,52 @@ class _DailyScoreTrendCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          SizedBox(
-            height: 154,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(
-                  width: 30,
-                  height: 126,
-                  child: _ScoreAxisLabels(),
-                ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 126,
-                        child: CustomPaint(
-                          size: Size.infinite,
-                          painter: _ScoreTrendPainter(_values),
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: const [
-                          _ScoreDayLabel('Mon'),
-                          _ScoreDayLabel('Tue'),
-                          _ScoreDayLabel('Wed'),
-                          _ScoreDayLabel('Thu'),
-                          _ScoreDayLabel('Fri'),
-                          _ScoreDayLabel('Sat'),
-                          _ScoreDayLabel('Sun'),
+          AnimatedBuilder(
+            animation: _anim,
+            builder: (context, _) {
+              return SizedBox(
+                height: 154,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(
+                      width: 30,
+                      height: 126,
+                      child: _ScoreAxisLabels(),
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: 126,
+                            child: CustomPaint(
+                              size: Size.infinite,
+                              painter: _ScoreTrendPainter(
+                                _values,
+                                progress: _anim.value,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: const [
+                              _ScoreDayLabel('Mon'),
+                              _ScoreDayLabel('Tue'),
+                              _ScoreDayLabel('Wed'),
+                              _ScoreDayLabel('Thu'),
+                              _ScoreDayLabel('Fri'),
+                              _ScoreDayLabel('Sat'),
+                              _ScoreDayLabel('Sun'),
+                            ],
+                          ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            },
           ),
         ],
       ),
@@ -1253,7 +1287,8 @@ class _AngleDeviationDayCard extends StatefulWidget {
   State<_AngleDeviationDayCard> createState() => _AngleDeviationDayCardState();
 }
 
-class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
+class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard>
+    with SingleTickerProviderStateMixin {
   static const _fallback = [75.0, 82.0, 78.0, 85.0, 93.0, 88.0, 80.0];
   static const _xLabels = ['8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
   static const _plotHeight = 132.0;
@@ -1264,10 +1299,24 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
   double _maxDeviation = 0;
   bool _hasRealData = false;
 
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
   @override
   void initState() {
     super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
     _refresh();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
   }
 
   void _refresh() {
@@ -1283,6 +1332,9 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
       _avgDeviation = _angleService.todayAverageDeviation;
       _maxDeviation = _angleService.todayMaxDeviation;
     });
+    _ctrl
+      ..reset()
+      ..forward();
   }
 
   @override
@@ -1351,14 +1403,20 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
               Expanded(
                 child: Column(
                   children: [
-                    SizedBox(
-                      height: _plotHeight,
-                      child: CustomPaint(
-                        painter: _AngleDeviationDayPainter(
-                          values: _values,
-                          lineColor: _kAngleChartPurple,
-                        ),
-                      ),
+                    AnimatedBuilder(
+                      animation: _anim,
+                      builder: (context, _) {
+                        return SizedBox(
+                          height: _plotHeight,
+                          child: CustomPaint(
+                            painter: _AngleDeviationDayPainter(
+                              values: _values,
+                              lineColor: _kAngleChartPurple,
+                              progress: _anim.value,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 6),
                     Row(
@@ -1436,10 +1494,15 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard> {
 }
 
 class _AngleDeviationDayPainter extends CustomPainter {
-  _AngleDeviationDayPainter({required this.values, required this.lineColor});
+  _AngleDeviationDayPainter({
+    required this.values,
+    required this.lineColor,
+    this.progress = 1.0,
+  });
 
   final List<double> values;
   final Color lineColor;
+  final double progress;
 
   static const _yMin = 60.0;
   static const _yMax = 100.0;
@@ -1471,6 +1534,10 @@ class _AngleDeviationDayPainter extends CustomPainter {
       return Offset(x, y);
     });
 
+    final clipWidth = w * progress;
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, 0, clipWidth, h));
+
     final linePath = _smoothPath(pts);
     final linePaint = Paint()
       ..color = lineColor
@@ -1480,16 +1547,20 @@ class _AngleDeviationDayPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     canvas.drawPath(linePath, linePaint);
 
-    // Dots
+    // Dots — only draw points that fall within the clipped region
     final fill = Paint()..color = lineColor;
     final ring = Paint()
       ..color = Colors.white
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
     for (final p in pts) {
-      canvas.drawCircle(p, 5, fill);
-      canvas.drawCircle(p, 5, ring);
+      if (p.dx <= clipWidth) {
+        canvas.drawCircle(p, 5, fill);
+        canvas.drawCircle(p, 5, ring);
+      }
     }
+
+    canvas.restore();
   }
 
   double _yForValue(double v, double h) {
@@ -1510,6 +1581,7 @@ class _AngleDeviationDayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AngleDeviationDayPainter oldDelegate) {
+    if (oldDelegate.progress != progress) return true;
     if (oldDelegate.lineColor != lineColor) return true;
     if (oldDelegate.values.length != values.length) return true;
     for (int i = 0; i < values.length; i++) {
@@ -1559,8 +1631,9 @@ class _ScoreDayLabel extends StatelessWidget {
 
 class _ScoreTrendPainter extends CustomPainter {
   final List<double> values;
+  final double progress;
 
-  _ScoreTrendPainter(this.values);
+  _ScoreTrendPainter(this.values, {this.progress = 1.0});
 
   static final _gridPaint = Paint()
     ..color = const Color(0xFFE3EAF3)
@@ -1598,6 +1671,10 @@ class _ScoreTrendPainter extends CustomPainter {
       return Offset(x, y);
     });
 
+    final clipWidth = size.width * progress;
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, 0, clipWidth, size.height));
+
     final linePath = _smoothPath(points);
     final areaPath = Path.from(linePath)
       ..lineTo(size.width, size.height)
@@ -1606,6 +1683,8 @@ class _ScoreTrendPainter extends CustomPainter {
 
     canvas.drawPath(areaPath, _areaPaint);
     canvas.drawPath(linePath, _linePaint);
+
+    canvas.restore();
   }
 
   Path _smoothPath(List<Offset> points) {
@@ -1621,6 +1700,7 @@ class _ScoreTrendPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ScoreTrendPainter oldDelegate) {
+    if (oldDelegate.progress != progress) return true;
     if (oldDelegate.values.length != values.length) return true;
     for (int i = 0; i < values.length; i++) {
       if (oldDelegate.values[i] != values[i]) return true;
