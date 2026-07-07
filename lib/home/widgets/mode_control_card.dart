@@ -328,38 +328,67 @@ class ModeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return ClipRRect(
+    const duration = Duration(milliseconds: 200);
+    const curve = Curves.easeOutCubic;
+    return SizedBox(
+      height: 40,
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: selected
-              ? const LinearGradient(
-                  colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-                )
-              : null,
-          color: selected ? null : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: selected ? Colors.white : scheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: AnimatedContainer(
+              duration: duration,
+              curve: curve,
+              decoration: BoxDecoration(
+                color: selected
+                    ? Colors.transparent
+                    : scheme.surfaceContainerHighest,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: AnimatedOpacity(
+              duration: duration,
+              curve: curve,
+              opacity: selected ? 1.0 : 0.0,
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+          Positioned.fill(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                splashColor: Colors.white.withValues(alpha: 0.15),
+                highlightColor: Colors.white.withValues(alpha: 0.08),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: AnimatedDefaultTextStyle(
+                      duration: duration,
+                      curve: curve,
+                      style: TextStyle(
+                        color: selected ? Colors.white : scheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                      child: Text(label, textAlign: TextAlign.center),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
-    );
+    ));
   }
 }
 

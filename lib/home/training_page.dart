@@ -497,6 +497,27 @@ class _TrainingHeader extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 40, minHeight: 34),
         ),
         const SizedBox(height: 12),
+        Hero(
+          tag: 'mode_icon_training',
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF34D399), Color(0xFF14B8A6)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.accessibility_new_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
             colors: [Color(0xFF8B00FF), Color(0xFFEC4899)],

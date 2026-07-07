@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:correctv1/home/widgets/surface_card.dart';
+import 'package:correctv1/home/widgets/celebration_confetti.dart';
 import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/theme/app_theme.dart';
@@ -254,130 +255,130 @@ class _StreakTileState extends State<_StreakTile>
                 ],
               ),
               child: Stack(
-            clipBehavior: Clip.hardEdge,
-            children: [
-              Positioned(
-                top: -20,
-                right: -20,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        Colors.white.withValues(alpha: 0.12),
-                        Colors.white.withValues(alpha: 0.0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 0,
-                bottom: 0,
-                left: -60 + (_ctrl.value * 260),
-                child: Transform.rotate(
-                  angle: -0.4,
-                  child: Container(
-                    width: 30,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.white.withValues(alpha: 0.0),
-                          Colors.white.withValues(alpha: 0.08),
-                          Colors.white.withValues(alpha: 0.0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '${widget.days}',
-                      style: const TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        height: 1.0,
-                        letterSpacing: -1,
-                      ),
-                    ),
-                    const Text(
-                      'Streak\nDays',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        height: 1.25,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Positioned(
-                bottom: -6,
-                right: -2,
-                child: Transform.rotate(
-                  angle: _flameFlicker.value,
-                  child: Transform.scale(
-                    scale: _scaleAnim.value,
-                    alignment: Alignment.bottomCenter,
-                    child: SizedBox(
-                      width: 56,
-                      height: 64,
-                      child: CustomPaint(
-                        painter: _StreakFirePainter(progress: _ctrl.value),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              // Freeze token badge — bottom-left, only when tokens > 0
-              if (widget.freezeTokens > 0)
-                Positioned(
-                  bottom: 10,
-                  left: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.22),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.ac_unit_rounded,
-                          size: 10,
-                          color: Colors.white,
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  Positioned(
+                    top: -20,
+                    right: -20,
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            Colors.white.withValues(alpha: 0.12),
+                            Colors.white.withValues(alpha: 0.0),
+                          ],
                         ),
-                        const SizedBox(width: 2),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    left: -60 + (_ctrl.value * 260),
+                    child: Transform.rotate(
+                      angle: -0.4,
+                      child: Container(
+                        width: 30,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.white.withValues(alpha: 0.0),
+                              Colors.white.withValues(alpha: 0.08),
+                              Colors.white.withValues(alpha: 0.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
                         Text(
-                          '${widget.freezeTokens}',
+                          '${widget.days}',
                           style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
                             color: Colors.white,
                             height: 1.0,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                        const Text(
+                          'Streak\nDays',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                            height: 1.25,
+                            letterSpacing: 0.2,
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
-            ],
-          ),
+                  Positioned(
+                    bottom: -6,
+                    right: -2,
+                    child: Transform.rotate(
+                      angle: _flameFlicker.value,
+                      child: Transform.scale(
+                        scale: _scaleAnim.value,
+                        alignment: Alignment.bottomCenter,
+                        child: SizedBox(
+                          width: 56,
+                          height: 64,
+                          child: CustomPaint(
+                            painter: _StreakFirePainter(progress: _ctrl.value),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Freeze token badge — bottom-left, only when tokens > 0
+                  if (widget.freezeTokens > 0)
+                    Positioned(
+                      bottom: 10,
+                      left: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.ac_unit_rounded,
+                              size: 10,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '${widget.freezeTokens}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                height: 1.0,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -566,6 +567,8 @@ class _StreakPopupState extends State<StreakPopup>
               onTap: _flyToTileAndClose,
             ),
           ),
+          if (milestone != null)
+            const Positioned.fill(child: CelebrationConfetti()),
           Center(
             child: AnimatedBuilder(
               animation: Listenable.merge([_entrance, _exit]),
@@ -867,8 +870,8 @@ class _StreakBurstPainter extends CustomPainter {
   @override
   bool shouldRepaint(_StreakBurstPainter oldDelegate) =>
       oldDelegate.progress != progress ||
-      oldDelegate.dimmed != dimmed ||
-      oldDelegate.palette != palette;
+          oldDelegate.dimmed != dimmed ||
+          oldDelegate.palette != palette;
 }
 
 class _SummaryMetricTile extends StatelessWidget {

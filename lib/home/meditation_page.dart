@@ -207,6 +207,27 @@ class _MeditationHeader extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 40, minHeight: 34),
         ),
         const SizedBox(height: 12),
+        Hero(
+          tag: 'mode_icon_breathe',
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF818CF8), Color(0xFF3B82F6)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.self_improvement,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         ShaderMask(
           shaderCallback: (bounds) => gradient.createShader(bounds),
           blendMode: BlendMode.srcIn,

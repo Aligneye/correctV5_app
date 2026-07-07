@@ -90,26 +90,26 @@ class _SplashScreenState extends State<SplashScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-            AnimatedBuilder(
-              animation: _floatAnimation,
-              builder: (_, child) => Transform.translate(
-                offset: Offset(0, _floatAnimation.value),
-                child: child,
-              ),
-              child: Image.asset('assets/newLogo.png', width: 260),
+                AnimatedBuilder(
+                  animation: _floatAnimation,
+                  builder: (_, child) => Transform.translate(
+                    offset: Offset(0, _floatAnimation.value),
+                    child: child,
+                  ),
+                  child: Image.asset('assets/newLogo.png', width: 260),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'REDEFINING POSTURE',
+                  style: TextStyle(
+                    color: Color(0xff00666D),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 3,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'REDEFINING POSTURE',
-              style: TextStyle(
-                color: Color(0xff00666D),
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 3,
-              ),
-            ),
-          ],
-        ),
           ),
           Positioned(
             bottom: 32,

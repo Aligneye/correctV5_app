@@ -51,6 +51,7 @@ dependencies:
   crypto: ^3.0.3
   path_provider: ^2.1.0
   package_info_plus: ^9.0.1
+  lottie: ^3.1.0
 
 dev_dependencies:
   flutter_test:
@@ -78,6 +79,7 @@ flutter:
   assets:
     - assets/
     - assets/badges/
+    - assets/animations/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
