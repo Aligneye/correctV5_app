@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart'
     show openAppSettings;
@@ -394,10 +395,16 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
               borderRadius: BorderRadius.circular(36),
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Image.asset(
-                  'assets/product.png',
-                  fit: BoxFit.contain,
-                ),
+                child: _scanning
+                    ? Lottie.asset(
+                        'assets/animations/pod_lottie.json',
+                        fit: BoxFit.contain,
+                        repeat: true,
+                      )
+                    : Image.asset(
+                        'assets/product.png',
+                        fit: BoxFit.contain,
+                      ),
               ),
             ),
           ),
