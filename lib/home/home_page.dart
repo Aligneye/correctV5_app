@@ -494,11 +494,6 @@ class _HomeDashboardState extends State<HomeDashboard>
         needsRebuild = true;
       }
       final isIdle = reading.mode.trim().toUpperCase() == 'IDLE';
-      if (isIdle) {
-        isBadPostureNotifier.value = false;
-        postureStatusNotifier.value = 'Device idle';
-        needsRebuild = true;
-      }
 
       if (isTherapyMode && reportedRemainingSec > 0) {
         final secondsChanged =
