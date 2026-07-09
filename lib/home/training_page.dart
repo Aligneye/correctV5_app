@@ -79,7 +79,7 @@ class _TrainingPageState extends State<TrainingPage>
       await showPodDisconnectedDialog(
         context,
         subtitle:
-            'Connect your Align Pod to start a training session.',
+        'Connect your Align Pod to start a training session.',
       );
       return;
     }
@@ -89,27 +89,20 @@ class _TrainingPageState extends State<TrainingPage>
 
     final service = widget.deviceService;
     if (newState) {
-      // Training start — mode + timing + difficulty ek saath bhejo
-      final timingStr = switch (_timing) {
+      // Training start — sub_mode + difficulty_angle + delay_ms ek saath bhejo
+      final subMode = switch (_timing) {
         'Delayed'  => 'DELAYED',
-        'No alert' => 'AUTOMATIC',
+        'No alert' => 'NO_ALERTS',
         _          => 'INSTANT',
       };
-      unawaited(service.sendModeControl(
-        mode: 'TRAINING',
-        postureTiming: timingStr,
-        therapyDurationMinutes: 10,
-        difficultyDegrees: _sensitivity.round(),
-        postureDelaySeconds: _timing == 'Delayed' ? _delaySeconds : 0,
+      unawaited(service.sendTrainingStart(
+        subMode: subMode,
+        difficultyAngle: _sensitivity.round(),
+        delayMs: _timing == 'Delayed' ? _delaySeconds * 1000 : 5000,
       ));
     } else {
-      // Training stop — tracking mode pe wapas
-      unawaited(service.sendModeControl(
-        mode: 'IDLE',
-        postureTiming: 'INSTANT',
-        therapyDurationMinutes: 10,
-        difficultyDegrees: _sensitivity.round(),
-      ));
+      // Training stop — device idle mode mein chala jaata hai
+      unawaited(service.sendTrainingStop());
     }
   }
 
@@ -607,10 +600,10 @@ class _ChoiceButton extends StatelessWidget {
             decoration: BoxDecoration(
               gradient: isSelected
                   ? LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: selectedGradient,
-                    )
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: selectedGradient,
+              )
                   : null,
               color: isSelected ? null : scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(11),
@@ -619,12 +612,12 @@ class _ChoiceButton extends StatelessWidget {
                   : Border.all(color: scheme.outline),
               boxShadow: isSelected
                   ? [
-                      BoxShadow(
-                        color: selectedGradient.last.withValues(alpha: 0.23),
-                        blurRadius: 14,
-                        offset: const Offset(0, 7),
-                      ),
-                    ]
+                BoxShadow(
+                  color: selectedGradient.last.withValues(alpha: 0.23),
+                  blurRadius: 14,
+                  offset: const Offset(0, 7),
+                ),
+              ]
                   : null,
             ),
             child: FittedBox(
@@ -660,7 +653,7 @@ class _DelayedAlertCard extends StatelessWidget {
       icon: Icons.hourglass_top_rounded,
       title: 'Delayed vibration alert',
       message:
-          'You will receive a vibration alert after $delaySeconds seconds of poor posture.',
+      'You will receive a vibration alert after $delaySeconds seconds of poor posture.',
       trailing: TextButton(
         onPressed: onChangeDelay,
         style: TextButton.styleFrom(
@@ -701,7 +694,7 @@ class _InstantAlertCard extends StatelessWidget {
       icon: Icons.electric_bolt_rounded,
       title: 'Instant vibration alert',
       message:
-          'You will receive a vibration alert the moment poor posture is detected.',
+      'You will receive a vibration alert the moment poor posture is detected.',
     );
   }
 }
@@ -715,7 +708,7 @@ class _TrackingOnlyCard extends StatelessWidget {
       icon: Icons.timeline_rounded,
       title: 'Tracking only',
       message:
-          'It will only track your posture. There will be no vibration alert.',
+      'It will only track your posture. There will be no vibration alert.',
     );
   }
 }
@@ -825,8 +818,8 @@ class _DelayChip extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: isSelected
                 ? const LinearGradient(
-                    colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-                  )
+              colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+            )
                 : null,
             color: isSelected ? null : scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(999),
@@ -969,8 +962,8 @@ class _LiveGraphPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _LiveGraphPainter old) =>
       old.progress != progress ||
-      old.liveAngle != liveAngle ||
-      old.difficultyDeg != difficultyDeg;
+          old.liveAngle != liveAngle ||
+          old.difficultyDeg != difficultyDeg;
 }
 
 
@@ -1003,10 +996,10 @@ class _StartButton extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color:
-                    (isRunning
-                            ? const Color(0xFFEF4444)
-                            : const Color(0xFFEC4899))
-                        .withValues(alpha: 0.28),
+                (isRunning
+                    ? const Color(0xFFEF4444)
+                    : const Color(0xFFEC4899))
+                    .withValues(alpha: 0.28),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
