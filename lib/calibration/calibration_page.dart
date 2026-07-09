@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:lottie/lottie.dart';
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/services/angle_history_service.dart';
