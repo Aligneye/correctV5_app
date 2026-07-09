@@ -888,6 +888,95 @@ class AlignEyeDeviceService {
     }
   }
 
+  /// Start a training (posture tracking) session on the device with a
+  /// specific alert timing, sensitivity angle, and (for DELAYED timing) an
+  /// alert delay. Returns true once the firmware ACKs the start command.
+  ///
+  /// Flow:
+  ///   1. App -> FW: {"seq":N,"cmd":"TRAINING_START","sub_mode":"INSTANT|
+  ///      DELAYED|NO_ALERTS","difficulty_angle":D,"delay_ms":M}
+  ///   2. FW -> App: {"t":"ACK","cmd":"TRAINING_START","seq":N,"ok":true}
+  ///
+  /// [subMode] must be one of 'INSTANT', 'DELAYED', 'NO_ALERTS' — these are
+  /// the canonical values the firmware accepts (it also tolerates aliases
+  /// like 'sub-mode' casing/hyphen variants, but the app always sends the
+  /// canonical underscore form).
+  /// [difficultyAngle] is clamped to the firmware-accepted range 5-60.
+  /// [delayMs] is clamped to the firmware-accepted range 500-30000; it's
+  /// only meaningful when subMode == 'DELAYED' but is always sent (firmware
+  /// ignores it otherwise).
+  Future<bool> sendTrainingStart({
+    required String subMode,
+    required int difficultyAngle,
+    int delayMs = 5000,
+  }) async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+
+    final clampedAngle = difficultyAngle.clamp(5, 60);
+    final clampedDelayMs = delayMs.clamp(500, 30000);
+
+    final seq = _nextCommandSeq();
+    final command = {
+      'seq': seq,
+      'cmd': 'TRAINING_START',
+      'sub_mode': subMode,
+      'difficulty_angle': clampedAngle,
+      'delay_ms': clampedDelayMs,
+    };
+
+    final ack = await _writeJsonCommandAndWaitForAck(
+      command,
+      timeout: const Duration(seconds: 2),
+    );
+
+    if (ack == null) {
+      debugPrint('Training start ACK timed out: $command');
+      return false;
+    }
+    if (ack['ok'] == false) {
+      debugPrint('Training start rejected: $ack');
+      return false;
+    }
+
+    return true;
+  }
+
+  /// Stops training and puts the device into idle mode.
+  ///
+  /// Flow:
+  ///   1. App -> FW: {"seq":N,"cmd":"TRAINING_STOP"}
+  ///   2. FW -> App: {"t":"ACK","cmd":"TRAINING_STOP","seq":N,"ok":true}
+  ///
+  /// Note (per firmware docs): the existing training-stop path still
+  /// handles session finalization/saving on its own — no dedicated
+  /// session-summary BLE packet is sent back for this command.
+  Future<bool> sendTrainingStop() async {
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
+      return false;
+    }
+
+    final seq = _nextCommandSeq();
+    final command = {'seq': seq, 'cmd': 'TRAINING_STOP'};
+
+    final ack = await _writeJsonCommandAndWaitForAck(
+      command,
+      timeout: const Duration(seconds: 2),
+    );
+
+    if (ack == null) {
+      debugPrint('Training stop ACK timed out: $command');
+      return false;
+    }
+    if (ack['ok'] == false) {
+      debugPrint('Training stop rejected: $ack');
+      return false;
+    }
+
+    return true;
+  }
+
   /// Start a therapy session on the device with a specific duration and
   /// intensity level (1-3). The device drives the timing and pattern
   /// sequencing — the phone is just the remote. Returns true once the
