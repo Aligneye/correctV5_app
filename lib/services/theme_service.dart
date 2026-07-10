@@ -7,12 +7,13 @@ class ThemeService {
 
   static const _kKey = 'app_theme_mode';
 
-  final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.system);
+  final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.light);
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kKey);
-    themeMode.value = _fromString(raw);
+    // First time user (no saved preference) → default to light
+    themeMode.value = raw == null ? ThemeMode.light : _fromString(raw);
   }
 
   Future<void> setMode(ThemeMode mode) async {
