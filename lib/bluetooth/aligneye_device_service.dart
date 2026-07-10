@@ -107,6 +107,9 @@ class PostureReading {
   final int calibrationQuality;
   final String calibrationFailReason;
   final int calibrationPassedSamples;
+  final int calibrationTotalSamples;
+  final int calibrationProfileId;
+  final int calibrationSlot;
   final double calibrationRefX;
   final double calibrationRefY;
   final double calibrationRefZ;
@@ -169,6 +172,9 @@ class PostureReading {
     this.calibrationQuality = 0,
     this.calibrationFailReason = '',
     this.calibrationPassedSamples = 0,
+    this.calibrationTotalSamples = 0,
+    this.calibrationProfileId = -1,
+    this.calibrationSlot = -1,
     this.calibrationRefX = 0.0,
     this.calibrationRefY = 0.0,
     this.calibrationRefZ = 0.0,
@@ -290,6 +296,15 @@ class PostureReading {
       calibrationPassedSamples: json.containsKey('passed_samples')
           ? toInt(json['passed_samples'])
           : (current?.calibrationPassedSamples ?? 0),
+      calibrationTotalSamples: json.containsKey('total_samples')
+          ? toInt(json['total_samples'])
+          : (current?.calibrationTotalSamples ?? 0),
+      calibrationProfileId: json.containsKey('profile_id')
+          ? toInt(json['profile_id'])
+          : (current?.calibrationProfileId ?? -1),
+      calibrationSlot: json.containsKey('slot') && json['slot'] is! String
+          ? toInt(json['slot'])
+          : (current?.calibrationSlot ?? -1),
       calibrationRefX: json.containsKey('x')
           ? toDouble(json['x'])
           : (current?.calibrationRefX ?? 0.0),
@@ -1084,11 +1099,39 @@ class AlignEyeDeviceService {
     return _writeTextCommand('ACTION=CALIBRATE');
   }
 
+  /// Cancels an in-progress calibration.
+  ///
+  /// Flow (per updated firmware docs — same seq/ACK pattern as training):
+  ///   1. App -> FW: {"seq":N,"cmd":"CALIBRATE_CANCEL"}
+  ///   2. FW -> App: {"t":"ACK","seq":N,"cmd":"CALIBRATE_CANCEL","ok":true}
+  ///      if a calibration was actually active, or "ok":false if the
+  ///      device was already idle (nothing to cancel).
+  ///
+  /// Returns true when the firmware confirms the cancel (ok:true), false on
+  /// timeout or when there was nothing to cancel (ok:false) — either way the
+  /// caller doesn't need to retry.
   Future<bool> sendCalibrationCancel() async {
     if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
     }
-    return _writeTextCommand('ACTION=CALIBRATE_CANCEL');
+
+    final seq = _nextCommandSeq();
+    final command = {'seq': seq, 'cmd': 'CALIBRATE_CANCEL'};
+
+    final ack = await _writeJsonCommandAndWaitForAck(
+      command,
+      timeout: const Duration(seconds: 2),
+    );
+
+    if (ack == null) {
+      debugPrint('Calibration cancel ACK timed out: $command');
+      return false;
+    }
+    if (ack['ok'] == false) {
+      debugPrint('Calibration cancel: nothing active to cancel: $ack');
+      return false;
+    }
+    return true;
   }
 
   Future<bool> getProfiles() async {
@@ -1103,14 +1146,44 @@ class AlignEyeDeviceService {
     return _writeJsonCommand({'cmd': 'GET_THERAPY_PLAN'});
   }
 
+  /// Starts a calibration session and saves the result under [name].
+  ///
+  /// Flow (per updated firmware docs — same seq/ACK pattern as training):
+  ///   1. App -> FW: {"seq":N,"cmd":"CALIBRATE_START","slot":"auto",
+  ///      "name":"<name>"}
+  ///   2. FW -> App: {"t":"ACK","seq":N,"cmd":"CALIBRATE_START","ok":true}
+  ///
+  /// The ACK only confirms the *start request* was accepted — progress
+  /// (GET_READY/HOLD_STILL) and the final DONE result still arrive as
+  /// separate "t":"C" notify packets handled in [_handleNotifyData].
+  /// Returns true once the firmware ACKs acceptance of the start request.
   Future<bool> sendCalibrationStartJson({String name = 'Profile'}) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
-    return _writeJsonCommand({
+    }
+
+    final seq = _nextCommandSeq();
+    final command = {
+      'seq': seq,
       'cmd': 'CALIBRATE_START',
       'slot': 'auto',
       'name': name,
-    });
+    };
+
+    final ack = await _writeJsonCommandAndWaitForAck(
+      command,
+      timeout: const Duration(seconds: 2),
+    );
+
+    if (ack == null) {
+      debugPrint('Calibration start ACK timed out: $command');
+      return false;
+    }
+    if (ack['ok'] == false) {
+      debugPrint('Calibration start rejected: $ack');
+      return false;
+    }
+    return true;
   }
 
   Future<bool> setDefaultProfile(int profileId) async {
