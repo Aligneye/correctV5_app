@@ -74,6 +74,13 @@ Future<bool> _ensureBleReady(BuildContext context) async {
       _showSnack(context, 'Bluetooth permissions were denied. Opening settings…');
       await openAppSettings();
       return false;
+
+    case BleReadiness.locationServicesOff:
+      _showSnack(
+        context,
+        'Location is off. Please turn on Location to scan for your pod.',
+      );
+      return false;
   }
 }
 

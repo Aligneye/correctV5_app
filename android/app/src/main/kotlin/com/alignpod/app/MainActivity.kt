@@ -48,8 +48,20 @@ class MainActivity : FlutterActivity() {
                     BluetoothDevice.BOND_BONDED -> true
                     BluetoothDevice.BOND_BONDING -> true
                     else -> {
-                        val method = device.javaClass.getMethod("createBond")
-                        method.invoke(device) as Boolean
+                        // Bond explicitly over the LE transport. Plain
+                        // createBond() means TRANSPORT_AUTO, which some OEM
+                        // stacks (notably MIUI) resolve to the wrong transport
+                        // for an address-only device — SMP then aborts within
+                        // seconds (auth_status 0x8C) because the pod is LE-only.
+                        try {
+                            val method = device.javaClass.getMethod(
+                                "createBond",
+                                Int::class.javaPrimitiveType
+                            )
+                            method.invoke(device, BluetoothDevice.TRANSPORT_LE) as Boolean
+                        } catch (e: Exception) {
+                            device.createBond()
+                        }
                     }
                 }
             }
