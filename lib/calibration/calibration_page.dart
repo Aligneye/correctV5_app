@@ -243,32 +243,6 @@ class _CalibrationPageState extends State<CalibrationPage>
       );
       _successBarController.forward();
 
-      Future<void> syncMode() async {
-        if (mounted && _isConnected) {
-          try {
-            await widget.deviceService.sendModeControl(
-              mode: 'TRAINING',
-              postureTiming: 'INSTANT',
-              therapyDurationMinutes: 10,
-              difficultyDegrees: 25,
-            );
-          } catch (_) {}
-        }
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted && _isConnected) {
-          try {
-            await widget.deviceService.sendModeControl(
-              mode: 'TRAINING',
-              postureTiming: 'INSTANT',
-              therapyDurationMinutes: 10,
-              difficultyDegrees: 25,
-            );
-          } catch (_) {}
-        }
-      }
-
-      unawaited(syncMode());
-
       _successAutoCloseTimer?.cancel();
       _successAutoCloseTimer = Timer(const Duration(milliseconds: 2200), () {
         if (!mounted || _closing) return;
