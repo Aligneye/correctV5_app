@@ -721,6 +721,8 @@ class AlignEyeDeviceService {
   final connectionStatus = ValueNotifier<DeviceConnectionStatus>(
     DeviceConnectionStatus.disconnected,
   );
+  // Sub-label shown during the connecting phase: 'Scanning', 'Pairing', 'Discovering'
+  final connectingLabel = ValueNotifier<String>('Connecting…');
   final currentReading = ValueNotifier<PostureReading?>(null);
   final deviceInfo = ValueNotifier<DeviceInfo?>(null);
   final activeProfileName = ValueNotifier<String>('');
@@ -1609,6 +1611,7 @@ class AlignEyeDeviceService {
       await _ensureBluetoothOn();
 
       // BLE is ready — now signal connecting state and arm timeout.
+      connectingLabel.value = 'Scanning…';
       connectionStatus.value = DeviceConnectionStatus.connecting;
       _connectionTimeoutTimer?.cancel();
       _connectionTimeoutTimer = Timer(_connectionTimeout, () {
@@ -1680,6 +1683,7 @@ class AlignEyeDeviceService {
 
       // For first-time devices, ask Android to create a bond before connection.
       if (!isPaired) {
+        connectingLabel.value = 'Pairing…';
         var pairingCompleted = await _requestPairing(_device!);
 
         if (!pairingCompleted) {
@@ -1833,6 +1837,7 @@ class AlignEyeDeviceService {
       );
 
       // Discover services with retry logic
+      connectingLabel.value = 'Discovering…';
       List<BluetoothService> services = await _discoverServicesWithRetry();
 
       _notifyCharacteristic = _findNotifyCharacteristic(services);
@@ -1917,6 +1922,7 @@ class AlignEyeDeviceService {
 
       _connectionTimeoutTimer?.cancel();
       _isConnecting = false;
+      connectingLabel.value = 'Connecting…';
       connectionStatus.value = DeviceConnectionStatus.connected;
       _connectionRetryCount = 0; // Reset retry count on success
 

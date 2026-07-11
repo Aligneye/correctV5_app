@@ -544,6 +544,17 @@ class _HomeDashboardState extends State<HomeDashboard>
     unawaited(_hydrateCachedStreak());
     unawaited(_hydrateXpCache());
     unawaited(_loadOfflineSessions());
+    unawaited(_requestNotificationPermissionOnce());
+  }
+
+  Future<void> _requestNotificationPermissionOnce() async {
+    final prefs = await SharedPreferences.getInstance();
+    const key = 'notification_permission_requested';
+    if (prefs.getBool(key) == true) return;
+    await prefs.setBool(key, true);
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+    await Permission.notification.request();
   }
 
   @override
@@ -1705,7 +1716,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     bool hasUnpairedNearby = false;
     try {
       hasUnpairedNearby = await _deviceService.hasUnpairedTargetDeviceNearby(
-        timeout: const Duration(seconds: 4),
+        timeout: const Duration(milliseconds: 2500),
       );
     } finally {
       if (mounted) {
@@ -2153,17 +2164,20 @@ class _HomeDashboardState extends State<HomeDashboard>
                             return ValueListenableBuilder<String>(
                               valueListenable: _deviceService.activeProfileName,
                               builder: (context, profile, child) {
-                                return TopHeaderBar(
-                                  status: connectionStatus,
-                                  isFindingDevice: _isFindingDevice,
-                                  isSyncing: isSyncing,
-                                  isLive:
-                                      connectionStatus ==
-                                          DeviceConnectionStatus.connected &&
-                                      activeSessionId != null,
-                                  batteryLevel: _batteryLevel.value,
-                                  profile: profile,
-                                  onTap: _handleDeviceStatusTap,
+                                return ValueListenableBuilder<String>(
+                                  valueListenable: _deviceService.connectingLabel,
+                                  builder: (context, connectingLabel, child) {
+                                    return TopHeaderBar(
+                                      status: connectionStatus,
+                                      isFindingDevice: _isFindingDevice,
+                                      isSyncing: isSyncing,
+                                      isLive: false,
+                                      batteryLevel: _batteryLevel.value,
+                                      profile: profile,
+                                      onTap: _handleDeviceStatusTap,
+                                      connectingLabel: connectingLabel,
+                                    );
+                                  },
                                 );
                               },
                             );
