@@ -10,6 +10,19 @@ import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/theme/app_theme.dart';
 
 const _kPodPrefix = 'align pod';
+const _kPodServiceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+
+bool _isAlignPod(ScanResult result) {
+  final advertisedName = result.advertisementData.advName.trim().toLowerCase();
+  final platformName = result.device.platformName.trim().toLowerCase();
+  final advertisesPodService = result.advertisementData.serviceUuids.any(
+    (uuid) => uuid.toString().toLowerCase() == _kPodServiceUuid,
+  );
+
+  return advertisesPodService ||
+      advertisedName.contains(_kPodPrefix) ||
+      platformName.contains(_kPodPrefix);
+}
 
 class DeviceConnectPage extends StatefulWidget {
   const DeviceConnectPage({super.key});
@@ -101,6 +114,11 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       Navigator.of(context).pop(true);
       return;
     }
+    if (status == DeviceConnectionStatus.disconnected && _connecting) {
+      setState(() => _connecting = false);
+      unawaited(_startScan());
+      return;
+    }
     // Keep the spinner in sync with the underlying service so a tap during
     // auto-connect lands straight on the connecting view.
     final shouldShowConnecting = status == DeviceConnectionStatus.connecting;
@@ -136,6 +154,11 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       case BleReadiness.permissionPermanentlyDenied:
         _showPermissionSettingsBar();
         return;
+      case BleReadiness.locationServicesOff:
+        _showReadinessSnackBar(
+          'Location is off. Android needs Location on to scan for Bluetooth devices — please enable it and try again.',
+        );
+        return;
     }
 
     setState(() {
@@ -144,21 +167,40 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       _found = [];
     });
     try {
+      // Listen before starting the scan so fast/early advertisements are not
+      // missed. The service UUID is the pod's stable cross-platform identity;
+      // advertised and cached platform names are fallbacks only.
+      await _scanSub?.cancel();
+      _scanSub = FlutterBluePlus.scanResults.listen(
+        (results) {
+          if (!mounted) return;
+          final pods = results.where(_isAlignPod).toList()
+            ..sort((a, b) => b.rssi.compareTo(a.rssi));
+          setState(() => _found = pods);
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('BLE scan results error: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        },
+      );
+
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 12));
-      _scanSub?.cancel();
-      _scanSub = FlutterBluePlus.scanResults.listen((results) {
-        if (!mounted) return;
-        final pods = results
-            .where((r) =>
-                r.device.platformName.toLowerCase().contains(_kPodPrefix))
-            .toList()
-          ..sort((a, b) => b.rssi.compareTo(a.rssi));
-        setState(() => _found = pods);
-      });
       await FlutterBluePlus.isScanning.where((s) => !s).first;
-      if (mounted) setState(() { _scanning = false; _scanDone = true; });
-    } catch (_) {
-      if (mounted) setState(() { _scanning = false; _scanDone = true; });
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _scanDone = true;
+        });
+      }
+    } catch (error, stackTrace) {
+      debugPrint('BLE scan failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _scanDone = true;
+        });
+      }
     }
   }
 
@@ -201,6 +243,12 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     _scanSub?.cancel();
     try {
       await _btManager.connect(remoteId: remoteId);
+      if (!mounted) return;
+      final status = _btManager.deviceService.connectionStatus.value;
+      if (status != DeviceConnectionStatus.connected &&
+          status != DeviceConnectionStatus.connecting) {
+        setState(() => _connecting = false);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _connecting = false);
@@ -218,6 +266,10 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   }
 
   String _friendlyError(String raw) {
+    if (raw.toLowerCase().contains('pairing')) {
+      return 'Pairing failed. Triple-click your pod\'s button (while idle) to '
+          'reset its pairing, then try again.';
+    }
     if (raw.toLowerCase().contains('permission')) {
       return 'Bluetooth permission required. Go to Settings → Permissions.';
     }

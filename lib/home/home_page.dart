@@ -1627,6 +1627,12 @@ class _HomeDashboardState extends State<HomeDashboard>
         );
         await openAppSettings();
         return false;
+
+      case BleReadiness.locationServicesOff:
+        _showBleSnackBar(
+          'Location is off. Please turn on Location to scan for your pod.',
+        );
+        return false;
     }
   }
 
