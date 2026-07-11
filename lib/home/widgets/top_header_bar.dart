@@ -13,6 +13,7 @@ class TopHeaderBar extends StatefulWidget {
   final int batteryLevel;
   final String profile;
   final VoidCallback onTap;
+  final String connectingLabel;
 
   const TopHeaderBar({
     super.key,
@@ -23,6 +24,7 @@ class TopHeaderBar extends StatefulWidget {
     required this.batteryLevel,
     required this.profile,
     required this.onTap,
+    this.connectingLabel = 'Connecting…',
   });
 
   @override
@@ -207,16 +209,19 @@ class _TopHeaderBarState extends State<TopHeaderBar>
       statusLabel = 'Finding…';
     } else if (isConnecting) {
       accentColor = const Color(0xFFF59E0B);
-      statusIcon = Icons.bluetooth_searching_rounded;
-      statusLabel = 'Connecting…';
+      final label = widget.connectingLabel;
+      if (label.startsWith('Scanning')) {
+        statusIcon = Icons.bluetooth_searching_rounded;
+      } else if (label.startsWith('Pairing')) {
+        statusIcon = Icons.lock_rounded;
+      } else {
+        statusIcon = Icons.manage_search_rounded;
+      }
+      statusLabel = label;
     } else if (widget.isSyncing) {
       accentColor = const Color(0xFF3B82F6);
       statusIcon = Icons.sync_rounded;
       statusLabel = 'Syncing';
-    } else if (isConnected && widget.isLive) {
-      accentColor = const Color(0xFFEF4444);
-      statusIcon = Icons.sensors_rounded;
-      statusLabel = 'Live';
     } else if (isConnected) {
       accentColor = const Color(0xFF22C55E);
       statusIcon = Icons.bluetooth_connected_rounded;

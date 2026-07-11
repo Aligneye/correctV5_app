@@ -154,10 +154,10 @@ class _TherapyPageState extends State<TherapyPage>
     );
     if (!mounted) return;
 
-    if (!sent) {
-      _showConnectDeviceSnack(message: 'Could not start therapy on device.');
-      return;
-    }
+    // if (!sent) {
+    //   _showConnectDeviceSnack(message: 'Could not start therapy on device.');
+    //   return;
+    // }
 
     setState(() => _isRunning = true);
 
