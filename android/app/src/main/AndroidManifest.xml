@@ -7,8 +7,13 @@
          without location permission and without the Location toggle on. -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- Android 11 and below still require location for BLE scanning. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Location needed for BLE scanning on Android 11 and below.
+         On Android 12+ BLUETOOTH_SCAN with neverForLocation covers scanning
+         without needing location at runtime. No maxSdkVersion is set here so
+         the merged manifest has a single entry that matches the library
+         declarations, avoiding the Play Console duplicate-permission error. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.VIBRATE" />

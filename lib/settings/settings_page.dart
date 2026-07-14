@@ -11,6 +11,7 @@ import 'package:correctv1/settings/firmware_update_page.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
 import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/services/theme_service.dart';
+import 'package:correctv1/legal/medical_disclaimer_page.dart';
 
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
@@ -148,6 +149,14 @@ class _SettingsPageState extends State<SettingsPage>
                   controller: _controller,
                   delayMs: 550,
                   child: const _AppearanceCard(),
+                ),
+                _kSectionSpacing,
+
+                // ── Medical Disclaimer ──────────────────────────────
+                _StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 575,
+                  child: const _MedicalDisclaimerCard(),
                 ),
                 _kSectionSpacing,
 
@@ -1225,6 +1234,62 @@ class _GradientButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Medical Disclaimer Card ──────────────────────────────────────────────────
+
+class _MedicalDisclaimerCard extends StatelessWidget {
+  const _MedicalDisclaimerCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return _SurfaceCard(
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.health_and_safety_outlined,
+            color: scheme.primary,
+            size: 22,
+          ),
+        ),
+        title: Text(
+          'Medical Disclaimer',
+          style: TextStyle(
+            color: scheme.onSurface,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          'Health & wellness information',
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontSize: 13,
+          ),
+        ),
+        trailing: Icon(
+          Icons.chevron_right_rounded,
+          color: scheme.onSurfaceVariant,
+        ),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const MedicalDisclaimerPage(),
+            ),
+          );
+        },
       ),
     );
   }

@@ -6,6 +6,8 @@ import 'package:correctv1/services/session_database.dart';
 import 'package:correctv1/services/session_sync_service.dart';
 import 'package:correctv1/services/background_service.dart';
 import 'package:correctv1/services/notification_service.dart';
+import 'package:correctv1/legal/disclaimer_prefs.dart';
+import 'package:correctv1/legal/disclaimer_gate_page.dart';
 
 class SplashScreen extends StatefulWidget {
   final String supabaseUrl;
@@ -66,11 +68,18 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
     final isConfigured =
         widget.supabaseUrl.isNotEmpty && widget.supabaseAnonKey.isNotEmpty;
+    final destination = isConfigured ? const AuthGate() : const HomePage();
+    _navigateWithDisclaimerCheck(destination);
+  }
+
+  Future<void> _navigateWithDisclaimerCheck(Widget destination) async {
+    final accepted = await DisclaimerPrefs.hasAcceptedCurrentVersion();
+    if (!mounted) return;
+    final target = accepted
+        ? destination
+        : DisclaimerGatePage(nextScreen: destination);
     Navigator.of(context).pushReplacement(
-      PageRouteBuilder<void>(
-        pageBuilder: (_, __, ___) =>
-        isConfigured ? const AuthGate() : const HomePage(),
-      ),
+      PageRouteBuilder<void>(pageBuilder: (_, __, ___) => target),
     );
   }
 

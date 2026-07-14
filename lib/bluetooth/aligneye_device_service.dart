@@ -238,11 +238,30 @@ class PostureReading {
     }
 
     // Determine isCalibrating:
+    // Priority 1 — explicit boolean key from firmware (highest priority).
+    // Priority 2 — infer from state/c_phase: DONE/CANCELLED/FAILED means not calibrating.
+    // Priority 3 — infer from result field being present and non-empty.
+    // Priority 4 — carry over from previous reading.
     bool isCal = current?.isCalibrating ?? false;
     if (json.containsKey('isCalibrating') ||
         json.containsKey('is_calibrating')) {
       final v = json['isCalibrating'] ?? json['is_calibrating'];
       isCal = v == true || v?.toString() == 'true';
+    } else {
+      final stateVal =
+          (json['c_phase'] ?? json['state'])?.toString().toUpperCase();
+      const _terminalPhases = {'DONE', 'CANCELLED', 'FAILED'};
+      final resultVal =
+          (json['calibrationResult'] ??
+              json['calibration_result'] ??
+              json['calibResult'] ??
+              json['result'])
+              ?.toString();
+      if (stateVal != null && _terminalPhases.contains(stateVal)) {
+        isCal = false;
+      } else if (resultVal != null && resultVal.isNotEmpty) {
+        isCal = false;
+      }
     }
 
     final tType = json['t']?.toString().toUpperCase();
@@ -287,7 +306,7 @@ class PostureReading {
         return val != null ? toInt(val) : (current?.calibrationTotalMs ?? 0);
       }(),
       calibrationPhase: () {
-        final val = json['c_phase'];
+        final val = json['c_phase'] ?? json['state'];
         return val != null
             ? val.toString().toUpperCase()
             : (current?.calibrationPhase ?? 'IDLE');
