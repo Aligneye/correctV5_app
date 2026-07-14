@@ -148,16 +148,11 @@ class _TherapyPageState extends State<TherapyPage>
       plannedDurationMinutes: _durationMinutes,
     );
 
-    final sent = await _deviceService.sendTherapyStart(
+    await _deviceService.sendTherapyStart(
       durationMinutes: _durationMinutes,
       intensityLevel: intensityLevel,
     );
     if (!mounted) return;
-
-    // if (!sent) {
-    //   _showConnectDeviceSnack(message: 'Could not start therapy on device.');
-    //   return;
-    // }
 
     setState(() => _isRunning = true);
 
@@ -188,20 +183,6 @@ class _TherapyPageState extends State<TherapyPage>
 
     if (!mounted) return;
     setState(() => _isRunning = false);
-  }
-
-  void _showConnectDeviceSnack({String? message}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF1F2937),
-        content: Text(
-          message ?? 'Connect your Align Pod to start therapy.',
-          style: const TextStyle(color: Colors.white),
-        ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
   }
 
   @override

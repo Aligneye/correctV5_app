@@ -46,8 +46,8 @@ class PostureGaugeCard extends StatelessWidget {
               height: 220,
               width: 220,
               child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 600),
-                curve: Curves.easeOutCubic,
+                duration: const Duration(milliseconds: 130),
+                curve: Curves.linear,
                 tween: Tween<double>(end: clampedAngle),
                 builder: (context, value, child) {
                   return CustomPaint(

@@ -24,6 +24,7 @@ import 'package:correctv1/services/firmware_manifest_service.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:correctv1/home/widgets/staggered_fade_slide.dart';
+import 'package:correctv1/home/widgets/pull_connect_banner.dart';
 import 'package:correctv1/home/widgets/top_header_bar.dart';
 import 'package:correctv1/home/widgets/posture_gauge_card.dart';
 import 'package:correctv1/home/widgets/mini_ongoing_therapy_card.dart';
@@ -281,6 +282,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool _liveDisplayHasFrame = false;
   bool _hasShownStartupConnectSheet = false;
   bool _isFindingDevice = false;
+
+  // Pull-to-refresh status banner state (see [PullConnectBanner]).
+  PullConnectPhase _pullConnectPhase = PullConnectPhase.idle;
+  String? _syncedLabel;
   bool _syncBannerDismissed = false;
   String _lastMode = '';
   bool _isLoadingOfflineSessions = false;
@@ -401,15 +406,15 @@ class _HomeDashboardState extends State<HomeDashboard>
 
       final postureText = reading.posture.trim();
       postureStatusNotifier.value =
-          postureText.isNotEmpty && postureText.toUpperCase() != 'UNKNOWN'
+      postureText.isNotEmpty && postureText.toUpperCase() != 'UNKNOWN'
           ? postureText
           : (reading.isBadPosture ? 'BAD POSTURE' : 'GOOD POSTURE');
 
       final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
       final isLiveMode =
           isTherapyMode ||
-          reading.mode.trim().toUpperCase() == 'TRAINING' ||
-          reading.mode.trim().toUpperCase() == 'POSTURE';
+              reading.mode.trim().toUpperCase() == 'TRAINING' ||
+              reading.mode.trim().toUpperCase() == 'POSTURE';
       final reportedRemainingSec = reading.therapyRemainingSeconds;
 
       _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
@@ -493,8 +498,6 @@ class _HomeDashboardState extends State<HomeDashboard>
         _selectedDifficulty = incomingDifficulty;
         needsRebuild = true;
       }
-      final isIdle = reading.mode.trim().toUpperCase() == 'IDLE';
-
       if (isTherapyMode && reportedRemainingSec > 0) {
         final secondsChanged =
             _therapyRemainingSeconds.value != reportedRemainingSec;
@@ -656,19 +659,19 @@ class _HomeDashboardState extends State<HomeDashboard>
   Future<void> _checkFirmwareLatestInSupabase(DeviceInfo info) async {
     _printDeviceInfoLog(
       'Checking Supabase firmware version for '
-      'model=${info.model}, hw=${info.hardwareRevision}, fw=${info.firmwareVersion}',
+          'model=${info.model}, hw=${info.hardwareRevision}, fw=${info.firmwareVersion}',
     );
 
     final manifest = await FirmwareManifestService()
         .fetchLatestForDeviceFromSupabase(
-          deviceModel: info.model,
-          hardwareRevision: info.hardwareRevision,
-        );
+      deviceModel: info.model,
+      hardwareRevision: info.hardwareRevision,
+    );
 
     if (manifest == null) {
       _printDeviceInfoLog(
         'Supabase firmware check: no active firmware row found for '
-        'model=${info.model}, hw=${info.hardwareRevision}',
+            'model=${info.model}, hw=${info.hardwareRevision}',
       );
       return;
     }
@@ -680,18 +683,18 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     _printDeviceInfoLog(
       'Supabase firmware check result: '
-      'current=${info.firmwareVersion}, '
-      'latest=${manifest.latestVersion}, '
-      'build=${manifest.buildNumber}, '
-      'updateAvailable=$hasUpdate',
+          'current=${info.firmwareVersion}, '
+          'latest=${manifest.latestVersion}, '
+          'build=${manifest.buildNumber}, '
+          'updateAvailable=$hasUpdate',
     );
 
     if (hasUpdate) {
       _printDeviceInfoLog(
         'Firmware update available: '
-        'current=${info.firmwareVersion}, latest=${manifest.latestVersion}, '
-        'notes=${manifest.releaseNotes.join(" | ")}, '
-        'url=${manifest.firmwareUrl}',
+            'current=${info.firmwareVersion}, latest=${manifest.latestVersion}, '
+            'notes=${manifest.releaseNotes.join(" | ")}, '
+            'url=${manifest.firmwareUrl}',
       );
     } else {
       _printDeviceInfoLog('Firmware is latest: ${info.firmwareVersion}');
@@ -701,7 +704,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _printDeviceInfoStatus(String reason) {
     _printDeviceInfoLog(
       'Device info status [$reason]: '
-      '${_deviceService.connectionStatus.value}',
+          '${_deviceService.connectionStatus.value}',
     );
   }
 
@@ -715,7 +718,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _syncLiveSessionTickerWithConnection() {
     final connected =
         _deviceService.connectionStatus.value ==
-        DeviceConnectionStatus.connected;
+            DeviceConnectionStatus.connected;
     final hasLiveSession = _deviceManager.activeSessionId.value != null;
     if (connected && hasLiveSession && _liveDisplayHasFrame) {
       _ensureLiveSessionTicker();
@@ -762,7 +765,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       // 🔥 CHANGE 2: Agar conditions follow nahi ho rahi hain, toh return karne ke bajay
       // ticker ko cancel karke band kar dein taaki battery aur memory bache.
       if (_deviceService.connectionStatus.value !=
-              DeviceConnectionStatus.connected ||
+          DeviceConnectionStatus.connected ||
           _deviceManager.activeSessionId.value == null ||
           !_liveDisplayHasFrame) {
         _liveSessionTicker?.cancel();
@@ -904,7 +907,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       gradient: gradient,
       positiveTrend: positive,
       trendNeutral:
-          !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
+      !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
     );
   }
 
@@ -1049,9 +1052,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   static StatItemData _lastSessionStatItem(
-    List<SessionData> sessions,
-    bool isLoading,
-  ) {
+      List<SessionData> sessions,
+      bool isLoading,
+      ) {
     const label = 'Last session';
 
     if (isLoading && sessions.isEmpty) {
@@ -1535,7 +1538,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   /// live-posture card for a compact ongoing-therapy preview.
   bool get _isTherapyLive =>
       _selectedMode == ModeControlType.therapy &&
-      _therapyRemainingSeconds.value > 0;
+          _therapyRemainingSeconds.value > 0;
 
   /// Idempotent: spin up the 1 Hz ticker if it isn't already alive. Called
   /// from the BLE reading handler on every frame so the countdown keeps
@@ -1544,8 +1547,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _ensureTherapyCountdownRunning() {
     if (_therapyCountdownTimer?.isActive ?? false) return;
     _therapyCountdownTimer = Timer.periodic(const Duration(seconds: 1), (
-      timer,
-    ) {
+        timer,
+        ) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -1829,10 +1832,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                               onPressed: isConnecting
                                   ? null
                                   : () {
-                                      setModalState(() => isConnecting = true);
-                                      Navigator.of(context).pop();
-                                      unawaited(_handleDeviceStatusTap());
-                                    },
+                                setModalState(() => isConnecting = true);
+                                Navigator.of(context).pop();
+                                unawaited(_handleDeviceStatusTap());
+                              },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: popupPrimary,
                                 foregroundColor: Colors.white,
@@ -1843,13 +1846,13 @@ class _HomeDashboardState extends State<HomeDashboard>
                               ),
                               child: isConnecting
                                   ? const SizedBox(
-                                      height: 18,
-                                      width: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    )
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
                                   : const Text('Connect'),
                             ),
                           ),
@@ -2143,274 +2146,336 @@ class _HomeDashboardState extends State<HomeDashboard>
       ),
       child: SafeArea(
         bottom: false, // Let content flow behind navbar
-        child: SingleChildScrollView(
-          padding: _kPagePadding, // Extra bottom padding for navbar
-          physics: const BouncingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 0,
-                child: ValueListenableBuilder<DeviceConnectionStatus>(
-                  valueListenable: _deviceService.connectionStatus,
-                  builder: (context, connectionStatus, child) {
-                    return ValueListenableBuilder<bool>(
-                      valueListenable: _deviceManager.isSyncing,
-                      builder: (context, isSyncing, child) {
-                        return ValueListenableBuilder<String?>(
-                          valueListenable: _deviceManager.activeSessionId,
-                          builder: (context, activeSessionId, child) {
-                            return ValueListenableBuilder<String>(
-                              valueListenable: _deviceService.activeProfileName,
-                              builder: (context, profile, child) {
-                                return ValueListenableBuilder<String>(
-                                  valueListenable: _deviceService.connectingLabel,
-                                  builder: (context, connectingLabel, child) {
-                                    return TopHeaderBar(
-                                      status: connectionStatus,
-                                      isFindingDevice: _isFindingDevice,
-                                      isSyncing: isSyncing,
-                                      isLive: false,
-                                      batteryLevel: _batteryLevel.value,
-                                      profile: profile,
-                                      onTap: _handleDeviceStatusTap,
-                                      connectingLabel: connectingLabel,
-                                    );
-                                  },
-                                );
-                              },
-                            );
-                          },
-                        );
-                      },
-                    );
-                  },
+        child: RefreshIndicator(
+          onRefresh: _handlePullToRefresh,
+          // The default platform spinner is hidden — our own
+          // [PullConnectBanner] (rendered as the first item below) shows
+          // the connecting/connected/failed status instead.
+          color: Colors.transparent,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: SingleChildScrollView(
+            padding: _kPagePadding, // Extra bottom padding for navbar
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                PullConnectBanner(
+                  phase: _pullConnectPhase,
+                  syncedLabel: _syncedLabel,
                 ),
-              ),
-              const SizedBox(height: 24),
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 100,
-                child: StatsSummaryCard(
-                  streakDays: _streakStats?.currentStreak ?? 0,
-                  streakTodayActive: _streakStats?.todayActive ?? false,
-                  streakTileKey: _streakTileKey,
-                  freezeTokens: _streakStats?.freezeTokens ?? 0,
-                  xpStats: _xpStats,
-                  xpTileKey: _xpTileKey,
-                  onStreakTap: _streakStats != null
-                      ? () => _showStreakDetailSheet()
-                      : null,
-                  onXpTap: _xpStats != null
-                      ? () => _showXpDetailSheet()
-                      : null,
-                  items: [
-                    _lastSessionStatItem(
-                      _offlineSessions,
-                      _isLoadingOfflineSessions,
-                    ),
-                    _goodPostureStatItem(_todayStats),
-                    _trainingTimeStatItem(_todayStats),
-                    _therapyTimeStatItem(_todayStats),
-                    _sessionsStatItem(_todayStats),
-                    _trackedTimeStatItem(_todayStats),
-                  ],
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 0,
+                  child: ValueListenableBuilder<DeviceConnectionStatus>(
+                    valueListenable: _deviceService.connectionStatus,
+                    builder: (context, connectionStatus, child) {
+                      return ValueListenableBuilder<bool>(
+                        valueListenable: _deviceManager.isSyncing,
+                        builder: (context, isSyncing, child) {
+                          return ValueListenableBuilder<String?>(
+                            valueListenable: _deviceManager.activeSessionId,
+                            builder: (context, activeSessionId, child) {
+                              return ValueListenableBuilder<String>(
+                                valueListenable: _deviceService.activeProfileName,
+                                builder: (context, profile, child) {
+                                  return ValueListenableBuilder<String>(
+                                    valueListenable: _deviceService.connectingLabel,
+                                    builder: (context, connectingLabel, child) {
+                                      return TopHeaderBar(
+                                        status: connectionStatus,
+                                        isFindingDevice: _isFindingDevice,
+                                        isSyncing: isSyncing,
+                                        isLive: false,
+                                        batteryLevel: _batteryLevel.value,
+                                        profile: profile,
+                                        onTap: _handleDeviceStatusTap,
+                                        connectingLabel: connectingLabel,
+                                      );
+                                    },
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
-              ),
-              _kSectionSpacing,
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 200,
-                // While therapy is in progress, swap the live-posture card
-                // out for a compact preview of the ongoing therapy session —
-                // tap it to jump into the full immersive page.
-                child: _isTherapyLive
-                    ? MiniOngoingTherapyCard(
-                        deviceService: _deviceService,
-                        totalMinutes: _therapyDurationMinutes,
-                        onTap: _openOngoingTherapyFromHome,
-                      )
-                    // : PostureGaugeCard(
-                    //     postureAngle: _postureAngle,
-                    //     postureStatus: _postureStatus,
-                    //     isBadPosture: _isBadPosture,
-                    //     controller: _controller,
-                    //   ),
-                    : ValueListenableBuilder<double>(
-                        valueListenable: postureAngleNotifier,
-
-                        builder: (context, angle, _) =>
-                            ValueListenableBuilder<bool>(
-                              valueListenable: isBadPostureNotifier,
-
-                              builder: (context, isBad, _) =>
-                                  ValueListenableBuilder<String>(
-                                    valueListenable: postureStatusNotifier,
-
-                                    builder: (context, status, _) =>
-                                        ValueListenableBuilder<int>(
-                                          valueListenable:
-                                              difficultyDegNotifier,
-
-                                          builder: (context, diff, _) =>
-                                              PostureGaugeCard(
-                                                postureAngle: angle,
-                                                postureStatus: status,
-                                                isBadPosture: isBad,
-                                                difficultyDeg: diff,
-                                                controller: _controller,
-                                              ),
-                                        ),
-                                  ),
-                            ),
+                const SizedBox(height: 24),
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 100,
+                  child: StatsSummaryCard(
+                    streakDays: _streakStats?.currentStreak ?? 0,
+                    streakTodayActive: _streakStats?.todayActive ?? false,
+                    streakTileKey: _streakTileKey,
+                    freezeTokens: _streakStats?.freezeTokens ?? 0,
+                    xpStats: _xpStats,
+                    xpTileKey: _xpTileKey,
+                    onStreakTap: _streakStats != null
+                        ? () => _showStreakDetailSheet()
+                        : null,
+                    onXpTap: _xpStats != null
+                        ? () => _showXpDetailSheet()
+                        : null,
+                    items: [
+                      _lastSessionStatItem(
+                        _offlineSessions,
+                        _isLoadingOfflineSessions,
                       ),
-              ),
-              _kSectionSpacing,
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 300,
-                child: ModeControlCard(
-                  selectedMode: _selectedMode,
-                  selectedPostureTiming: _selectedPostureTiming,
-                  selectedDifficulty: _selectedDifficulty,
-                  onModeSelected: (mode) {
-                    setState(() => _selectedMode = mode);
-                    _pendingMode = mode;
-                    _pendingModeTimer?.cancel();
-                    // IDLE guard has no timer: device won't confirm IDLE while a
-                    // live session is active, so we hold the guard until the user
-                    // explicitly picks a different mode (which overwrites _pendingMode).
-                    // For posture/therapy, a 4s safety timer is enough because those
-                    // modes are actually confirmed by the device quickly.
-                    if (mode != ModeControlType.track) {
-                      _pendingModeTimer = Timer(_kPendingTimeout, () {
-                        _pendingMode = null;
-                        _pendingModeTimer = null;
-                      });
-                    }
-                    _stopTherapyCountdown();
-                    unawaited(
-                      _syncModeControlToDevice(
-                        mode: mode,
-                        postureTiming: _selectedPostureTiming,
-                        therapyDurationMinutes: _therapyDurationMinutes,
-                        difficultyDegrees: _selectedDifficulty,
-                      ),
-                    );
-                  },
-                  onPostureTimingSelected: (timing) {
-                    setState(() => _selectedPostureTiming = timing);
-                    _pendingPostureTiming = timing;
-                    _pendingPostureTimingTimer?.cancel();
-                    _pendingPostureTimingTimer = Timer(_kPendingTimeout, () {
-                      _pendingPostureTiming = null;
-                      _pendingPostureTimingTimer = null;
-                    });
-                    unawaited(
-                      _syncModeControlToDevice(
-                        mode: _selectedMode,
-                        postureTiming: timing,
-                        therapyDurationMinutes: _therapyDurationMinutes,
-                        difficultyDegrees: _selectedDifficulty,
-                      ),
-                    );
-                  },
-                  onDifficultySelected: (difficulty) {
-                    setState(() => _selectedDifficulty = difficulty);
-                    _pendingDifficulty = difficulty;
-                    _pendingDifficultyTimer?.cancel();
-                    _pendingDifficultyTimer = Timer(_kPendingTimeout, () {
-                      _pendingDifficulty = null;
-                      _pendingDifficultyTimer = null;
-                    });
-                    unawaited(
-                      _syncModeControlToDevice(
-                        mode: _selectedMode,
-                        postureTiming: _selectedPostureTiming,
-                        therapyDurationMinutes: _therapyDurationMinutes,
-                        difficultyDegrees: difficulty,
-                      ),
-                    );
-                  },
+                      _goodPostureStatItem(_todayStats),
+                      _trainingTimeStatItem(_todayStats),
+                      _therapyTimeStatItem(_todayStats),
+                      _sessionsStatItem(_todayStats),
+                      _trackedTimeStatItem(_todayStats),
+                    ],
+                  ),
                 ),
-              ),
-              _kSectionSpacing,
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 350,
-                child: QuickModesSection(
-                  modes: _quickModes,
-                  onViewAll: () => _showAllModesSheet(context),
-                  onModeTap: widget.onNavigateToPage,
-                  onTherapyModeTap: widget.onOpenTherapy,
-                  onTrainingModeTap: widget.onOpenTraining,
-                  onMeditationModeTap: widget.onOpenMeditation,
-                ),
-              ),
-              _kSectionSpacing,
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 400,
-                child: CalibrationCard(
-                  onCalibratePressed: () async {
-                    if (_deviceService.connectionStatus.value !=
-                        DeviceConnectionStatus.connected) {
-                      await showPodDisconnectedDialog(context);
-                      return;
-                    }
-                    final result = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute<bool>(
-                        builder: (_) => CalibrationManagerPage(
-                          deviceService: _deviceService,
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 200,
+                  // While therapy is in progress, swap the live-posture card
+                  // out for a compact preview of the ongoing therapy session —
+                  // tap it to jump into the full immersive page.
+                  child: _isTherapyLive
+                      ? MiniOngoingTherapyCard(
+                    deviceService: _deviceService,
+                    totalMinutes: _therapyDurationMinutes,
+                    onTap: _openOngoingTherapyFromHome,
+                  )
+                  // : PostureGaugeCard(
+                  //     postureAngle: _postureAngle,
+                  //     postureStatus: _postureStatus,
+                  //     isBadPosture: _isBadPosture,
+                  //     controller: _controller,
+                  //   ),
+                      : ValueListenableBuilder<double>(
+                    valueListenable: postureAngleNotifier,
+
+                    builder: (context, angle, _) =>
+                        ValueListenableBuilder<bool>(
+                          valueListenable: isBadPostureNotifier,
+
+                          builder: (context, isBad, _) =>
+                              ValueListenableBuilder<String>(
+                                valueListenable: postureStatusNotifier,
+
+                                builder: (context, status, _) =>
+                                    ValueListenableBuilder<int>(
+                                      valueListenable:
+                                      difficultyDegNotifier,
+
+                                      builder: (context, diff, _) =>
+                                          PostureGaugeCard(
+                                            postureAngle: angle,
+                                            postureStatus: status,
+                                            isBadPosture: isBad,
+                                            difficultyDeg: diff,
+                                            controller: _controller,
+                                          ),
+                                    ),
+                              ),
                         ),
-                      ),
-                    );
-                    if (!mounted) return;
-                    if (result == true) {
-                      widget.onNavigateToPage(0);
-                    }
-                  },
+                  ),
                 ),
-              ),
-              _kSectionSpacing,
-              StaggeredFadeSlide(
-                controller: _controller,
-                delayMs: 500,
-                child: ValueListenableBuilder<DeviceConnectionStatus>(
-                  valueListenable: _deviceService.connectionStatus,
-                  builder: (context, status, _) {
-                    return ValueListenableBuilder<bool>(
-                      valueListenable: _deviceManager.isSyncing,
-                      builder: (context, isSyncing, _) {
-                        return RecentSessionsCard(
-                          sessions: _sessionsWithLiveDisplayDuration(),
-                          isLoading: _isLoadingOfflineSessions,
-                          isSyncing: isSyncing,
-                          isDeviceDisconnected:
-                              status == DeviceConnectionStatus.disconnected &&
-                              !_syncBannerDismissed,
-                          isDeviceConnecting:
-                              status == DeviceConnectionStatus.connecting,
-                          onViewAll: () => Navigator.of(context).push<void>(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const SessionsHistoryPage(),
-                            ),
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 300,
+                  child: ModeControlCard(
+                    selectedMode: _selectedMode,
+                    selectedPostureTiming: _selectedPostureTiming,
+                    selectedDifficulty: _selectedDifficulty,
+                    onModeSelected: (mode) {
+                      setState(() => _selectedMode = mode);
+                      _pendingMode = mode;
+                      _pendingModeTimer?.cancel();
+                      // IDLE guard has no timer: device won't confirm IDLE while a
+                      // live session is active, so we hold the guard until the user
+                      // explicitly picks a different mode (which overwrites _pendingMode).
+                      // For posture/therapy, a 4s safety timer is enough because those
+                      // modes are actually confirmed by the device quickly.
+                      if (mode != ModeControlType.track) {
+                        _pendingModeTimer = Timer(_kPendingTimeout, () {
+                          _pendingMode = null;
+                          _pendingModeTimer = null;
+                        });
+                      }
+                      _stopTherapyCountdown();
+                      unawaited(
+                        _syncModeControlToDevice(
+                          mode: mode,
+                          postureTiming: _selectedPostureTiming,
+                          therapyDurationMinutes: _therapyDurationMinutes,
+                          difficultyDegrees: _selectedDifficulty,
+                        ),
+                      );
+                    },
+                    onPostureTimingSelected: (timing) {
+                      setState(() => _selectedPostureTiming = timing);
+                      _pendingPostureTiming = timing;
+                      _pendingPostureTimingTimer?.cancel();
+                      _pendingPostureTimingTimer = Timer(_kPendingTimeout, () {
+                        _pendingPostureTiming = null;
+                        _pendingPostureTimingTimer = null;
+                      });
+                      unawaited(
+                        _syncModeControlToDevice(
+                          mode: _selectedMode,
+                          postureTiming: timing,
+                          therapyDurationMinutes: _therapyDurationMinutes,
+                          difficultyDegrees: _selectedDifficulty,
+                        ),
+                      );
+                    },
+                    onDifficultySelected: (difficulty) {
+                      setState(() => _selectedDifficulty = difficulty);
+                      _pendingDifficulty = difficulty;
+                      _pendingDifficultyTimer?.cancel();
+                      _pendingDifficultyTimer = Timer(_kPendingTimeout, () {
+                        _pendingDifficulty = null;
+                        _pendingDifficultyTimer = null;
+                      });
+                      unawaited(
+                        _syncModeControlToDevice(
+                          mode: _selectedMode,
+                          postureTiming: _selectedPostureTiming,
+                          therapyDurationMinutes: _therapyDurationMinutes,
+                          difficultyDegrees: difficulty,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 350,
+                  child: QuickModesSection(
+                    modes: _quickModes,
+                    onViewAll: () => _showAllModesSheet(context),
+                    onModeTap: widget.onNavigateToPage,
+                    onTherapyModeTap: widget.onOpenTherapy,
+                    onTrainingModeTap: widget.onOpenTraining,
+                    onMeditationModeTap: widget.onOpenMeditation,
+                  ),
+                ),
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 400,
+                  child: CalibrationCard(
+                    onCalibratePressed: () async {
+                      if (_deviceService.connectionStatus.value !=
+                          DeviceConnectionStatus.connected) {
+                        await showPodDisconnectedDialog(context);
+                        return;
+                      }
+                      final result = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute<bool>(
+                          builder: (_) => CalibrationManagerPage(
+                            deviceService: _deviceService,
                           ),
-                          onSessionTap: (session) =>
-                              showSessionDetailSheet(context, session: session),
-                          onSyncNow: () => unawaited(_handleSyncNow()),
-                        );
-                      },
-                    );
-                  },
+                        ),
+                      );
+                      if (!mounted) return;
+                      if (result == true) {
+                        widget.onNavigateToPage(0);
+                      }
+                    },
+                  ),
                 ),
-              ),
-            ],
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 500,
+                  child: ValueListenableBuilder<DeviceConnectionStatus>(
+                    valueListenable: _deviceService.connectionStatus,
+                    builder: (context, status, _) {
+                      return ValueListenableBuilder<bool>(
+                        valueListenable: _deviceManager.isSyncing,
+                        builder: (context, isSyncing, _) {
+                          return RecentSessionsCard(
+                            sessions: _sessionsWithLiveDisplayDuration(),
+                            isLoading: _isLoadingOfflineSessions,
+                            isSyncing: isSyncing,
+                            isDeviceDisconnected:
+                            status == DeviceConnectionStatus.disconnected &&
+                                !_syncBannerDismissed,
+                            isDeviceConnecting:
+                            status == DeviceConnectionStatus.connecting,
+                            onViewAll: () => Navigator.of(context).push<void>(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const SessionsHistoryPage(),
+                              ),
+                            ),
+                            onSessionTap: (session) =>
+                                showSessionDetailSheet(context, session: session),
+                            onSyncNow: () => unawaited(_handleSyncNow()),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// Pull-to-refresh handler for the home dashboard.
+  /// - Disconnected: reuses the existing connect flow (same as the "Sync
+  ///   Now" banner button) to find and connect the paired pod.
+  /// - Already connected: triggers an on-demand backlog sync so any
+  ///   sessions stored on the device land in the app/Supabase.
+  Future<void> _handlePullToRefresh() async {
+    if (!mounted) return;
+
+    final wasAlreadyConnected =
+        _deviceService.connectionStatus.value == DeviceConnectionStatus.connected;
+
+    if (wasAlreadyConnected) {
+      setState(() => _pullConnectPhase = PullConnectPhase.syncing);
+      try {
+        await _deviceManager.requestManualSync();
+        if (!mounted) return;
+        setState(() => _pullConnectPhase = PullConnectPhase.synced);
+        await Future.delayed(const Duration(milliseconds: 900));
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _pullConnectPhase = PullConnectPhase.failed);
+        await Future.delayed(const Duration(seconds: 2));
+      }
+      if (!mounted) return;
+      setState(() => _pullConnectPhase = PullConnectPhase.idle);
+      return;
+    }
+
+    setState(() => _pullConnectPhase = PullConnectPhase.connecting);
+    await _handleSyncNow();
+
+    final isConnectedNow =
+        _deviceService.connectionStatus.value == DeviceConnectionStatus.connected;
+
+    if (!mounted) return;
+    if (isConnectedNow) {
+      setState(() => _pullConnectPhase = PullConnectPhase.connected);
+      await Future.delayed(const Duration(milliseconds: 900));
+    } else {
+      setState(() => _pullConnectPhase = PullConnectPhase.failed);
+      await Future.delayed(const Duration(seconds: 2));
+    }
+
+    if (!mounted) return;
+    setState(() => _pullConnectPhase = PullConnectPhase.idle);
   }
 
   Future<void> _handleSyncNow() async {
@@ -2427,7 +2492,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         const SnackBar(
           content: Text(
             'Bluetooth connection cancelled. '
-            'Tap the connect button when ready.',
+                'Tap the connect button when ready.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -2702,5 +2767,3 @@ class _AllModesSheetItem extends StatelessWidget {
     );
   }
 }
-
-

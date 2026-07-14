@@ -1,4 +1,3 @@
-import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter/material.dart';

@@ -106,12 +106,6 @@ class _TrainingPageState extends State<TrainingPage>
     }
   }
 
-  int _levelToDegrees(String level) => switch (level) {
-    'Basic'        => 45,
-    'Intermediate' => 30,
-    _              => 20, // Advanced
-  };
-
   void _applyDefaultsForLevel(String level) {
     switch (level) {
       case 'Basic':
