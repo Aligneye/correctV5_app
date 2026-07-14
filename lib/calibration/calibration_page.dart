@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:lottie/lottie.dart';
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/services/angle_history_service.dart';
+import 'package:correctv1/services/calibration_profile_sync_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -62,6 +63,7 @@ class _CalibrationPageState extends State<CalibrationPage>
   // Result details from DONE packet
   int _calibrationQuality = 0;
   String _failReason = '';
+  PostureReading? _lastDoneReading;
 
   // Wall-clock anchor for smooth progress when BLE packets are sparse
   DateTime? _getReadyStartedAt;
@@ -183,9 +185,10 @@ class _CalibrationPageState extends State<CalibrationPage>
     // time. The old guard (stage != starting && elapsed > 2000ms) caused the UI
     // to stick on "Starting" forever when calibration failed in under 2 seconds.
     if (reading.calibrationResult.isNotEmpty && _startRequestedAt != null) {
-      // Capture quality score and fail reason before transitioning
+      // Capture quality score, fail reason, and full reading for Supabase sync
       _calibrationQuality = reading.calibrationQuality;
       _failReason = reading.calibrationFailReason;
+      _lastDoneReading = reading;
       _handleCalibrationResult(reading.calibrationResult == 'complete');
       return;
     }
@@ -241,6 +244,16 @@ class _CalibrationPageState extends State<CalibrationPage>
       AngleHistoryService().setReferenceAngle(
         widget.deviceService.currentAngle,
       );
+      // Sync profile data to Supabase fire-and-forget (non-blocking).
+      final doneReading = _lastDoneReading;
+      if (doneReading != null) {
+        unawaited(
+          CalibrationProfileSyncService.saveProfile(
+            profileName: _profileName,
+            reading: doneReading,
+          ),
+        );
+      }
       _successBarController.forward();
 
       _successAutoCloseTimer?.cancel();
