@@ -46,14 +46,15 @@ class PostureGaugeCard extends StatelessWidget {
               height: 220,
               width: 220,
               child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 600),
-                curve: Curves.easeOutCubic,
+                duration: const Duration(milliseconds: 130),
+                curve: Curves.linear,
                 tween: Tween<double>(end: clampedAngle),
                 builder: (context, value, child) {
                   return CustomPaint(
                     painter: PostureGaugePainter(
                       angle: value,
                       accentColor: accentColor,
+                      difficultyDeg: difficultyDeg,
                     ),
                   );
                 },
@@ -120,8 +121,13 @@ class PostureGaugeCard extends StatelessWidget {
 class PostureGaugePainter extends CustomPainter {
   final double angle;
   final Color accentColor;
+  final int difficultyDeg;
 
-  PostureGaugePainter({required this.angle, required this.accentColor});
+  PostureGaugePainter({
+    required this.angle,
+    required this.accentColor,
+    required this.difficultyDeg,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -237,6 +243,36 @@ class PostureGaugePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );
+    // Draw red threshold marker at the difficulty angle (bad-posture cutoff)
+    final thresholdRad = difficultyDeg.abs() * math.pi / 180.0;
+    final thresholdAngle = startAngle + thresholdRad;
+    final outerRadius = radius + strokeWidth / 2 + 10;
+    final thresholdPoint = Offset(
+      center.dx + outerRadius * math.cos(thresholdAngle),
+      center.dy + outerRadius * math.sin(thresholdAngle),
+    );
+    final trianglePath = Path();
+    const triSize = 9.0;
+    final dirX = math.cos(thresholdAngle);
+    final dirY = math.sin(thresholdAngle);
+    final tipX = thresholdPoint.dx - dirX * (triSize * 0.6);
+    final tipY = thresholdPoint.dy - dirY * (triSize * 0.6);
+    final baseX = thresholdPoint.dx + dirX * (triSize * 0.6);
+    final baseY = thresholdPoint.dy + dirY * (triSize * 0.6);
+    final perpX = -dirY * triSize * 0.6;
+    final perpY = dirX * triSize * 0.6;
+
+    trianglePath.moveTo(tipX, tipY);
+    trianglePath.lineTo(baseX + perpX, baseY + perpY);
+    trianglePath.lineTo(baseX - perpX, baseY - perpY);
+    trianglePath.close();
+
+    canvas.drawPath(
+      trianglePath,
+      Paint()
+        ..color = AppTheme.destructive
+        ..style = PaintingStyle.fill,
+    );
 
     // Draw angle value in center (as integer)
     final valuePainter = TextPainter(
@@ -283,6 +319,8 @@ class PostureGaugePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
     return oldDelegate is PostureGaugePainter &&
-        (oldDelegate.angle != angle || oldDelegate.accentColor != accentColor);
+        (oldDelegate.angle != angle ||
+            oldDelegate.accentColor != accentColor ||
+            oldDelegate.difficultyDeg != difficultyDeg);
   }
 }

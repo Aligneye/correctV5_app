@@ -177,6 +177,47 @@ class DeviceManager {
     }
   }
 
+  /// Manually kicks off a backlog sync on demand — e.g. from a pull-to-
+  /// refresh gesture on the home screen when the device is already
+  /// connected. No-ops if not connected or a live session currently owns
+  /// the link (same deferral rule as the automatic reconnect-triggered
+  /// sync). Awaits until the sync actually finishes (or times out) so the
+  /// caller can show a refresh spinner for the real duration of the sync.
+  Future<void> requestManualSync() async {
+    if (_btManager.deviceService.connectionStatus.value !=
+        DeviceConnectionStatus.connected) {
+      debugPrint('DeviceManager: requestManualSync ignored, not connected');
+      return;
+    }
+    if (activeSessionId.value != null) {
+      debugPrint(
+        'DeviceManager: requestManualSync ignored, live session in progress',
+      );
+      return;
+    }
+
+    await _startSync();
+
+    if (isSyncing.value) {
+      final completer = Completer<void>();
+      void listener() {
+        if (!isSyncing.value && !completer.isCompleted) {
+          completer.complete();
+        }
+      }
+
+      isSyncing.addListener(listener);
+      try {
+        await completer.future.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {},
+        );
+      } finally {
+        isSyncing.removeListener(listener);
+      }
+    }
+  }
+
   Future<void> _startSync() async {
     await _teardownSync();
 
