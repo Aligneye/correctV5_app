@@ -515,8 +515,9 @@ class _HomeDashboardState extends State<HomeDashboard>
       }
 
       if (isLiveMode) {
+        final hadFrame = _liveDisplayHasFrame;
         _snapLiveSessionDuration(reading);
-        needsRebuild = true;
+        if (!hadFrame) needsRebuild = true;
       } else {
         final wasTicking = _liveSessionTicker != null;
         _stopLiveSessionTicker(

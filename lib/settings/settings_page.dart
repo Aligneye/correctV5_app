@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:correctv1/bluetooth/device_connect_page.dart';
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
@@ -488,36 +488,89 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          Divider(height: 1, thickness: 1, color: scheme.outline),
-          const SizedBox(height: 14),
-          ValueListenableBuilder<String>(
+
+          const SizedBox(height: 12),
+          ValueListenableBuilder<DeviceConnectionStatus>(
             valueListenable:
-                BluetoothServiceManager().deviceService.activeProfileName,
-            builder: (context, profile, _) {
-              return _InfoRow(
-                label: 'Active Profile',
-                value: profile.isNotEmpty ? profile : '-',
+            BluetoothServiceManager().deviceService.connectionStatus,
+            builder: (context, status, _) {
+              final isConnected = status == DeviceConnectionStatus.connected;
+              return SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () async {
+                    if (isConnected) {
+                      await BluetoothServiceManager().disconnectByUser();
+                    } else {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const DeviceConnectPage(),
+                        ),
+                      );
+                    }
+                  },
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor:
+                      isConnected ? AppTheme.destructive : AppTheme.goodPostureEnd,
+                      foregroundColor: Colors.white,
+                      side: BorderSide(
+                        color: isConnected ? AppTheme.destructive : AppTheme.goodPostureEnd,
+                      ),
+                    ),
+                  child: Text(isConnected ? 'Disconnect' : 'Connect'),
+                ),
               );
             },
           ),
+          const SizedBox(height: 18),
+          Divider(height: 1, thickness: 1, color: scheme.outline),
           const SizedBox(height: 14),
-          ValueListenableBuilder<DeviceInfo?>(
-            valueListenable: BluetoothServiceManager().deviceService.deviceInfo,
-            builder: (context, info, _) {
+          ValueListenableBuilder<DeviceConnectionStatus>(
+            valueListenable:
+            BluetoothServiceManager().deviceService.connectionStatus,
+            builder: (context, status, _) {
+              final isConnected = status == DeviceConnectionStatus.connected;
+              if (!isConnected) return const SizedBox.shrink();
               return Column(
                 children: [
-                  _InfoRow(
-                    label: 'Firmware Version',
-                    value: info != null ? 'v${info.firmwareVersion}' : '-',
+                  ValueListenableBuilder<String>(
+                    valueListenable: BluetoothServiceManager()
+                        .deviceService
+                        .activeProfileName,
+                    builder: (context, profile, _) {
+                      return _InfoRow(
+                        label: 'Active Profile',
+                        value: profile.isNotEmpty ? profile : '-',
+                      );
+                    },
                   ),
                   const SizedBox(height: 14),
-                  _InfoRow(
-                    label: 'Hardware Revision',
-                    value: info?.hardwareRevision ?? '-',
+                  ValueListenableBuilder<DeviceInfo?>(
+                    valueListenable:
+                    BluetoothServiceManager().deviceService.deviceInfo,
+                    builder: (context, info, _) {
+                      return Column(
+                        children: [
+                          _InfoRow(
+                            label: 'Firmware Version',
+                            value: info != null
+                                ? 'v${info.firmwareVersion}'
+                                : '-',
+                          ),
+                          const SizedBox(height: 14),
+                          _InfoRow(
+                            label: 'Hardware Revision',
+                            value: info?.hardwareRevision ?? '-',
+                          ),
+                          const SizedBox(height: 14),
+                          _InfoRow(
+                            label: 'Serial Number',
+                            value: info?.serial ?? '-',
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  const SizedBox(height: 14),
-                  _InfoRow(label: 'Serial Number', value: info?.serial ?? '-'),
                 ],
               );
             },
