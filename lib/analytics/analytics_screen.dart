@@ -190,7 +190,8 @@ BoxDecoration _cardDecoration(ColorScheme scheme, {double radius = 16}) =>
 // ─── Analytics Screen ────────────────────────────────────────────────────────
 
 class AnalyticsScreen extends StatefulWidget {
-  const AnalyticsScreen({super.key});
+  final VoidCallback? onBack;
+  const AnalyticsScreen({super.key, this.onBack});
 
   @override
   State<AnalyticsScreen> createState() => _AnalyticsScreenState();
@@ -682,7 +683,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         children: [
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.maybePop(context),
+            onTap: () {
+              if (widget.onBack != null) {
+                widget.onBack!();
+              } else {
+                Navigator.of(context).pop();
+              }
+            },
             child: Padding(
               padding: const EdgeInsets.only(bottom: 24),
               child: Icon(

@@ -10,10 +10,11 @@ const _kBlueLight = Color(0xFFEFF6FF);
 const _kGreen = AppTheme.successText;
 const _kRed = AppTheme.destructive;
 
-enum _Filter { all, posture, therapy }
+enum SessionFilter { all, posture, therapy }
 
 class SessionsHistoryPage extends StatefulWidget {
-  const SessionsHistoryPage({super.key});
+  final SessionFilter initialFilter;
+  const SessionsHistoryPage({super.key, this.initialFilter = SessionFilter.all});
 
   @override
   State<SessionsHistoryPage> createState() => _SessionsHistoryPageState();
@@ -26,7 +27,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
   List<SessionData> _sessions = const <SessionData>[];
   bool _isLoading = true;
   int _lastSyncTick = 0;
-  _Filter _filter = _Filter.all;
+  late SessionFilter _filter = widget.initialFilter;
 
   @override
   void initState() {
@@ -87,11 +88,11 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
 
   List<SessionData> get _filtered {
     switch (_filter) {
-      case _Filter.posture:
+      case SessionFilter.posture:
         return _sessions.where((s) => s.type == SessionType.posture).toList();
-      case _Filter.therapy:
+      case SessionFilter.therapy:
         return _sessions.where((s) => s.type == SessionType.therapy).toList();
-      case _Filter.all:
+      case SessionFilter.all:
         return _sessions;
     }
   }
@@ -212,7 +213,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
   Widget _buildFilterRow() {
     final scheme = Theme.of(context).colorScheme;
 
-    Widget chip(String label, _Filter value, {IconData? icon}) {
+    Widget chip(String label, SessionFilter value, {IconData? icon}) {
       final selected = _filter == value;
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -269,15 +270,15 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Row(
         children: [
-          chip('All', _Filter.all),
+          chip('All', SessionFilter.all),
           const SizedBox(width: 8),
           chip(
             'Posture',
-            _Filter.posture,
+            SessionFilter.posture,
             icon: Icons.accessibility_new_rounded,
           ),
           const SizedBox(width: 8),
-          chip('Therapy', _Filter.therapy, icon: Icons.graphic_eq),
+          chip('Therapy', SessionFilter.therapy, icon: Icons.graphic_eq),
         ],
       ),
     );
@@ -286,9 +287,9 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
   Widget _buildEmpty() {
     final scheme = Theme.of(context).colorScheme;
     final filterLabel = switch (_filter) {
-      _Filter.posture => 'posture',
-      _Filter.therapy => 'therapy',
-      _Filter.all => null,
+      SessionFilter.posture => 'posture',
+      SessionFilter.therapy => 'therapy',
+      SessionFilter.all => null,
     };
 
     return ListView(

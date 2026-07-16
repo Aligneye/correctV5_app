@@ -11,7 +11,7 @@ import 'package:correctv1/services/therapy_pattern_names.dart';
 /// the source of truth for reads; background sync pushes data to Supabase.
 class SessionRepository {
   SessionRepository({SupabaseClient? client})
-    : _client = client ?? Supabase.instance.client;
+      : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -31,9 +31,9 @@ class SessionRepository {
   /// period ∈ {'week', 'month', 'all'}.
   /// Unknown periods fall back to 'all' so the UI never breaks on a typo.
   Future<List<SessionData>> fetchByPeriod(
-    String period, {
-    String? liveSessionId,
-  }) async {
+      String period, {
+        String? liveSessionId,
+      }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return [];
 
@@ -210,8 +210,8 @@ class SessionRepository {
       }
       // Missing day — try freeze
       final alreadyFrozen = freezeUsedDays.any(
-        (d) =>
-            d.year == cursor.year &&
+            (d) =>
+        d.year == cursor.year &&
             d.month == cursor.month &&
             d.day == cursor.day,
       );
@@ -280,8 +280,8 @@ class SessionRepository {
       final freezeDayStrings = freezeUsedDays
           .map(
             (d) =>
-                '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}',
-          )
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}',
+      )
           .toList();
 
       await _client.from('user_streaks').upsert({
@@ -289,7 +289,7 @@ class SessionRepository {
         'current_streak': currentStreak,
         'highest_streak': newHighest,
         'last_active_day':
-            '${todayStreakDay.year.toString().padLeft(4, '0')}-${todayStreakDay.month.toString().padLeft(2, '0')}-${todayStreakDay.day.toString().padLeft(2, '0')}',
+        '${todayStreakDay.year.toString().padLeft(4, '0')}-${todayStreakDay.month.toString().padLeft(2, '0')}-${todayStreakDay.day.toString().padLeft(2, '0')}',
         'freeze_tokens': freezeTokens,
         'freeze_used_days': freezeDayStrings,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
@@ -310,15 +310,26 @@ class SessionRepository {
   }
 
   // ── XP System ──────────────────────────────────────────────────────────────
+  //
+  // Dual-pool leveling:
+  //  - Every level needs [kXpPerLevel] (600) XP total, split into two pools:
+  //    [kPoolXpPerLevel] (300) from Therapy + 300 from Training.
+  //  - Both modes earn [kXpPerMinute] (10) XP per minute, min 5 XP/session.
+  //  - Level up ONLY when BOTH pools are full. Extra XP earned in one pool
+  //    carries forward into that same pool for the next level.
 
-  static int _xpForLevel(int level) => level * level * 100;
+  static const int kXpPerMinute = 10;
+  static const int kPoolXpPerLevel = 300;
+  static const int kXpPerLevel = kPoolXpPerLevel * 2; // 600
 
-  static int _levelFromXp(int totalXp) {
-    int level = 1;
-    while (_xpForLevel(level + 1) <= totalXp) {
-      level++;
-    }
-    return level;
+  /// Total XP required to *reach* [level] (level 1 => 0).
+  static int _xpForLevel(int level) => (level - 1) * kXpPerLevel;
+
+  /// XP for a single session at 10 XP/min, minimum 5 XP.
+  static int xpForDuration(int durationSec) {
+    if (durationSec <= 0) return 0;
+    final xp = (durationSec ~/ 60) * kXpPerMinute;
+    return xp < 5 ? 5 : xp;
   }
 
   Future<XpStats> fetchXpStats() async {
@@ -333,42 +344,60 @@ class SessionRepository {
       now.add(const Duration(days: 1)),
     );
 
-    int totalXp = 0;
+    int therapyXpTotal = 0;
+    int trainingXpTotal = 0;
     for (final row in rows) {
       final dur = _asInt(row['duration_sec']);
       if (dur <= 0) continue;
+      final xp = xpForDuration(dur);
       final type = row['type']?.toString() ?? '';
-      final minutes = dur ~/ 60;
-      int xp;
       if (type == 'therapy') {
-        xp = minutes * 12;
+        therapyXpTotal += xp;
       } else {
-        xp = minutes * 8;
+        trainingXpTotal += xp;
       }
-      if (xp < 5) xp = 5;
-      totalXp += xp;
     }
 
-    await _syncXpToSupabase(totalXp: totalXp);
+    final totalXp = therapyXpTotal + trainingXpTotal;
 
-    final level = _levelFromXp(totalXp);
-    final xpForCurrent = _xpForLevel(level);
-    final xpForNext = _xpForLevel(level + 1);
+    // Level up only when BOTH pools have banked 300 XP each.
+    final therapyLevelsDone = therapyXpTotal ~/ kPoolXpPerLevel;
+    final trainingLevelsDone = trainingXpTotal ~/ kPoolXpPerLevel;
+    final completedLevels = therapyLevelsDone < trainingLevelsDone
+        ? therapyLevelsDone
+        : trainingLevelsDone;
+    final level = 1 + completedLevels;
+
+    // Progress inside the current level, clamped to the pool cap so an
+    // over-earned pool shows as "full" while the other catches up.
+    final therapyLevelXp = (therapyXpTotal - completedLevels * kPoolXpPerLevel)
+        .clamp(0, kPoolXpPerLevel)
+        .toInt();
+    final trainingLevelXp =
+    (trainingXpTotal - completedLevels * kPoolXpPerLevel)
+        .clamp(0, kPoolXpPerLevel)
+        .toInt();
+
+    await _syncXpToSupabase(totalXp: totalXp, level: level);
 
     return XpStats(
       totalXp: totalXp,
       currentLevel: level,
-      xpForCurrentLevel: xpForCurrent,
-      xpForNextLevel: xpForNext,
+      xpForCurrentLevel: _xpForLevel(level),
+      xpForNextLevel: _xpForLevel(level + 1),
+      therapyLevelXp: therapyLevelXp,
+      trainingLevelXp: trainingLevelXp,
     );
   }
 
-  Future<void> _syncXpToSupabase({required int totalXp}) async {
+  Future<void> _syncXpToSupabase({
+    required int totalXp,
+    required int level,
+  }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return;
 
     try {
-      final level = _levelFromXp(totalXp);
       await _client.from('user_xp').upsert({
         'user_id': userId,
         'total_xp': totalXp,
@@ -385,9 +414,9 @@ class SessionRepository {
   /// Returns day-states for the last [days] streak-days (oldest first).
   /// 0 = inactive, 1 = active, 2 = freeze-used.
   Future<List<int>> fetchStreakCalendar(
-    int days, {
-    List<DateTime> freezeUsedDays = const [],
-  }) async {
+      int days, {
+        List<DateTime> freezeUsedDays = const [],
+      }) async {
     final now = DateTime.now();
     final todayStreakDay = _streakDayOf(now);
     final windowStart = todayStreakDay.subtract(Duration(days: days - 1));
@@ -410,8 +439,8 @@ class SessionRepository {
       final day = windowStart.add(Duration(days: i));
       if (activeDays.contains(day)) return 1;
       final frozen = freezeUsedDays.any(
-        (d) =>
-            d.year == day.year && d.month == day.month && d.day == day.day,
+            (d) =>
+        d.year == day.year && d.month == day.month && d.day == day.day,
       );
       if (frozen) return 2;
       return 0;
@@ -436,11 +465,7 @@ class SessionRepository {
       if (ts != null) {
         activeDaySet.add(DateTime(ts.year, ts.month, ts.day));
       }
-      final type = row['type']?.toString() ?? '';
-      final minutes = dur ~/ 60;
-      int xp = type == 'therapy' ? minutes * 12 : minutes * 8;
-      if (xp < 5) xp = 5;
-      weekXp += xp;
+      weekXp += xpForDuration(dur);
     }
 
     return WeeklyRecap(
@@ -556,10 +581,10 @@ class SessionRepository {
   }
 
   Future<List<Map<String, dynamic>>> _fetchRowsBetween(
-    DateTime startInclusive,
-    DateTime endExclusive, {
-    String? typeFilter,
-  }) async {
+      DateTime startInclusive,
+      DateTime endExclusive, {
+        String? typeFilter,
+      }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return [];
 
@@ -602,10 +627,10 @@ class SessionRepository {
   }
 
   SessionData? _rowToSession(
-    Map<String, dynamic> row,
-    int index, {
-    String? liveSessionId,
-  }) {
+      Map<String, dynamic> row,
+      int index, {
+        String? liveSessionId,
+      }) {
     final typeStr = row['type']?.toString() ?? '';
     final isPosture = typeStr == 'posture';
     final type = isPosture ? SessionType.posture : SessionType.therapy;
@@ -635,11 +660,11 @@ class SessionRepository {
     final therapyPatternEvents = isPosture
         ? null
         : _parseTherapyPatternEvents(
-            row['therapy_pattern_events'],
-            therapyPatterns,
-            pattern,
-            durationSec,
-          );
+      row['therapy_pattern_events'],
+      therapyPatterns,
+      pattern,
+      durationSec,
+    );
 
     return SessionData(
       id: index,
@@ -691,11 +716,11 @@ class SessionRepository {
   }
 
   List<TherapyPatternEvent>? _parseTherapyPatternEvents(
-    dynamic raw,
-    List<int>? fallbackPatterns,
-    int? singlePattern,
-    int durationSec,
-  ) {
+      dynamic raw,
+      List<int>? fallbackPatterns,
+      int? singlePattern,
+      int durationSec,
+      ) {
     if (raw is List) {
       final out = <TherapyPatternEvent>[];
       for (final entry in raw) {
@@ -721,7 +746,7 @@ class SessionRepository {
 
     final patterns =
         fallbackPatterns ??
-        (singlePattern == null ? null : <int>[singlePattern]);
+            (singlePattern == null ? null : <int>[singlePattern]);
     if (patterns == null || patterns.isEmpty) return null;
 
     final safeDuration = durationSec.clamp(0, 1 << 30).toInt();
@@ -765,8 +790,8 @@ class SessionRepository {
   }
 
   List<TherapyPatternEvent> _normalizeTherapyPatternEvents(
-    List<TherapyPatternEvent> events,
-  ) {
+      List<TherapyPatternEvent> events,
+      ) {
     final normalized = <TherapyPatternEvent>[];
     for (final event in events) {
       final pattern = therapyPatternIndexFromDeviceNumber(event.patternIndex);
@@ -783,9 +808,9 @@ class SessionRepository {
   }
 
   List<TherapyPatternEvent> _playedTherapyPatternEvents(
-    List<TherapyPatternEvent> events,
-    int durationSec,
-  ) {
+      List<TherapyPatternEvent> events,
+      int durationSec,
+      ) {
     final safeDuration = durationSec.clamp(0, 1 << 30).toInt();
     final played = <TherapyPatternEvent>[];
     for (final event in events) {
@@ -921,6 +946,8 @@ class XpStats {
     required this.currentLevel,
     required this.xpForCurrentLevel,
     required this.xpForNextLevel,
+    this.therapyLevelXp = 0,
+    this.trainingLevelXp = 0,
   });
 
   final int totalXp;
@@ -928,10 +955,26 @@ class XpStats {
   final int xpForCurrentLevel;
   final int xpForNextLevel;
 
-  int get xpProgress => totalXp - xpForCurrentLevel;
-  int get xpNeeded => xpForNextLevel - xpForCurrentLevel;
+  /// XP banked toward the current level's Therapy pool (0..300).
+  final int therapyLevelXp;
+
+  /// XP banked toward the current level's Training pool (0..300).
+  final int trainingLevelXp;
+
+  int get xpProgress => therapyLevelXp + trainingLevelXp;
+  int get xpNeeded => SessionRepository.kXpPerLevel;
   double get levelProgress =>
       xpNeeded <= 0 ? 1.0 : (xpProgress / xpNeeded).clamp(0.0, 1.0);
+
+  double get therapyPoolProgress =>
+      (therapyLevelXp / SessionRepository.kPoolXpPerLevel).clamp(0.0, 1.0);
+  double get trainingPoolProgress =>
+      (trainingLevelXp / SessionRepository.kPoolXpPerLevel).clamp(0.0, 1.0);
+
+  bool get therapyPoolFull =>
+      therapyLevelXp >= SessionRepository.kPoolXpPerLevel;
+  bool get trainingPoolFull =>
+      trainingLevelXp >= SessionRepository.kPoolXpPerLevel;
 }
 
 class WeeklyRecap {

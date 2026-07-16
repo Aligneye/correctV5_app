@@ -246,21 +246,23 @@ class PostureGaugePainter extends CustomPainter {
     // Draw red threshold marker at the difficulty angle (bad-posture cutoff)
     final thresholdRad = difficultyDeg.abs() * math.pi / 180.0;
     final thresholdAngle = startAngle + thresholdRad;
-    final outerRadius = radius + strokeWidth / 2 + 10;
+    final innerRadius = radius - strokeWidth / 2 - 10;
     final thresholdPoint = Offset(
-      center.dx + outerRadius * math.cos(thresholdAngle),
-      center.dy + outerRadius * math.sin(thresholdAngle),
+      center.dx + innerRadius * math.cos(thresholdAngle),
+      center.dy + innerRadius * math.sin(thresholdAngle),
     );
     final trianglePath = Path();
-    const triSize = 9.0;
+    const triSize = 10.0;
     final dirX = math.cos(thresholdAngle);
     final dirY = math.sin(thresholdAngle);
-    final tipX = thresholdPoint.dx - dirX * (triSize * 0.6);
-    final tipY = thresholdPoint.dy - dirY * (triSize * 0.6);
-    final baseX = thresholdPoint.dx + dirX * (triSize * 0.6);
-    final baseY = thresholdPoint.dy + dirY * (triSize * 0.6);
-    final perpX = -dirY * triSize * 0.6;
-    final perpY = dirX * triSize * 0.6;
+    final halfBase = triSize / 2;
+    final halfHeight = (triSize * math.sqrt(3) / 2) / 2;
+    final tipX = thresholdPoint.dx - dirX * halfHeight;
+    final tipY = thresholdPoint.dy - dirY * halfHeight;
+    final baseX = thresholdPoint.dx + dirX * halfHeight;
+    final baseY = thresholdPoint.dy + dirY * halfHeight;
+    final perpX = -dirY * halfBase;
+    final perpY = dirX * halfBase;
 
     trianglePath.moveTo(tipX, tipY);
     trianglePath.lineTo(baseX + perpX, baseY + perpY);
