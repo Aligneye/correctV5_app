@@ -8,10 +8,10 @@ import 'package:correctv1/services/session_repository.dart';
 import '../../analytics/analytics_screen.dart';
 
 void showXpDetailSheet(
-  BuildContext context, {
-  required XpStats xpStats,
-  required SessionRepository repository,
-}) {
+    BuildContext context, {
+      required XpStats xpStats,
+      required SessionRepository repository,
+    }) {
   HapticFeedback.lightImpact();
   showModalBottomSheet<void>(
     context: context,
@@ -68,15 +68,15 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
       final rows = sessions
           .take(8)
           .map((s) {
-            final xp = _xpForSession(s);
-            return _SessionXpRow(
-              label: s.type == SessionType.posture ? 'Training' : 'Therapy',
-              duration: s.duration,
-              xp: xp,
-              isTraining: s.type == SessionType.posture,
-              timeLabel: s.time,
-            );
-          })
+        final xp = _xpForSession(s);
+        return _SessionXpRow(
+          label: s.type == SessionType.posture ? 'Training' : 'Therapy',
+          duration: s.duration,
+          xp: xp,
+          isTraining: s.type == SessionType.posture,
+          timeLabel: s.time,
+        );
+      })
           .where((r) => r.xp > 0)
           .toList();
       if (!mounted) return;
@@ -93,8 +93,7 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
   }
 
   static int _xpForSession(SessionData s) {
-    final minutes = s.durationSec ~/ 60;
-    final xp = s.type == SessionType.posture ? minutes * 8 : minutes * 12;
+    final xp = (s.durationSec ~/ 60) * SessionRepository.kXpPerMinute;
     return math.max(xp, 5);
   }
 
@@ -106,7 +105,7 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
     const accentStart = Color(0xFFA855F7);
     const accentEnd = Color(0xFFEC4899);
 
-    final xpToNext = stats.xpForNextLevel - stats.totalXp;
+    final xpToNext = (stats.xpNeeded - stats.xpProgress).clamp(0, stats.xpNeeded);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.75,
@@ -184,7 +183,7 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
                                   ),
                                   decoration: BoxDecoration(
                                     color:
-                                        Colors.white.withValues(alpha: 0.22),
+                                    Colors.white.withValues(alpha: 0.22),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: const Text(
@@ -236,7 +235,7 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
                       ],
                     ),
                     const SizedBox(height: 14),
-                    // Progress bar
+                    // Dual pool progress — level up when BOTH bars fill.
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -261,38 +260,33 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         AnimatedBuilder(
                           animation: _barAnim,
                           builder: (context, _) {
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: Stack(
-                                children: [
-                                  Container(
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white
-                                          .withValues(alpha: 0.22),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                  ),
-                                  FractionallySizedBox(
-                                    widthFactor:
-                                        (stats.levelProgress * _barAnim.value)
-                                            .clamp(0.0, 1.0),
-                                    child: Container(
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.92),
-                                        borderRadius:
-                                            BorderRadius.circular(6),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _PoolBar(
+                                  label: 'Therapy',
+                                  currentXp: stats.therapyLevelXp,
+                                  capXp:
+                                  SessionRepository.kPoolXpPerLevel,
+                                  progress: stats.therapyPoolProgress *
+                                      _barAnim.value,
+                                  isFull: stats.therapyPoolFull,
+                                ),
+                                const SizedBox(height: 8),
+                                _PoolBar(
+                                  label: 'Training',
+                                  currentXp: stats.trainingLevelXp,
+                                  capXp:
+                                  SessionRepository.kPoolXpPerLevel,
+                                  progress: stats.trainingPoolProgress *
+                                      _barAnim.value,
+                                  isFull: stats.trainingPoolFull,
+                                ),
+                              ],
                             );
                           },
                         ),
@@ -336,7 +330,7 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
                       )
                     else
                       ..._recentXp!.map(
-                        (row) => _SessionXpTile(row: row),
+                            (row) => _SessionXpTile(row: row),
                       ),
                   ],
                 ),
@@ -345,6 +339,90 @@ class _XpDetailSheetState extends State<_XpDetailSheet>
           ),
         );
       },
+    );
+  }
+}
+
+class _PoolBar extends StatelessWidget {
+  const _PoolBar({
+    required this.label,
+    required this.currentXp,
+    required this.capXp,
+    required this.progress,
+    required this.isFull,
+  });
+
+  final String label;
+  final int currentXp;
+  final int capXp;
+  final double progress;
+  final bool isFull;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                    color: Colors.white.withValues(alpha: 0.85),
+                  ),
+                ),
+                if (isFull) ...[
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    size: 12,
+                    color: Colors.white,
+                  ),
+                ],
+              ],
+            ),
+            Text(
+              '$currentXp / $capXp',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Colors.white.withValues(alpha: 0.80),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(5),
+          child: Stack(
+            children: [
+              Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+              FractionallySizedBox(
+                widthFactor: progress.clamp(0.0, 1.0),
+                child: Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -382,21 +460,21 @@ class _XpRateCard extends StatelessWidget {
               _RatePill(
                 icon: Icons.accessibility_new_rounded,
                 label: 'Training',
-                rate: '8 XP / min',
+                rate: '10 XP / min',
                 color: const Color(0xFF10B981),
               ),
               const SizedBox(width: 10),
               _RatePill(
                 icon: Icons.graphic_eq_rounded,
                 label: 'Therapy',
-                rate: '12 XP / min',
+                rate: '10 XP / min',
                 color: const Color(0xFF06B6D4),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            'Min 5 XP per session. Level = √(totalXP / 100) rounded down.',
+            'Min 5 XP per session. Every level needs 600 XP — 300 from Therapy + 300 from Training. Level up only when both are complete; extra XP carries over.',
             style: TextStyle(
               fontSize: 10,
               color: scheme.onSurfaceVariant,
@@ -472,7 +550,7 @@ class _SessionXpTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color =
-        row.isTraining ? const Color(0xFF10B981) : const Color(0xFF06B6D4);
+    row.isTraining ? const Color(0xFF10B981) : const Color(0xFF06B6D4);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),

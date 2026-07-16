@@ -1174,7 +1174,7 @@ class AlignEyeDeviceService {
   Future<bool> getProfiles() async {
     if (connectionStatus.value != DeviceConnectionStatus.connected)
       return false;
-    return _writeJsonCommand({'cmd': 'GET_PROFILES'});
+    return _writeJsonCommand({'cmd': 'GET_CALIBRATION_PROFILE'});
   }
 
   Future<bool> getTherapyPlan() async {
@@ -1932,7 +1932,7 @@ class AlignEyeDeviceService {
 
       Future.delayed(const Duration(milliseconds: 500), () {
         if (connectionStatus.value == DeviceConnectionStatus.connected) {
-          getProfiles().then((_) => debugPrint('GET_PROFILES sent on connect'));
+          getProfiles().then((_) => debugPrint('GET_CALIBRATION_PROFILES sent on connect'));
           // GET_DEVICE_INFO is handled by home_page after 5s (with firmware check)
         }
       });

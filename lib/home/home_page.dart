@@ -14,7 +14,7 @@ import 'package:correctv1/home/ongoing_therapy_page.dart';
 import 'package:correctv1/home/therapy_page.dart';
 import 'package:correctv1/home/training_page.dart';
 import 'package:correctv1/analytics/analytics_screen.dart';
-import 'package:correctv1/sessions/sessions_history_page.dart';
+import 'package:correctv1/sessions/sessions_history_page.dart' show SessionsHistoryPage, SessionFilter;
 import 'package:correctv1/settings/settings_page.dart';
 import 'package:correctv1/components/nav_bar.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
@@ -33,6 +33,7 @@ import 'package:correctv1/home/widgets/connected_device_sheet.dart';
 import 'package:correctv1/home/widgets/mode_control_card.dart';
 import 'package:correctv1/home/widgets/quick_modes_section.dart';
 import 'package:correctv1/home/widgets/stats_summary_card.dart';
+import 'package:correctv1/home/widgets/surface_card.dart';
 import 'package:correctv1/home/widgets/streak_calendar_widget.dart';
 import 'package:correctv1/home/widgets/streak_detail_sheet.dart';
 import 'package:correctv1/home/widgets/xp_detail_sheet.dart';
@@ -74,7 +75,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         deviceService: _bluetoothManager.deviceService,
       ),
       const DiscoverPage(),
-      const AnalyticsScreen(),
+      AnalyticsScreen(onBack: () => _onItemTapped(0)),
       const SettingsPage(),
     ];
   }
@@ -122,9 +123,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _onItemTapped(int index) {
     final isAdjacent = (index - _currentIndex).abs() <= 1;
-    setState(() {
-      _currentIndex = index;
-    });
     if (isAdjacent) {
       _pageController.animateToPage(
         index,
@@ -1054,29 +1052,32 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   static StatItemData _lastSessionStatItem(
       List<SessionData> sessions,
-      bool isLoading,
-      ) {
+      bool isLoading, {
+      VoidCallback? onTap,
+      }) {
     const label = 'Last session';
 
     if (isLoading && sessions.isEmpty) {
-      return const StatItemData(
+      return StatItemData(
         value: '-',
         label: label,
         trendText: 'Loading...',
         icon: Icons.history_rounded,
         gradient: AppTheme.meditationGradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
     if (sessions.isEmpty) {
-      return const StatItemData(
+      return StatItemData(
         value: 'None',
         label: label,
         trendText: 'Do a session',
         icon: Icons.history_rounded,
         gradient: AppTheme.meditationGradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
@@ -1093,6 +1094,21 @@ class _HomeDashboardState extends State<HomeDashboard>
           ? AppTheme.trainingGradient
           : AppTheme.vibrationTherapyGradient,
       trendNeutral: true,
+      onTap: onTap,
+    );
+  }
+
+  static StatItemData _trainingTimeStatItem(TodayStats? stats, {VoidCallback? onTap}) {
+    return _durationStatItem(
+      stats: stats,
+      label: 'Training time',
+      icon: Icons.accessibility_new_rounded,
+      gradient: AppTheme.trainingGradient,
+      emptyCta: 'Do a training',
+      todaySec: stats?.todayPostureDurationSec ?? 0,
+      yesterdaySec: stats?.yesterdayPostureDurationSec ?? 0,
+      yesterdayHasData: stats?.yesterdayHasPostureData ?? false,
+      onTap: onTap,
     );
   }
 
@@ -1109,19 +1125,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  static StatItemData _trainingTimeStatItem(TodayStats? stats) {
-    return _durationStatItem(
-      stats: stats,
-      label: 'Training time',
-      icon: Icons.accessibility_new_rounded,
-      gradient: AppTheme.trainingGradient,
-      emptyCta: 'Do a training',
-      todaySec: stats?.todayPostureDurationSec ?? 0,
-      yesterdaySec: stats?.yesterdayPostureDurationSec ?? 0,
-      yesterdayHasData: stats?.yesterdayHasPostureData ?? false,
-    );
-  }
-
   static StatItemData _durationStatItem({
     required TodayStats? stats,
     required String label,
@@ -1131,6 +1134,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     required int todaySec,
     required int yesterdaySec,
     required bool yesterdayHasData,
+    VoidCallback? onTap,
   }) {
     if (stats == null) {
       return StatItemData(
@@ -1140,6 +1144,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         icon: icon,
         gradient: gradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
@@ -1152,6 +1157,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         icon: icon,
         gradient: gradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
@@ -1187,6 +1193,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       gradient: gradient,
       positiveTrend: positive,
       trendNeutral: neutral,
+      onTap: onTap,
     );
   }
 
@@ -1291,6 +1298,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   static const String _kXpTotal = 'xp_total';
   static const String _kXpLevel = 'xp_level';
   static const String _kXpLastLevel = 'xp_last_level';
+  static const String _kXpTherapyPool = 'xp_therapy_pool';
+  static const String _kXpTrainingPool = 'xp_training_pool';
   static const String _kWeeklyRecapLastShownWeek = 'weekly_recap_last_shown_week';
 
   Future<void> _persistStreakCache(StreakStats stats) async {
@@ -1327,6 +1336,8 @@ class _HomeDashboardState extends State<HomeDashboard>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_kXpTotal, stats.totalXp);
       await prefs.setInt(_kXpLevel, stats.currentLevel);
+      await prefs.setInt(_kXpTherapyPool, stats.therapyLevelXp);
+      await prefs.setInt(_kXpTrainingPool, stats.trainingLevelXp);
     } catch (e) {
       debugPrint('HomeDashboard: _persistXpCache error: $e');
     }
@@ -1337,16 +1348,20 @@ class _HomeDashboardState extends State<HomeDashboard>
       final prefs = await SharedPreferences.getInstance();
       final cachedLevel = prefs.getInt(_kXpLevel) ?? 1;
       final cachedTotal = prefs.getInt(_kXpTotal) ?? 0;
+      final cachedTherapy = prefs.getInt(_kXpTherapyPool) ?? 0;
+      final cachedTraining = prefs.getInt(_kXpTrainingPool) ?? 0;
       if (!mounted || _xpStats != null) return;
-      // Reconstruct minimal XpStats from cache
-      final xpForCurrent = cachedLevel * cachedLevel * 100;
-      final xpForNext = (cachedLevel + 1) * (cachedLevel + 1) * 100;
+      // Reconstruct minimal XpStats from cache (600 XP per level).
+      final xpForCurrent = (cachedLevel - 1) * SessionRepository.kXpPerLevel;
+      final xpForNext = cachedLevel * SessionRepository.kXpPerLevel;
       setState(() {
         _xpStats = XpStats(
           totalXp: cachedTotal,
           currentLevel: cachedLevel,
           xpForCurrentLevel: xpForCurrent,
           xpForNextLevel: xpForNext,
+          therapyLevelXp: cachedTherapy,
+          trainingLevelXp: cachedTraining,
         );
       });
     } catch (e) {
@@ -2227,12 +2242,15 @@ class _HomeDashboardState extends State<HomeDashboard>
                       _lastSessionStatItem(
                         _offlineSessions,
                         _isLoadingOfflineSessions,
+                        onTap: () => Navigator.of(context).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const SessionsHistoryPage(
+                              initialFilter: SessionFilter.posture,
+                            ),
+                          ),
+                        ),
                       ),
-                      _goodPostureStatItem(_todayStats),
                       _trainingTimeStatItem(_todayStats),
-                      _therapyTimeStatItem(_todayStats),
-                      _sessionsStatItem(_todayStats),
-                      _trackedTimeStatItem(_todayStats),
                     ],
                   ),
                 ),
@@ -2389,6 +2407,59 @@ class _HomeDashboardState extends State<HomeDashboard>
                         widget.onNavigateToPage(0);
                       }
                     },
+                  ),
+                ),
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 450,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _TherapyTimeTile(
+                          item: _sessionsStatItem(_todayStats),
+                          onTap: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SessionsHistoryPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _TherapyTimeTile(
+                          item: _goodPostureStatItem(_todayStats),
+                          onTap: () => widget.onNavigateToPage(2),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _kSectionSpacing,
+                StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 475,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _TherapyTimeTile(
+                          item: _therapyTimeStatItem(_todayStats),
+                          onTap: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SessionsHistoryPage(
+                                initialFilter: SessionFilter.therapy,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _TherapyTimeTile(
+                          item: _trackedTimeStatItem(_todayStats),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 _kSectionSpacing,
@@ -2678,6 +2749,63 @@ class _RecapStat extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TherapyTimeTile extends StatelessWidget {
+  final StatItemData item;
+  final VoidCallback? onTap;
+  const _TherapyTimeTile({required this.item, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AspectRatio(
+      aspectRatio: 1.1,
+      child: GestureDetector(
+        onTap: onTap,
+        child: HomeSurfaceCard(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: item.gradient.colors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(item.icon, color: Colors.white, size: 24),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                item.unit != null && item.unit!.isNotEmpty
+                    ? '${item.value} ${item.unit}'
+                    : item.value,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

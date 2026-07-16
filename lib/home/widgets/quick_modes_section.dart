@@ -222,6 +222,89 @@ class _QuickModeCard extends StatelessWidget {
   }
 }
 
+/// A 2-column grid of tappable action cards styled identically to
+/// [_QuickModeCard], for use between sections on the home page.
+class QuickActionGrid extends StatelessWidget {
+  final List<QuickActionItem> items;
+
+  const QuickActionGrid({super.key, required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      padding: EdgeInsets.zero,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 16,
+      crossAxisSpacing: 16,
+      childAspectRatio: 1.1,
+      children: items.map((item) => _ActionCard(item: item)).toList(),
+    );
+  }
+}
+
+class QuickActionItem {
+  final String title;
+  final IconData icon;
+  final List<Color> gradient;
+  final VoidCallback onTap;
+
+  const QuickActionItem({
+    required this.title,
+    required this.icon,
+    required this.gradient,
+    required this.onTap,
+  });
+}
+
+class _ActionCard extends StatelessWidget {
+  final QuickActionItem item;
+  const _ActionCard({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return HomeSurfaceCard(
+      padding: const EdgeInsets.all(20),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          onTap: item.onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: item.gradient,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(item.icon, color: Colors.white, size: 24),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                item.title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ComingSoonPage extends StatelessWidget {
   final String title;
   const ComingSoonPage({super.key, required this.title});

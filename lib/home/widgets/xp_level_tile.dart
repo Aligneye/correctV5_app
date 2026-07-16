@@ -77,8 +77,10 @@ class _XpLevelTileState extends State<XpLevelTile>
                   ),
                 ],
               ),
-              child: Stack(
-                clipBehavior: Clip.hardEdge,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Stack(
+                clipBehavior: Clip.antiAlias,
                 children: [
                   Positioned(
                     top: -20,
@@ -216,6 +218,7 @@ class _XpLevelTileState extends State<XpLevelTile>
                     ),
                   ),
                 ],
+                ),
               ),
             ),
           ),

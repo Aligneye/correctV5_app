@@ -23,6 +23,7 @@ class StatItemData {
   final LinearGradient gradient;
   final bool positiveTrend;
   final bool trendNeutral;
+  final VoidCallback? onTap;
 
   const StatItemData({
     required this.value,
@@ -33,6 +34,7 @@ class StatItemData {
     required this.gradient,
     this.positiveTrend = true,
     this.trendNeutral = false,
+    this.onTap,
   });
 }
 
@@ -254,8 +256,10 @@ class _StreakTileState extends State<_StreakTile>
                   ),
                 ],
               ),
-              child: Stack(
-                clipBehavior: Clip.hardEdge,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Stack(
+                clipBehavior: Clip.antiAlias,
                 children: [
                   Positioned(
                     top: -20,
@@ -378,6 +382,7 @@ class _StreakTileState extends State<_StreakTile>
                       ),
                     ),
                 ],
+                ),
               ),
             ),
           ),
@@ -895,7 +900,9 @@ class _SummaryMetricTile extends StatelessWidget {
       trendBg = AppTheme.destructive.withValues(alpha: 0.10);
     }
 
-    return HomeSurfaceCard(
+    return GestureDetector(
+      onTap: item.onTap,
+      child: HomeSurfaceCard(
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -992,6 +999,7 @@ class _SummaryMetricTile extends StatelessWidget {
             ],
           ),
         ],
+      ),
       ),
     );
   }
