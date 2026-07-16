@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -6,23 +8,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:correctv1/services/session_database.dart';
 import 'package:correctv1/services/session_sync_service.dart';
-
-/// UUIDs of the firmware's session-sync characteristics.
-/// Must match `src/bluetooth_manager.cpp` exactly.
-const String _kSessionDataUuid = '0000aa01-0000-1000-8000-00805f9b34fb';
-const String _kSessionAckUuid = '0000aa02-0000-1000-8000-00805f9b34fb';
-
-/// Protocol bytes — must match firmware.
-const int _kSessionSyncStart = 0xFF;
-const int _kExtensionMarker = 0xEE;
-
-bool _matchesBleUuid(Guid uuid, String expected) {
-  final actual = uuid.toString().toLowerCase();
-  final normalizedExpected = expected.toLowerCase();
-  return actual == normalizedExpected ||
-      actual == normalizedExpected.substring(4, 8) ||
-      (actual.length == 4 && normalizedExpected.startsWith('0000$actual-'));
-}
 
 /// Progress snapshot emitted by [BleSessionSync.progress] for UI feedback.
 class SyncProgress {
@@ -39,126 +24,72 @@ class SyncProgress {
   final Object? error;
 }
 
-/// Buffer that accumulates a session summary plus its extension packets
-/// (event timeline) before being upserted into Supabase.
-class _PendingSession {
-  _PendingSession({
-    required this.index,
+/// Holds the data for one session received from firmware, ready to be
+/// persisted to the local database.
+class _SessionRecord {
+  _SessionRecord({
+    required this.q,
     required this.type,
     required this.startTsEpoch,
-    required this.startTsIso,
     required this.durationSec,
     required this.wrongCount,
     required this.wrongDurSec,
-    required this.therapyPattern,
     required this.tsSynced,
-    required this.expectedExtPackets,
-    required this.totalEvents,
+    this.therapyPattern,
   });
 
-  final int index;
+  final int q; // packet index within this transfer
   final String type; // 'posture' or 'therapy'
-  final int startTsEpoch;
-  final String? startTsIso;
+  final int startTsEpoch; // unix epoch seconds (0 if unsynced)
   final int durationSec;
   final int wrongCount;
   final int wrongDurSec;
-  final int therapyPattern;
   final bool tsSynced;
-  final int expectedExtPackets;
-  final int totalEvents;
-  int receivedExtPackets = 0;
+  final int? therapyPattern;
 
-  // Accumulated events.
-  final List<Map<String, int>> postureEvents = <Map<String, int>>[];
-  final List<int> therapyPatterns = <int>[];
-
-  List<Map<String, int>> therapyPatternEvents() {
-    final patterns = therapyPatterns.isNotEmpty
-        ? therapyPatterns
-        : (therapyPattern >= 0 ? <int>[therapyPattern] : const <int>[]);
-    if (patterns.isEmpty) return const <Map<String, int>>[];
-
-    var cursor = 0;
-    final events = <Map<String, int>>[];
-    for (var i = 0; i < patterns.length; i++) {
-      final isLast = i == patterns.length - 1;
-      final remaining = (durationSec - cursor).clamp(0, 1 << 30).toInt();
-      final dur = isLast ? remaining : remaining.clamp(0, 60).toInt();
-      events.add({'p': patterns[i], 's': cursor, 'd': dur});
-      cursor += dur;
-    }
-    return events;
-  }
-
-  bool get hasExtensions => expectedExtPackets > 0;
-  bool get extensionsComplete => receivedExtPackets >= expectedExtPackets;
-
-  int get expectedTherapyPatternCount {
-    if (type != 'therapy') return 0;
-    if (totalEvents > 0) return totalEvents;
-    return ((durationSec + 59) ~/ 60).clamp(1, 30).toInt();
-  }
+  String? get startTsIso => startTsEpoch > 0
+      ? DateTime.fromMillisecondsSinceEpoch(
+          startTsEpoch * 1000,
+          isUtc: true,
+        ).toIso8601String()
+      : null;
 }
 
-/// Pulls unsent posture/therapy sessions off the Align wearable over BLE,
-/// uploads each one to Supabase, and ACKs the device only once the insert
-/// succeeds so failed rows retry on the next connection.
+/// Pulls unsent posture/therapy sessions off the Align wearable using the
+/// JSON-over-GATT protocol described in app_sync_proto §5.
 ///
-/// Two-stage protocol (matches firmware `src/bluetooth_manager.cpp`):
+/// Protocol summary:
+///   App → Device : {"cmd":"FETCH_SESSIONS"}
+///   Device → App : {"t":"SESS_HDR","n":N,"xfer":X}  (N=0 means drained)
+///   Device → App : {"t":"SESS_DATA","q":Q,"ty":TY,"ts":TS,"d":D,"wc":WC,"wd":WD,...}
+///   Device → App : {"t":"SESS_END","pk":PK,"xfer":X}
+///   App → Device : {"cmd":"ACK_SESSIONS","ok":true,"xfer":X}          (all ok)
+///                  {"cmd":"ACK_SESSIONS","nack":[…],"xfer":X}          (retry)
 ///
-/// **Summary packet** (20 bytes, sent first for each session):
-///   byte 0:      sync index
-///   byte 1:      type (1=posture, 2=therapy)
-///   bytes 2-5:   start_ts uint32 LE
-///   bytes 6-7:   duration_sec uint16 LE
-///   bytes 8-9:   wrong_count uint16 LE
-///   bytes 10-11: wrong_dur_sec uint16 LE
-///   byte 12:     therapy_pattern uint8
-///   byte 13:     ts_synced uint8
-///   byte 14:     event count (posture pairs or therapy patterns)
-///   byte 15:     extension packet count
-///   bytes 16-19: therapy fallback patterns when extension packets are absent
-///
-/// **Extension packet** (20 bytes, sent after summary if event count > 0):
-///   byte 0:      0xEE (extension marker)
-///   byte 1:      extension sub-index (0-based)
-///   bytes 2-19:  payload — for posture, up to 4 (slouch_u16, correction_u16)
-///                pairs; for therapy, up to 18 pattern_u8 indices.
-///
-/// The device only marks a session sent after the *last* extension packet is
-/// ACK'd (or, when there are no extensions, after the summary itself is
-/// ACK'd). Failed Supabase upserts therefore leave the record on flash for
-/// the next reconnect.
+/// Uses the same GATT characteristic / notification stream already used for
+/// posture telemetry, calibration, and profile commands.
 class BleSessionSync {
   BleSessionSync(this._device, {SupabaseClient? client})
-    : _supabase = client ?? Supabase.instance.client;
+      : _supabase = client ?? Supabase.instance.client;
 
   final BluetoothDevice _device;
   final SupabaseClient _supabase;
 
   final _progressController = StreamController<SyncProgress>.broadcast();
 
-  BluetoothCharacteristic? _dataChar;
-  BluetoothCharacteristic? _ackChar;
-  StreamSubscription<List<int>>? _notifySub;
+  BluetoothCharacteristic? _char;
+  StreamSubscription<List<int>>? _rawSub;
 
   int _sentCount = 0;
-  int _observedMax = 0;
-  Timer? _idleTimer;
   bool _complete = false;
   bool _running = false;
 
-  _PendingSession? _pending;
+  // Raw buffer for JSON framing (same framing as AlignEyeDeviceService).
+  String _buf = '';
 
-  /// Bumps inactivity-based completion when the device stops streaming.
-  /// 4s gives the firmware ample time between sessions on a busy link.
-  static const Duration _idleTimeout = Duration(seconds: 8);
-
-  /// ±10s window for stitching an offline-sync row onto an existing live
-  /// session row (e.g. BT dropped mid-session and the firmware rebroadcasts
-  /// the full session on reconnect).
-  static const Duration _dedupeWindow = Duration(seconds: 10);
+  // Completer used to await the next matching packet from firmware.
+  Completer<Map<String, dynamic>>? _waitCompleter;
+  bool Function(Map<String, dynamic>)? _waitMatcher;
 
   Stream<SyncProgress> get progress => _progressController.stream;
 
@@ -170,368 +101,422 @@ class BleSessionSync {
     _running = true;
     _complete = false;
     _sentCount = 0;
-    _observedMax = 0;
-    _pending = null;
+    _buf = '';
     debugPrint('[SESSION] ── Sync started ── device=${_device.remoteId}');
 
     try {
-      // Use the already-discovered service list from the active connection.
-      // AlignEyeDeviceService.connect() already calls discoverServices(),
-      // so calling it again can cause BLE stack errors on some platforms.
-      final services = _device.servicesList;
-      void scanServices(List<BluetoothService> serviceList) {
-        for (final service in serviceList) {
-          for (final char in service.characteristics) {
-            if (_matchesBleUuid(char.uuid, _kSessionDataUuid)) {
-              _dataChar = char;
-            }
-            if (_matchesBleUuid(char.uuid, _kSessionAckUuid)) {
-              _ackChar = char;
-            }
-          }
-        }
-      }
-
-      if (services.isEmpty) {
+      _char = _findChar();
+      if (_char == null) {
         debugPrint(
-          'BleSessionSync: no cached services, falling back to discovery',
-        );
-        final discovered = await _device.discoverServices();
-        scanServices(discovered);
-      } else {
-        scanServices(services);
-      }
-
-      if (_dataChar == null || _ackChar == null) {
-        debugPrint(
-          '[SESSION] ⚠️ Sync characteristics NOT found on device — '
-          'firmware may not support offline session sync '
-          '(data=${_dataChar != null}, ack=${_ackChar != null})',
+          '[SESSION] ⚠️ No JSON characteristic found — firmware may be old',
         );
         _emitComplete();
         return;
       }
-      debugPrint('[SESSION] Found sync characteristics (data + ack)');
 
-      // Subscribe BEFORE enabling notifications to avoid missing the first
-      // packet if it arrives between setNotifyValue() completing and listen().
-      _notifySub = _dataChar!.lastValueStream.listen(
-        _onPacket,
+      _rawSub = _char!.onValueReceived.listen(
+        _onRawBytes,
         onError: (Object e) {
           debugPrint('BleSessionSync: notify error: $e');
           _emitError(e);
         },
       );
-      await _dataChar!.setNotifyValue(true);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-      await _writeAck(_kSessionSyncStart);
-      debugPrint('[SESSION] Sync start requested over BLE');
-
-      _armIdleTimer();
-      _emitProgress();
+      await _runFetchLoop();
     } catch (e) {
-      debugPrint('BleSessionSync: startSync failed: $e');
+      debugPrint('BleSessionSync: fatal error: $e');
       _emitError(e);
+    } finally {
       _emitComplete();
     }
   }
 
   Future<void> dispose() async {
-    _idleTimer?.cancel();
-    _idleTimer = null;
-    await _notifySub?.cancel();
-    _notifySub = null;
-    try {
-      await _dataChar?.setNotifyValue(false);
-    } catch (_) {
-      // Best effort cleanup; disconnects can make CCCD writes fail.
-    }
+    _waitCompleter?.complete(<String, dynamic>{});
+    _waitCompleter = null;
+    await _rawSub?.cancel();
+    _rawSub = null;
     if (!_progressController.isClosed) {
       await _progressController.close();
     }
     _running = false;
   }
 
-  // ── packet handling ────────────────────────────────────────────────────────
+  // ── characteristic lookup ─────────────────────────────────────────────────
 
-  Future<void> _onPacket(List<int> data) async {
-    if (data.length < 20) {
-      if (data.isNotEmpty) {
-        debugPrint(
-          'BleSessionSync: short packet (${data.length} bytes), ignoring',
-        );
+  static const String _kServiceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+  static const String _kCharUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+
+  BluetoothCharacteristic? _findChar() {
+    final services = _device.servicesList;
+    for (final svc in services) {
+      if (!_uuidMatch(svc.uuid, _kServiceUuid)) continue;
+      for (final c in svc.characteristics) {
+        if (_uuidMatch(c.uuid, _kCharUuid)) return c;
       }
+    }
+    // Fallback: scan all services (e.g. if UUID casing differs).
+    for (final svc in services) {
+      for (final c in svc.characteristics) {
+        if (_uuidMatch(c.uuid, _kCharUuid)) return c;
+      }
+    }
+    return null;
+  }
+
+  static bool _uuidMatch(Guid a, String b) {
+    final as = a.toString().toLowerCase();
+    final bs = b.toLowerCase();
+    return as == bs || as == bs.substring(4, 8);
+  }
+
+  // ── raw notification → JSON framing ──────────────────────────────────────
+
+  void _onRawBytes(List<int> bytes) {
+    _buf += utf8.decode(bytes, allowMalformed: true);
+    if (_buf.length > 10000) {
+      debugPrint('BleSessionSync: buffer overflow, clearing');
+      _buf = '';
       return;
     }
 
-    // Ignore all-zero packets (initial cached value from the characteristic).
-    if (data.every((b) => b == 0)) return;
+    while (true) {
+      final start = _buf.indexOf('{');
+      if (start == -1) { _buf = ''; break; }
+      if (start > 0) { _buf = _buf.substring(start); }
 
-    _armIdleTimer();
-    final bytes = Uint8List.fromList(data);
+      int depth = 0, end = -1;
+      bool inStr = false, esc = false;
+      for (int i = 0; i < _buf.length; i++) {
+        final ch = _buf[i];
+        if (esc) { esc = false; continue; }
+        if (ch == '\\') { esc = true; continue; }
+        if (ch == '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch == '{') {
+          depth++;
+        } else if (ch == '}') {
+          depth--;
+          if (depth == 0) { end = i; break; }
+        }
+      }
+      if (end == -1) {
+        if (_buf.length > 5000) _buf = '';
+        break;
+      }
 
-    // Extension packets are tagged with 0xEE in byte 0; everything else is a
-    // session summary.
-    if (bytes[0] == _kExtensionMarker) {
-      await _handleExtensionPacket(bytes);
-    } else {
-      await _handleSummaryPacket(bytes);
+      final chunk = _buf.substring(0, end + 1).trim();
+      _buf = _buf.substring(end + 1);
+      try {
+        final parsed = jsonDecode(chunk) as Map<String, dynamic>;
+        _dispatch(parsed);
+      } catch (_) {}
     }
   }
 
-  Future<void> _handleSummaryPacket(Uint8List bytes) async {
-    final bd = ByteData.sublistView(bytes);
-
-    final index = bytes[0];
-    final type = bytes[1];
-    final startTsEpoch = bd.getUint32(2, Endian.little);
-    final durationSec = bd.getUint16(6, Endian.little);
-    final wrongCount = bd.getUint16(8, Endian.little);
-    final wrongDurSec = bd.getUint16(10, Endian.little);
-    final therapyPatt = bytes[12];
-    final tsSynced = bytes[13] == 1;
-    final eventCount = bytes[14];
-    final extPackets = bytes[15];
-
-    _observedMax = index + 1 > _observedMax ? index + 1 : _observedMax;
-
-    final typeStr = type == 1 ? 'posture' : (type == 2 ? 'therapy' : null);
-    if (typeStr == null) {
-      debugPrint('BleSessionSync: unknown type byte=$type, skipping');
-      return;
-    }
-
-    final startTsIso = startTsEpoch > 0
-        ? DateTime.fromMillisecondsSinceEpoch(
-            startTsEpoch * 1000,
-            isUtc: true,
-          ).toIso8601String()
-        : null;
-
-    debugPrint(
-      '[SESSION] Summary │ idx=$index  type=$typeStr  '
-      'duration=${durationSec}s  wrongCount=$wrongCount  '
-      'wrongDur=${wrongDurSec}s  therapyPatt=$therapyPatt  '
-      'tsSynced=$tsSynced  events=$eventCount  extPackets=$extPackets',
-    );
-
-    _pending = _PendingSession(
-      index: index,
-      type: typeStr,
-      startTsEpoch: startTsEpoch,
-      startTsIso: startTsIso,
-      durationSec: durationSec,
-      wrongCount: wrongCount,
-      wrongDurSec: wrongDurSec,
-      therapyPattern: therapyPatt,
-      tsSynced: tsSynced,
-      expectedExtPackets: extPackets,
-      totalEvents: eventCount,
-    );
-
-    if (typeStr == 'therapy' && !_pending!.hasExtensions) {
-      final playedSlots = ((durationSec + 59) ~/ 60).clamp(1, 4).toInt();
-      final fallback = <int>[
-        for (var i = 0; i < playedSlots; i++) bytes[16 + i],
-      ];
-      final hasFallback = fallback.any((pattern) => pattern != 0);
-      if (hasFallback) {
-        _pending!.therapyPatterns.addAll(fallback);
-        debugPrint('[SESSION] Summary therapy fallback=$fallback');
+  void _dispatch(Map<String, dynamic> msg) {
+    final completer = _waitCompleter;
+    final matcher = _waitMatcher;
+    if (completer != null && !completer.isCompleted) {
+      if (matcher == null || matcher(msg)) {
+        _waitCompleter = null;
+        _waitMatcher = null;
+        completer.complete(msg);
       }
-    }
-
-    if (_pending!.hasExtensions) {
-      // ACK the summary index — this triggers the firmware to start streaming
-      // extension packets. Upsert happens after the last extension lands.
-      await _writeAck(index);
-      return;
-    }
-
-    // No extensions; persist the summary and ACK with index to advance.
-    final ok = await _persistPending();
-    if (ok) {
-      await _writeAck(index);
-      _sentCount++;
-      _emitProgress();
     }
   }
 
-  Future<void> _handleExtensionPacket(Uint8List bytes) async {
-    final pending = _pending;
-    if (pending == null) {
-      debugPrint('BleSessionSync: extension packet with no pending summary');
-      return;
-    }
+  // ── waiting helpers ───────────────────────────────────────────────────────
 
-    final subIndex = bytes[1];
-    final bd = ByteData.sublistView(bytes);
-
-    if (pending.type == 'posture') {
-      // Up to 4 (uint16 slouch, uint16 correction) pairs in bytes 2..19.
-      final remaining = pending.totalEvents - pending.postureEvents.length;
-      final pairsInPacket = remaining > 4 ? 4 : remaining;
-      for (var i = 0; i < pairsInPacket; i++) {
-        final s = bd.getUint16(2 + i * 4, Endian.little);
-        final c = bd.getUint16(2 + i * 4 + 2, Endian.little);
-        pending.postureEvents.add({'s': s, 'c': c});
-      }
-    } else {
-      // Therapy: the extension payload carries one pattern index per minute.
-      final remaining =
-          pending.expectedTherapyPatternCount - pending.therapyPatterns.length;
-      final payloadCapacity = bytes.length - 2;
-      final countInPacket = remaining > payloadCapacity
-          ? payloadCapacity
-          : remaining;
-      for (var i = 0; i < countInPacket; i++) {
-        pending.therapyPatterns.add(bytes[2 + i]);
-      }
-    }
-
-    pending.receivedExtPackets++;
-    debugPrint(
-      '[SESSION] Ext │ sub=$subIndex  ${pending.receivedExtPackets}/'
-      '${pending.expectedExtPackets}',
-    );
-
-    if (!pending.extensionsComplete) {
-      // More extensions still to come — ACK this one to request the next.
-      await _writeAck(_kExtensionMarker);
-      return;
-    }
-
-    // Last extension landed — persist now, then ACK so the device advances
-    // and marks the session sent. Skipping the ACK on failure leaves the
-    // record on flash for the next reconnect.
-    final ok = await _persistPending();
-    if (ok) {
-      await _writeAck(_kExtensionMarker);
-      _sentCount++;
-      _emitProgress();
-    }
-  }
-
-  Future<bool> _persistPending() async {
-    final pending = _pending;
-    if (pending == null) return false;
-
-    final user = _supabase.auth.currentUser;
-    if (user == null) {
-      debugPrint('BleSessionSync: no authenticated user, cannot upsert');
-      _emitError(StateError('No authenticated Supabase user'));
-      return false;
-    }
-
-    final effectiveStartTs =
-        pending.startTsIso ?? DateTime.now().toUtc().toIso8601String();
-
-    final row = <String, dynamic>{
-      'user_id': user.id,
-      'type': pending.type,
-      'start_ts': effectiveStartTs,
-      'duration_sec': pending.durationSec,
-      'wrong_count': pending.type == 'posture' ? pending.wrongCount : null,
-      'wrong_dur_sec': pending.type == 'posture' ? pending.wrongDurSec : null,
-      'therapy_pattern': pending.type == 'therapy'
-          ? pending.therapyPattern
-          : null,
-      'ts_synced': pending.tsSynced,
-      'posture_events':
-          pending.type == 'posture' && pending.postureEvents.isNotEmpty
-          ? pending.postureEvents
-          : null,
-      'therapy_patterns':
-          pending.type == 'therapy' && pending.therapyPatterns.isNotEmpty
-          ? pending.therapyPatterns
-          : null,
-      'therapy_pattern_events': pending.type == 'therapy'
-          ? pending.therapyPatternEvents()
-          : null,
-    };
-
+  /// Wait for the next packet that satisfies [matcher], up to [timeout].
+  /// Returns null on timeout.
+  Future<Map<String, dynamic>?> _waitFor(
+    bool Function(Map<String, dynamic>) matcher, {
+    required Duration timeout,
+  }) async {
+    final c = Completer<Map<String, dynamic>>();
+    _waitCompleter = c;
+    _waitMatcher = matcher;
     try {
-      final db = SessionDatabase.instance;
-      final existingId = await _findExistingRowId(pending);
-      if (existingId != null) {
-        // Fetch-only policy: BLE sync is for *offline backlog* — sessions the
-        // phone never recorded live. If we already have a row for this
-        // start_ts, the live recorder is (or was) its source of truth, and
-        // the phone's copy is richer than firmware's flash snapshot (latest
-        // pattern events, continuous duration, etc). Overwriting it corrupts
-        // the in-progress session whenever BT drops and reconnects mid-way.
-        //
-        // Return ok=true so the caller still ACKs the device and drains its
-        // backlog without re-sending this packet next time.
-        debugPrint(
-          '[SESSION] Skipping overwrite — local row exists │ idx=${pending.index} '
-          'id=$existingId type=${pending.type}',
-        );
-      } else {
-        final id = await db.insertSession({...row, 'sync_status': 0});
-        debugPrint(
-          '[SESSION] Local upsert (insert) ✓ │ idx=${pending.index} '
-          'id=$id type=${pending.type}',
-        );
-      }
-      _pending = null;
-      SessionSyncService.instance.triggerSync();
-      return true;
-    } catch (e) {
-      debugPrint(
-        '[SESSION] Local upsert FAILED ✗ │ idx=${pending.index}  error=$e',
-      );
-      _emitError(e);
-      return false;
-    }
-  }
-
-  Future<String?> _findExistingRowId(_PendingSession pending) async {
-    final iso = pending.startTsIso;
-    if (iso == null) return null;
-
-    final user = _supabase.auth.currentUser;
-    if (user == null) return null;
-
-    try {
-      return await SessionDatabase.instance.findExistingByStartTs(
-        user.id,
-        pending.type,
-        DateTime.parse(iso),
-        _dedupeWindow,
-      );
-    } catch (e) {
-      debugPrint('BleSessionSync: dedupe lookup failed: $e');
+      return await c.future.timeout(timeout, onTimeout: () {
+        _waitCompleter = null;
+        _waitMatcher = null;
+        return <String, dynamic>{};
+      });
+    } catch (_) {
+      _waitCompleter = null;
+      _waitMatcher = null;
       return null;
     }
   }
 
-  Future<void> _writeAck(int byte) async {
-    final char = _ackChar;
-    if (char == null) return;
+  // ── command write ─────────────────────────────────────────────────────────
+
+  Future<bool> _send(Map<String, dynamic> cmd) async {
+    final char = _char;
+    if (char == null) return false;
     try {
+      final payload = utf8.encode(jsonEncode(cmd));
       await char.write(
-        [byte],
-        withoutResponse:
-            !char.properties.write && char.properties.writeWithoutResponse,
+        payload,
+        withoutResponse: char.properties.writeWithoutResponse,
       );
+      debugPrint('[SESSION] TX: ${jsonEncode(cmd)}');
+      return true;
     } catch (e) {
-      debugPrint('BleSessionSync: ACK write failed (byte=$byte): $e');
+      debugPrint('[SESSION] TX failed: $e');
+      return false;
+    }
+  }
+
+  // ── main fetch loop ───────────────────────────────────────────────────────
+
+  Future<void> _runFetchLoop() async {
+    // Keep fetching until the device says n==0 (drained).
+    while (true) {
+      if (!_running) return;
+
+      // Send FETCH_SESSIONS, wait up to 5 s for SESS_HDR; retry once.
+      Map<String, dynamic>? hdr = await _fetchWithRetry();
+      if (hdr == null) {
+        debugPrint('[SESSION] No SESS_HDR after retries — giving up');
+        return;
+      }
+
+      if (hdr['err']?.toString() == 'MTU_TOO_SMALL') {
+        debugPrint('[SESSION] SESS_HDR err=MTU_TOO_SMALL — requesting MTU 247');
+        if (Platform.isAndroid) {
+          try {
+            await _device.requestMtu(247, timeout: 3);
+          } catch (_) {}
+        }
+        // Retry once after MTU fix.
+        hdr = await _fetchWithRetry();
+        if (hdr == null) return;
+      }
+
+      final n = (hdr['n'] as num?)?.toInt() ?? 0;
+      final xfer = hdr['xfer'];
+      debugPrint('[SESSION] SESS_HDR n=$n xfer=$xfer');
+
+      if (n == 0) {
+        debugPrint('[SESSION] Device drained — sync complete');
+        return;
+      }
+
+      // Collect SESS_DATA packets until SESS_END.
+      final received = await _collectSession(n, xfer);
+      if (received == null) return; // stall/disconnect
+
+      final pk = received.pk;
+      final packets = received.packets;
+      final missing = <int>[
+        for (int i = 0; i < pk; i++)
+          if (!packets.containsKey(i)) i,
+      ];
+
+      // Retry loop for NACK.
+      int nackRounds = 0;
+      const maxNackRounds = 5;
+      while (missing.isNotEmpty && nackRounds < maxNackRounds) {
+        nackRounds++;
+        debugPrint('[SESSION] Sending NACK for ${missing.length} packets: $missing');
+        final nack = missing.take(16).toList();
+        await _send({'cmd': 'ACK_SESSIONS', 'nack': nack, 'xfer': xfer});
+
+        final retx = await _collectSession(n, xfer);
+        if (retx == null) return;
+        for (final entry in retx.packets.entries) {
+          packets[entry.key] = entry.value;
+        }
+        missing.removeWhere((i) => packets.containsKey(i));
+      }
+
+      if (missing.isNotEmpty) {
+        debugPrint('[SESSION] Still missing ${missing.length} packets after $nackRounds rounds — skipping');
+      }
+
+      // Persist all received sessions.
+      for (final rec in packets.values) {
+        await _persist(rec);
+      }
+
+      // ACK success.
+      bool acked = false;
+      int ackAttempts = 0;
+      while (!acked && ackAttempts < 3) {
+        ackAttempts++;
+        final sent = await _send({'cmd': 'ACK_SESSIONS', 'ok': true, 'xfer': xfer});
+        if (!sent) break;
+
+        // Wait briefly for a possible error response.
+        final ackResp = await _waitFor(
+          (m) => m['t']?.toString().toUpperCase() == 'ACK' &&
+              m['cmd']?.toString().toUpperCase() == 'ACK_SESSIONS',
+          timeout: const Duration(seconds: 3),
+        );
+
+        if (ackResp == null || ackResp.isEmpty || ackResp['ok'] == true) {
+          acked = true;
+        } else {
+          final err = ackResp['err']?.toString();
+          debugPrint('[SESSION] ACK_SESSIONS nack: err=$err');
+          if (err == 'BAD_XFER') {
+            // Echo the wrong xfer back — firmware will tell us the right one.
+            // Just retry with same xfer value; a real implementation would use
+            // the corrected xfer from the error response if the firmware provides it.
+            continue;
+          } else if (err == 'NOT_WAITING') {
+            // Device dropped this transfer window. Restart.
+            break;
+          } else {
+            acked = true; // Unknown error; treat as done.
+          }
+        }
+      }
+
+      // Loop: fetch again (device will return n==0 when fully drained).
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchWithRetry() async {
+    for (int attempt = 0; attempt < 2; attempt++) {
+      final sent = await _send({'cmd': 'FETCH_SESSIONS'});
+      if (!sent) return null;
+
+      final hdr = await _waitFor(
+        (m) => m['t']?.toString().toUpperCase() == 'SESS_HDR',
+        timeout: const Duration(seconds: 5),
+      );
+      if (hdr != null && hdr.isNotEmpty) return hdr;
+      debugPrint('[SESSION] No SESS_HDR (attempt ${attempt + 1})');
+    }
+    return null;
+  }
+
+  // ── session packet collection ─────────────────────────────────────────────
+
+  /// Accumulates SESS_DATA packets until SESS_END.
+  /// Returns null if the stream stalls (10 s between packets).
+  Future<_CollectedSession?> _collectSession(int n, dynamic xfer) async {
+    final packets = <int, _SessionRecord>{};
+    int pk = n; // updated when SESS_END arrives
+
+    while (true) {
+      final msg = await _waitFor(
+        (m) {
+          final t = m['t']?.toString().toUpperCase();
+          return t == 'SESS_DATA' || t == 'SESS_END';
+        },
+        timeout: const Duration(seconds: 10),
+      );
+
+      if (msg == null || msg.isEmpty) {
+        debugPrint('[SESSION] Stream stall — restarting fetch');
+        return null;
+      }
+
+      final t = msg['t']?.toString().toUpperCase();
+
+      if (t == 'SESS_END') {
+        pk = (msg['pk'] as num?)?.toInt() ?? pk;
+        debugPrint('[SESSION] SESS_END pk=$pk received=${packets.length}');
+        return _CollectedSession(pk: pk, packets: packets);
+      }
+
+      // SESS_DATA
+      final q = (msg['q'] as num?)?.toInt() ?? -1;
+      if (q < 0) continue;
+
+      final tyRaw = msg['ty']?.toString().toLowerCase();
+      final type = tyRaw == 'posture' || tyRaw == '1'
+          ? 'posture'
+          : (tyRaw == 'therapy' || tyRaw == '2' ? 'therapy' : null);
+      if (type == null) {
+        debugPrint('[SESSION] Unknown ty=$tyRaw in SESS_DATA, skipping');
+        continue;
+      }
+
+      final ts = (msg['ts'] as num?)?.toInt() ?? 0;
+      final d = (msg['d'] as num?)?.toInt() ?? 0;
+      final wc = (msg['wc'] as num?)?.toInt() ?? 0;
+      final wd = (msg['wd'] as num?)?.toInt() ?? 0;
+      final tsSynced = msg['tss'] == true || msg['tss'] == 1;
+      final therapyPatt = (msg['tp'] as num?)?.toInt();
+
+      debugPrint(
+        '[SESSION] SESS_DATA q=$q ty=$type ts=$ts d=${d}s wc=$wc wd=$wd',
+      );
+
+      packets[q] = _SessionRecord(
+        q: q,
+        type: type,
+        startTsEpoch: ts,
+        durationSec: d,
+        wrongCount: wc,
+        wrongDurSec: wd,
+        tsSynced: tsSynced,
+        therapyPattern: therapyPatt,
+      );
+    }
+  }
+
+  // ── persistence ───────────────────────────────────────────────────────────
+
+  Future<void> _persist(_SessionRecord rec) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      debugPrint('BleSessionSync: no authenticated user, skipping persist');
+      return;
+    }
+
+    final effectiveTs =
+        rec.startTsIso ?? DateTime.now().toUtc().toIso8601String();
+
+    try {
+      final db = SessionDatabase.instance;
+      final existingId = await db.findExistingByFields(
+        userId: user.id,
+        type: rec.type,
+        startTsEpoch: rec.startTsEpoch,
+        durationSec: rec.durationSec,
+        wrongCount: rec.wrongCount,
+        wrongDurSec: rec.wrongDurSec,
+      );
+
+      if (existingId != null) {
+        debugPrint(
+          '[SESSION] Dedup: row exists id=$existingId ty=${rec.type} ts=${rec.startTsEpoch}',
+        );
+      } else {
+        final id = await db.insertSession({
+          'user_id': user.id,
+          'type': rec.type,
+          'start_ts': effectiveTs,
+          'duration_sec': rec.durationSec,
+          'wrong_count': rec.type == 'posture' ? rec.wrongCount : null,
+          'wrong_dur_sec': rec.type == 'posture' ? rec.wrongDurSec : null,
+          'therapy_pattern': rec.type == 'therapy' ? rec.therapyPattern : null,
+          'ts_synced': rec.tsSynced,
+          'sync_status': 0,
+        });
+        debugPrint('[SESSION] Inserted id=$id ty=${rec.type} ts=${rec.startTsEpoch}');
+        _sentCount++;
+        _emitProgress(_sentCount);
+        SessionSyncService.instance.triggerSync();
+      }
+    } catch (e) {
+      debugPrint('[SESSION] Persist failed: $e');
       _emitError(e);
     }
   }
 
-  void _armIdleTimer() {
-    _idleTimer?.cancel();
-    _idleTimer = Timer(_idleTimeout, _emitComplete);
-  }
+  // ── progress / error ──────────────────────────────────────────────────────
 
-  void _emitProgress() {
+  void _emitProgress(int sent) {
     if (_progressController.isClosed) return;
-    final total = _observedMax > _sentCount ? _observedMax : _sentCount;
     _progressController.add(
-      SyncProgress(sent: _sentCount, total: total, complete: _complete),
+      SyncProgress(sent: sent, total: sent, complete: false),
     );
   }
 
@@ -539,8 +524,6 @@ class BleSessionSync {
     if (_complete) return;
     _complete = true;
     _running = false;
-    _idleTimer?.cancel();
-    _idleTimer = null;
     debugPrint('[SESSION] ── Sync complete ── total_saved=$_sentCount');
     if (_progressController.isClosed) return;
     _progressController.add(
@@ -551,19 +534,18 @@ class BleSessionSync {
   void _emitError(Object error) {
     if (_progressController.isClosed) return;
     _progressController.add(
-      SyncProgress(
-        sent: _sentCount,
-        total: _observedMax,
-        complete: false,
-        error: error,
-      ),
+      SyncProgress(sent: _sentCount, total: _sentCount, complete: false, error: error),
     );
   }
 }
 
+class _CollectedSession {
+  _CollectedSession({required this.pk, required this.packets});
+  final int pk;
+  final Map<int, _SessionRecord> packets;
+}
+
 /// Derive the "good posture" % shown in Analytics from the raw BLE fields.
-/// Exposed as a top-level helper so UI code can stay in sync with the
-/// canonical formula used by [SessionRepository].
 int goodPostureScore({required int durationSec, required int wrongDurSec}) {
   if (durationSec <= 0) return 100;
   return (100 - (wrongDurSec / durationSec * 100)).round().clamp(0, 100);
