@@ -61,6 +61,8 @@ class DeviceManager {
     );
   }
   StreamSubscription<SyncProgress>? _progressSub;
+  StreamSubscription<void>? _sessAvailSub;
+  Timer? _periodicSyncTimer;
   bool _wired = false;
   bool _lastConnected = false;
 
@@ -149,15 +151,10 @@ class DeviceManager {
 
     if (isConnected && !wasConnected) {
       debugPrint('DeviceManager: BLE connected');
-      // Keep the live recorder enabled: BLE sync runs on a separate
-      // characteristic and will never overwrite existing local rows, so live
-      // readings can flow into the recorder in parallel.
       _liveSessionRecorder?.setEnabled(true);
+      _wireSessAvail();
+      _startPeriodicSync();
 
-      // Defer the backlog pull when a live session is already active at the
-      // moment we (re)connect — e.g. BT dropped mid-session and recovered.
-      // Bulk transfers share the same link and cause the live stream to
-      // stutter, so we wait for the session-end tick instead.
       if (activeSessionId.value != null) {
         _syncDeferredForLiveSession = true;
         debugPrint(
@@ -169,12 +166,41 @@ class DeviceManager {
       }
     } else if (!isConnected && wasConnected) {
       debugPrint('DeviceManager: BLE disconnected');
-      // Leave the recorder enabled. It gates itself on connection status and
-      // will simply skip readings until BLE comes back. Keeping it enabled
-      // means the in-memory _LiveSession survives the drop and resumes on
-      // reconnect with no duplicate row.
+      _teardownSessAvail();
       _teardownSync();
     }
+  }
+
+  void _wireSessAvail() {
+    _sessAvailSub?.cancel();
+    _sessAvailSub = _btManager.deviceService.sessAvailStream.listen((_) {
+      debugPrint('DeviceManager: SESS_AVAIL received — triggering sync');
+      if (activeSessionId.value != null) {
+        _syncDeferredForLiveSession = true;
+        return;
+      }
+      _scheduleResync();
+    });
+  }
+
+  void _teardownSessAvail() {
+    _sessAvailSub?.cancel();
+    _sessAvailSub = null;
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = null;
+  }
+
+  void _startPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (_btManager.deviceService.connectionStatus.value !=
+          DeviceConnectionStatus.connected) {
+        return;
+      }
+      if (activeSessionId.value != null) return;
+      debugPrint('DeviceManager: periodic sync tick');
+      _scheduleResync();
+    });
   }
 
   /// Manually kicks off a backlog sync on demand — e.g. from a pull-to-
@@ -293,6 +319,7 @@ class DeviceManager {
       );
       _wired = false;
     }
+    _teardownSessAvail();
     await _teardownSync();
     await _liveSessionRecorder?.dispose();
     _liveSessionRecorder = null;

@@ -717,10 +717,14 @@ class AlignEyeDeviceService {
   final _therapyCompletionController =
   StreamController<TherapyCompletion>.broadcast();
   final _ackController = StreamController<Map<String, dynamic>>.broadcast();
+  final _sessAvailController = StreamController<void>.broadcast();
   Stream<List<FirmwareProfile>> get profileListStream =>
       _profileListController.stream;
   Stream<TherapyCompletion> get therapyCompletions =>
       _therapyCompletionController.stream;
+  /// Fires whenever the device sends a SESS_AVAIL push notification,
+  /// signalling that a newly-completed session is ready to fetch.
+  Stream<void> get sessAvailStream => _sessAvailController.stream;
   List<FirmwareProfile> _lastKnownProfiles = [];
   List<FirmwareProfile> get lastKnownProfiles =>
       List.unmodifiable(_lastKnownProfiles);
@@ -1796,53 +1800,9 @@ class AlignEyeDeviceService {
 
           // Small delay to ensure connection is stable
           await Future.delayed(const Duration(milliseconds: 300));
-
-          // Request larger MTU on Android BEFORE enabling notifications
-          // so large JSON payloads are never truncated mid-packet.
-          if (Platform.isAndroid || Platform.isIOS) {
-            debugPrint('Requesting MTU of 251...');
-            try {
-              final mtu = await _device!.requestMtu(251, timeout: 3);
-              debugPrint('MTU negotiated: $mtu');
-              if (mtu < 100) {
-                debugPrint('MTU too low ($mtu) — disconnecting');
-                _isConnecting = false;
-                _connectionTimeoutTimer?.cancel();
-                await disconnect();
-                throw Exception('Bluetooth connection quality is too low.');
-              }
-            } catch (e) {
-              debugPrint('Failed to request MTU (non-fatal): $e');
-            }
-          }
         } catch (e) {
           debugPrint('Connection failed: $e');
-
-          // MTU negotiation can fail if the device briefly drops the link right
-          // after GATT connect.  The physical connection was established (GATT
-          // connected), so treat this as a non-fatal hiccup and fall through to
-          // service discovery rather than aborting the whole connect attempt.
-          final isMtuError =
-              e.toString().toLowerCase().contains('requestmtu') ||
-                  e.toString().toLowerCase().contains('mtu');
-          final deviceAfterError = _device;
-          final stateAfterError = deviceAfterError == null
-              ? BluetoothConnectionState.disconnected
-              : await deviceAfterError.connectionState.first.timeout(
-            const Duration(seconds: 2),
-            onTimeout: () => BluetoothConnectionState.disconnected,
-          );
-          debugPrint('Connection state after error: $stateAfterError');
-
-          // If the MTU request itself failed but device is still connected,
-          // continue with service discovery (MTU failure is not fatal).
-          if (isMtuError &&
-              stateAfterError == BluetoothConnectionState.connected) {
-            debugPrint('MTU error but device still connected — continuing...');
-            // fall through to service discovery below
-          } else {
-            rethrow;
-          }
+          rethrow;
         }
       }
 
@@ -1888,6 +1848,26 @@ class AlignEyeDeviceService {
       debugPrint(
         'Found characteristic: ${_notifyCharacteristic!.uuid} in service: ${_notifyCharacteristic!.serviceUuid}',
       );
+
+      // Request MTU 247 after service discovery per spec §5.1.
+      // iOS negotiates MTU automatically (185+), so we only call this on Android.
+      if (Platform.isAndroid) {
+        debugPrint('Requesting MTU 247 (post-discovery)...');
+        try {
+          final mtu = await _device!.requestMtu(247, timeout: 3);
+          debugPrint('MTU negotiated: $mtu');
+          if (mtu < 140) {
+            debugPrint('MTU too low ($mtu < 140) — disconnecting');
+            _isConnecting = false;
+            _connectionTimeoutTimer?.cancel();
+            await disconnect();
+            throw Exception('Bluetooth MTU too low for session sync.');
+          }
+        } catch (e) {
+          if (e.toString().contains('MTU too low')) rethrow;
+          debugPrint('MTU request failed (non-fatal): $e');
+        }
+      }
 
       // Subscribe before enabling notifications. Some Android BLE stacks can
       // deliver the first cached/live value immediately after the CCCD write.
@@ -2079,6 +2059,7 @@ class AlignEyeDeviceService {
     await _profileListController.close();
     await _therapyCompletionController.close();
     await _ackController.close();
+    await _sessAvailController.close();
     await _cleanupScan();
     connectionStatus.dispose();
     currentReading.dispose();
@@ -2837,6 +2818,12 @@ class AlignEyeDeviceService {
                 'Command ACK received: '
                     'seq=${decoded['seq']} cmd=${decoded['cmd']} ok=${decoded['ok']}',
               );
+              break;
+
+            case 'SESS_AVAIL':
+            // Device signals a new session is available to fetch.
+              debugPrint('[SESSION] SESS_AVAIL received');
+              _sessAvailController.add(null);
               break;
           }
         }

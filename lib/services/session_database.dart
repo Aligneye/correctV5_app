@@ -367,6 +367,55 @@ class SessionDatabase {
     return rows.first['id'] as String?;
   }
 
+  /// BLE-sync dedup per spec §5.4: key is (ty, ts, d, wc, wd).
+  ///
+  /// For ts==0 sessions (recorded before device time-sync), identical
+  /// (ty, 0, d, wc, wd) tuples across different transfers are treated as the
+  /// same session and replaced. Within a single transfer they have distinct q
+  /// indices so the caller avoids calling this twice for the same record.
+  ///
+  /// NOTE: This is a known limitation until a monotonic session id is added
+  /// to the firmware storage format.
+  Future<String?> findExistingByFields({
+    required String userId,
+    required String type,
+    required int startTsEpoch,
+    required int durationSec,
+    required int wrongCount,
+    required int wrongDurSec,
+  }) async {
+    final db = await database;
+
+    final String tsWhere;
+    final List<dynamic> tsArgs;
+
+    if (startTsEpoch == 0) {
+      // ts==0: match any row stored with epoch-zero start_ts.
+      tsWhere = "(start_ts = '1970-01-01T00:00:00.000Z' OR start_ts = '1970-01-01T00:00:00Z')";
+      tsArgs = [];
+    } else {
+      final iso = DateTime.fromMillisecondsSinceEpoch(
+        startTsEpoch * 1000,
+        isUtc: true,
+      ).toIso8601String();
+      tsWhere = 'start_ts = ?';
+      tsArgs = [iso];
+    }
+
+    final rows = await db.query(
+      'sessions',
+      columns: ['id'],
+      where: 'user_id = ? AND type = ? AND $tsWhere '
+          'AND duration_sec = ? AND '
+          'COALESCE(wrong_count,0) = ? AND COALESCE(wrong_dur_sec,0) = ?',
+      whereArgs: [userId, type, ...tsArgs, durationSec, wrongCount, wrongDurSec],
+      orderBy: 'created_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['id'] as String?;
+  }
+
   // ---------- Helpers ----------
 
   String? _encodeJson(dynamic value) {
