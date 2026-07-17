@@ -114,7 +114,7 @@ class PostureReading {
   final int calibrationPassedSamples;
   final int calibrationTotalSamples;
   final int calibrationProfileId;
-  final int calibrationSlot;
+
   final double calibrationRefX;
   final double calibrationRefY;
   final double calibrationRefZ;
@@ -179,7 +179,6 @@ class PostureReading {
     this.calibrationPassedSamples = 0,
     this.calibrationTotalSamples = 0,
     this.calibrationProfileId = -1,
-    this.calibrationSlot = -1,
     this.calibrationRefX = 0.0,
     this.calibrationRefY = 0.0,
     this.calibrationRefZ = 0.0,
@@ -326,9 +325,10 @@ class PostureReading {
       calibrationProfileId: json.containsKey('profile_id')
           ? toInt(json['profile_id'])
           : (current?.calibrationProfileId ?? -1),
-      calibrationSlot: json.containsKey('slot') && json['slot'] is! String
-          ? toInt(json['slot'])
-          : (current?.calibrationSlot ?? -1),
+      // Firmware no longer sends "slot" in any packet (removed from both the
+      // DONE packet and the profile list). Always -1 rather than inheriting
+      // a stale value from a previous reading, which was silently persisted
+      // to Supabase via CalibrationProfileSyncService.
       calibrationRefX: json.containsKey('x')
           ? toDouble(json['x'])
           : (current?.calibrationRefX ?? 0.0),
@@ -586,7 +586,6 @@ class DeviceInfo {
 
 class FirmwareProfile {
   final int id;
-  final int slot;
   final String name;
   final bool isActive;
   final bool isDefault;
@@ -595,7 +594,6 @@ class FirmwareProfile {
 
   const FirmwareProfile({
     required this.id,
-    required this.slot,
     required this.name,
     required this.isActive,
     required this.isDefault,
@@ -603,14 +601,18 @@ class FirmwareProfile {
     required this.quality,
   });
 
+  /// Parses a single profile entry from the "P" packet's `profiles` list.
+  /// NOTE: firmware no longer sends per-profile active/default flags (old
+  /// "a"/"d") or a slot ("s") — active/default are now top-level profile IDs
+  /// on the parent packet. isActive/isDefault here are placeholders; call
+  /// [copyWithActiveDefault] after comparing [id] against the packet's
+  /// top-level "active"/"default" fields.
   factory FirmwareProfile.fromJson(Map<String, dynamic> json) {
     return FirmwareProfile(
       id: (json['id'] as num?)?.toInt() ?? 0,
-      slot:
-      (json['s'] as num?)?.toInt() ?? (json['slot'] as num?)?.toInt() ?? 0,
       name: json['n']?.toString() ?? json['name']?.toString() ?? 'Profile',
-      isActive: (json['a'] as num?)?.toInt() == 1 || json['active'] == true,
-      isDefault: (json['d'] as num?)?.toInt() == 1 || json['default'] == true,
+      isActive: false,
+      isDefault: false,
       createdEpoch:
       (json['c'] as num?)?.toInt() ??
           (json['created'] as num?)?.toInt() ??
@@ -619,6 +621,20 @@ class FirmwareProfile {
       (json['q'] as num?)?.toInt() ??
           (json['quality'] as num?)?.toInt() ??
           0,
+    );
+  }
+
+  FirmwareProfile copyWithActiveDefault({
+    required bool isActive,
+    required bool isDefault,
+  }) {
+    return FirmwareProfile(
+      id: id,
+      name: name,
+      isActive: isActive,
+      isDefault: isDefault,
+      createdEpoch: createdEpoch,
+      quality: quality,
     );
   }
 
@@ -635,8 +651,9 @@ class FirmwareProfile {
 
   @override
   String toString() =>
-      'FirmwareProfile(id=$id, slot=$slot, name=$name, active=$isActive, default=$isDefault)';
+      'FirmwareProfile(id=$id, name=$name, active=$isActive, default=$isDefault)';
 }
+
 
 class TherapyCompletion {
   final int sessionId;
@@ -1186,8 +1203,7 @@ class AlignEyeDeviceService {
   /// Starts a calibration session and saves the result under [name].
   ///
   /// Flow (per updated firmware docs — same seq/ACK pattern as training):
-  ///   1. App -> FW: {"seq":N,"cmd":"CALIBRATE_START","slot":"auto",
-  ///      "name":"<name>"}
+  ///   1. App -> FW: {"seq":N,"cmd":"CALIBRATE_START","name":"<name>"}
   ///   2. FW -> App: {"t":"ACK","seq":N,"cmd":"CALIBRATE_START","ok":true}
   ///
   /// The ACK only confirms the *start request* was accepted — progress
@@ -1203,7 +1219,6 @@ class AlignEyeDeviceService {
     final command = {
       'seq': seq,
       'cmd': 'CALIBRATE_START',
-      'slot': 'auto',
       'name': name,
     };
 
@@ -2781,19 +2796,30 @@ class AlignEyeDeviceService {
             // Update profile list only.
             // Do not emit fake posture reading.
               final rawList = decoded['profiles'];
-              final profiles = (rawList is List)
+              final parsedProfiles = (rawList is List)
                   ? rawList
                   .whereType<Map<String, dynamic>>()
                   .map(FirmwareProfile.fromJson)
                   .toList()
                   : <FirmwareProfile>[];
 
-              final hasActiveCustom = profiles.any((p) => p.isActive);
-              final hasDefaultCustom = profiles.any((p) => p.isDefault);
+              // Top-level active/default are profile IDs (0 = system
+              // default / no stored profile) — match against profile.id.
+              final activeId = (decoded['active'] as num?)?.toInt() ?? 0;
+              final defaultId = (decoded['default'] as num?)?.toInt() ?? 0;
+
+              final profiles = parsedProfiles
+                  .map((p) => p.copyWithActiveDefault(
+                isActive: p.id == activeId,
+                isDefault: p.id == defaultId,
+              ))
+                  .toList();
+
+              final hasActiveCustom = activeId != 0;
+              final hasDefaultCustom = defaultId != 0;
 
               final systemDefault = FirmwareProfile(
                 id: 0,
-                slot: 0,
                 name: 'System default',
                 isActive: !hasActiveCustom,
                 isDefault: !hasDefaultCustom,

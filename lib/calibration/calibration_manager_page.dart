@@ -485,7 +485,7 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
               ),
               child: Center(
                 child: Text(
-                  widget.profile.id == 0 ? 'S' : '${widget.profile.slot}',
+                  widget.profile.id == 0 ? 'S' : '${widget.profile.id}',
                   style: TextStyle(
                     color: isDefault ? Colors.white : AppTheme.brandPrimary,
                     fontSize: 18,
@@ -499,110 +499,110 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
             Expanded(
               child: _isEditing
                   ? TextField(
-                      controller: _nameController,
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 6),
-                        border: UnderlineInputBorder(
-                          borderSide: BorderSide(color: AppTheme.brandPrimary),
-                        ),
-                        focusedBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: AppTheme.brandPrimary, width: 2),
-                        ),
-                      ),
-                      autofocus: true,
-                      maxLength: 23,
-                      buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
-                    )
+                controller: _nameController,
+                style: TextStyle(
+                  color: scheme.onSurface,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 6),
+                  border: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.brandPrimary),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.brandPrimary, width: 2),
+                  ),
+                ),
+                autofocus: true,
+                maxLength: 23,
+                buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
+              )
                   : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                widget.profile.name,
-                                style: TextStyle(
-                                  color: scheme.onSurface,
-                                  fontSize: 15,
-                                  fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (isDefault) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  gradient: AppTheme.brandGradient,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: const Text(
-                                  'DEFAULT',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ),
-                            ],
-                            if (isActive && !isDefault) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF22C55E).withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: const Color(0xFF22C55E).withValues(alpha: 0.3),
-                                  ),
-                                ),
-                                child: const Text(
-                                  'ACTIVE',
-                                  style: TextStyle(
-                                    color: Color(0xFF22C55E),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.profile.name,
+                          style: TextStyle(
+                            color: scheme.onSurface,
+                            fontSize: 15,
+                            fontWeight: isDefault ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Text(
-                              _formatDate(widget.profile.createdAt),
-                              style: const TextStyle(
-                                color: AppTheme.textMuted,
-                                fontSize: 12,
-                              ),
+                      ),
+                      if (isDefault) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            gradient: AppTheme.brandGradient,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'DEFAULT',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
                             ),
-                            if (widget.profile.quality > 0) ...[
-                              const SizedBox(width: 8),
-                              Text(
-                                '· ${widget.profile.qualityLabel}',
-                                style: TextStyle(
-                                  color: _qualityColor(widget.profile.quality),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ],
+                          ),
                         ),
                       ],
-                    ),
+                      if (isActive && !isDefault) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: const Text(
+                            'ACTIVE',
+                            style: TextStyle(
+                              color: Color(0xFF22C55E),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Text(
+                        _formatDate(widget.profile.createdAt),
+                        style: const TextStyle(
+                          color: AppTheme.textMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (widget.profile.quality > 0) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '· ${widget.profile.qualityLabel}',
+                          style: TextStyle(
+                            color: _qualityColor(widget.profile.quality),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
             ),
 
             const SizedBox(width: 8),
@@ -612,68 +612,68 @@ class _CalibrationSlotCardState extends State<_CalibrationSlotCard> {
               mainAxisSize: MainAxisSize.min,
               children: _isEditing
                   ? [
-                      _ActionIcon(
-                        icon: Icons.wifi_tethering_rounded,
-                        tooltip: 'Recalibrate',
-                        color: AppTheme.brandPrimary,
-                        onTap: () {
-                          setState(() {
-                            _isEditing = false;
-                          });
-                          widget.onSelect();
-                        },
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionIcon(
-                        icon: Icons.check_rounded,
-                        tooltip: 'Save',
-                        color: const Color(0xFF22C55E),
-                        onTap: () {
-                          final trimmed = _nameController.text.trim();
-                          if (trimmed.isNotEmpty && trimmed != widget.profile.name) {
-                            widget.onRename(trimmed);
-                          }
-                          setState(() {
-                            _isEditing = false;
-                          });
-                        },
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionIcon(
-                        icon: Icons.close_rounded,
-                        tooltip: 'Cancel',
-                        color: AppTheme.textMuted,
-                        onTap: () {
-                          setState(() {
-                            _isEditing = false;
-                            _nameController.text = widget.profile.name;
-                          });
-                        },
-                      ),
-                    ]
+                _ActionIcon(
+                  icon: Icons.wifi_tethering_rounded,
+                  tooltip: 'Recalibrate',
+                  color: AppTheme.brandPrimary,
+                  onTap: () {
+                    setState(() {
+                      _isEditing = false;
+                    });
+                    widget.onSelect();
+                  },
+                ),
+                const SizedBox(width: 6),
+                _ActionIcon(
+                  icon: Icons.check_rounded,
+                  tooltip: 'Save',
+                  color: const Color(0xFF22C55E),
+                  onTap: () {
+                    final trimmed = _nameController.text.trim();
+                    if (trimmed.isNotEmpty && trimmed != widget.profile.name) {
+                      widget.onRename(trimmed);
+                    }
+                    setState(() {
+                      _isEditing = false;
+                    });
+                  },
+                ),
+                const SizedBox(width: 6),
+                _ActionIcon(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Cancel',
+                  color: AppTheme.textMuted,
+                  onTap: () {
+                    setState(() {
+                      _isEditing = false;
+                      _nameController.text = widget.profile.name;
+                    });
+                  },
+                ),
+              ]
                   : [
-                      if (!isDefault)
-                        _ActionIcon(
-                          icon: Icons.star_border_rounded,
-                          tooltip: 'Set Default',
-                          color: const Color(0xFFF59E0B),
-                          onTap: widget.onSetDefault,
-                        ),
-                      if (isDefault)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
-                        ),
-                      if (!isDefault && widget.profile.id != 0) ...[
-                        const SizedBox(width: 4),
-                        _ActionIcon(
-                          icon: Icons.delete_outline_rounded,
-                          tooltip: 'Delete',
-                          color: AppTheme.destructive,
-                          onTap: widget.onDelete,
-                        ),
-                      ],
-                    ],
+                if (!isDefault)
+                  _ActionIcon(
+                    icon: Icons.star_border_rounded,
+                    tooltip: 'Set Default',
+                    color: const Color(0xFFF59E0B),
+                    onTap: widget.onSetDefault,
+                  ),
+                if (isDefault)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 22),
+                  ),
+                if (!isDefault && widget.profile.id != 0) ...[
+                  const SizedBox(width: 4),
+                  _ActionIcon(
+                    icon: Icons.delete_outline_rounded,
+                    tooltip: 'Delete',
+                    color: AppTheme.destructive,
+                    onTap: widget.onDelete,
+                  ),
+                ],
+              ],
             ),
           ],
         ),
@@ -924,4 +924,3 @@ class _DeleteDialog extends StatelessWidget {
     );
   }
 }
-
