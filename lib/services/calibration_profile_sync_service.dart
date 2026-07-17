@@ -20,7 +20,6 @@ class CalibrationProfileSyncService {
               'user_id': user.id,
               'name': profileName,
               'profile_id': reading.calibrationProfileId,
-              'slot': reading.calibrationSlot,
               'quality': reading.calibrationQuality,
               'ref_x': reading.calibrationRefX,
               'ref_y': reading.calibrationRefY,

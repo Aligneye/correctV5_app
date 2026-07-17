@@ -103,26 +103,10 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
                 _kSectionSpacing,
 
-                // ── Firmware Update Card ────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 200,
-                  child: const _FirmwareUpdateCard(),
-                ),
-                _kSectionSpacing,
-
-                // ── Alignment Calibration Card ──────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 300,
-                  child: const _AlignmentCalibrationCard(),
-                ),
-                _kSectionSpacing,
-
                 // ── Battery & Temperature Row ───────────────────────
                 _StaggeredFadeSlide(
                   controller: _controller,
-                  delayMs: 400,
+                  delayMs: 200,
                   child: const _BatteryTemperatureRow(),
                 ),
                 _kSectionSpacing,
@@ -130,7 +114,7 @@ class _SettingsPageState extends State<SettingsPage>
                 // ── Connection Settings Card ────────────────────────
                 _StaggeredFadeSlide(
                   controller: _controller,
-                  delayMs: 500,
+                  delayMs: 300,
                   child: _ConnectionSettingsCard(
                     lowPowerMode: _lowPowerMode,
                     vibrationAlerts: _vibrationAlerts,
@@ -147,15 +131,31 @@ class _SettingsPageState extends State<SettingsPage>
                 // ── Appearance Card ─────────────────────────────────
                 _StaggeredFadeSlide(
                   controller: _controller,
-                  delayMs: 550,
+                  delayMs: 400,
                   child: const _AppearanceCard(),
+                ),
+                _kSectionSpacing,
+
+                // ── Firmware Update Card ────────────────────────────
+                _StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 450,
+                  child: const _FirmwareUpdateCard(),
+                ),
+                _kSectionSpacing,
+
+                // ── Alignment Calibration Card ──────────────────────
+                _StaggeredFadeSlide(
+                  controller: _controller,
+                  delayMs: 500,
+                  child: const _AlignmentCalibrationCard(),
                 ),
                 _kSectionSpacing,
 
                 // ── Medical Disclaimer ──────────────────────────────
                 _StaggeredFadeSlide(
                   controller: _controller,
-                  delayMs: 575,
+                  delayMs: 550,
                   child: const _MedicalDisclaimerCard(),
                 ),
                 _kSectionSpacing,
@@ -1304,17 +1304,13 @@ class _MedicalDisclaimerCard extends StatelessWidget {
       padding: EdgeInsets.zero,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: scheme.primaryContainer,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.health_and_safety_outlined,
-            color: scheme.primary,
-            size: 22,
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Image.asset(
+            'assets/appIcon.png',
+            width: 52,
+            height: 52,
+            fit: BoxFit.cover,
           ),
         ),
         title: Text(

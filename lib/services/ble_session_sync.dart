@@ -49,9 +49,9 @@ class _SessionRecord {
 
   String? get startTsIso => startTsEpoch > 0
       ? DateTime.fromMillisecondsSinceEpoch(
-          startTsEpoch * 1000,
-          isUtc: true,
-        ).toIso8601String()
+    startTsEpoch * 1000,
+    isUtc: true,
+  ).toIso8601String()
       : null;
 }
 
@@ -231,9 +231,9 @@ class BleSessionSync {
   /// Wait for the next packet that satisfies [matcher], up to [timeout].
   /// Returns null on timeout.
   Future<Map<String, dynamic>?> _waitFor(
-    bool Function(Map<String, dynamic>) matcher, {
-    required Duration timeout,
-  }) async {
+      bool Function(Map<String, dynamic>) matcher, {
+        required Duration timeout,
+      }) async {
     final c = Completer<Map<String, dynamic>>();
     _waitCompleter = c;
     _waitMatcher = matcher;
@@ -272,6 +272,10 @@ class BleSessionSync {
   // ── main fetch loop ───────────────────────────────────────────────────────
 
   Future<void> _runFetchLoop() async {
+    // Tracks consecutive SESS_HDR-missing-xfer failures so we retry instead
+    // of silently dying on a single flaky packet.
+    int xferRetries = 0;
+
     // Keep fetching until the device says n==0 (drained).
     while (true) {
       if (!_running) return;
@@ -296,8 +300,19 @@ class BleSessionSync {
       }
 
       final n = (hdr['n'] as num?)?.toInt() ?? 0;
-      final xfer = hdr['xfer'];
+      final xfer = (hdr['xfer'] as num?)?.toInt();
       debugPrint('[SESSION] SESS_HDR n=$n xfer=$xfer');
+
+      if (xfer == null) {
+        xferRetries++;
+        debugPrint('[SESSION] SESS_HDR missing/null xfer (attempt $xferRetries) — retrying');
+        if (xferRetries >= 3) {
+          debugPrint('[SESSION] Giving up after $xferRetries xfer failures');
+          return;
+        }
+        continue; // while(true) ke top pe wapas — naya FETCH_SESSIONS bhejega
+      }
+      xferRetries = 0; // reset on a good header
 
       if (n == 0) {
         debugPrint('[SESSION] Device drained — sync complete');
@@ -351,7 +366,7 @@ class BleSessionSync {
 
         // Wait briefly for a possible error response.
         final ackResp = await _waitFor(
-          (m) => m['t']?.toString().toUpperCase() == 'ACK' &&
+              (m) => m['t']?.toString().toUpperCase() == 'ACK' &&
               m['cmd']?.toString().toUpperCase() == 'ACK_SESSIONS',
           timeout: const Duration(seconds: 3),
         );
@@ -385,7 +400,7 @@ class BleSessionSync {
       if (!sent) return null;
 
       final hdr = await _waitFor(
-        (m) => m['t']?.toString().toUpperCase() == 'SESS_HDR',
+            (m) => m['t']?.toString().toUpperCase() == 'SESS_HDR',
         timeout: const Duration(seconds: 5),
       );
       if (hdr != null && hdr.isNotEmpty) return hdr;
@@ -398,13 +413,13 @@ class BleSessionSync {
 
   /// Accumulates SESS_DATA packets until SESS_END.
   /// Returns null if the stream stalls (10 s between packets).
-  Future<_CollectedSession?> _collectSession(int n, dynamic xfer) async {
+  Future<_CollectedSession?> _collectSession(int n, int xfer) async {
     final packets = <int, _SessionRecord>{};
     int pk = n; // updated when SESS_END arrives
 
     while (true) {
       final msg = await _waitFor(
-        (m) {
+            (m) {
           final t = m['t']?.toString().toUpperCase();
           return t == 'SESS_DATA' || t == 'SESS_END';
         },
