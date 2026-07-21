@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -2850,6 +2851,59 @@ class AlignEyeDeviceService {
             // Device signals a new session is available to fetch.
               debugPrint('[SESSION] SESS_AVAIL received');
               _sessAvailController.add(null);
+              break;
+
+            case 'STATUS':
+            // Periodic health snapshot (battery + raw IMU), sent every 5s in
+            // any mode. Update battery cache and emit a lightweight reading so
+            // the IDLE gauge stays live without needing an L or T packet.
+              final rawBattery = decoded['battery'];
+              if (rawBattery != null) {
+                _lastKnownBattery =
+                    int.tryParse(rawBattery.toString()) ?? _lastKnownBattery;
+              }
+
+              // Compute a posture angle from the raw accelerometer axes so
+              // the home-screen gauge animates in IDLE mode at 5s cadence.
+              // Formula: tilt angle = arctan2(sqrt(x²+z²), y) * 180/π
+              // This matches the convention used in the L packet's angle field
+              // (device Y-axis points along the spine, so deviation from
+              // vertical is the angle between Y and the gravity vector).
+              final rawX = (decoded['x'] as num?)?.toDouble() ?? 0.0;
+              final rawY = (decoded['y'] as num?)?.toDouble() ?? 0.0;
+              final rawZ = (decoded['z'] as num?)?.toDouble() ?? 0.0;
+              final xzMag = math.sqrt(rawX * rawX + rawZ * rawZ);
+              final idleAngle = math.atan2(xzMag, rawY.abs()) *
+                  180.0 / math.pi;
+
+              final prev = currentReading.value;
+              // Only emit in IDLE — in active modes the L/T packets already
+              // keep the reading current and we don't want STATUS to stomp them.
+              final activeMode =
+                  prev?.mode.toUpperCase() ?? _lastKnownMode.toUpperCase();
+              if (activeMode == 'IDLE') {
+                final statusReading = PostureReading.fromJson(
+                  {
+                    'mode': 'IDLE',
+                    'battery': _lastKnownBattery,
+                    'raw_x_g': rawX,
+                    'raw_y_g': rawY,
+                    'raw_z_g': rawZ,
+                    'angle': idleAngle,
+                  },
+                  current: prev,
+                );
+                _emitReading(statusReading, throttle: false);
+              } else {
+                // Still update battery on currentReading even when active.
+                if (prev != null && rawBattery != null) {
+                  final updated = PostureReading.fromJson(
+                    {'battery': _lastKnownBattery},
+                    current: prev,
+                  );
+                  _emitReading(updated, throttle: false);
+                }
+              }
               break;
           }
         }

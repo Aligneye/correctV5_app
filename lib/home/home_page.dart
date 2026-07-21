@@ -14,7 +14,8 @@ import 'package:correctv1/home/ongoing_therapy_page.dart';
 import 'package:correctv1/home/therapy_page.dart';
 import 'package:correctv1/home/training_page.dart';
 import 'package:correctv1/analytics/analytics_screen.dart';
-import 'package:correctv1/sessions/sessions_history_page.dart' show SessionsHistoryPage, SessionFilter;
+import 'package:correctv1/sessions/sessions_history_page.dart'
+    show SessionsHistoryPage, SessionFilter;
 import 'package:correctv1/settings/settings_page.dart';
 import 'package:correctv1/components/nav_bar.dart';
 import 'package:correctv1/calibration/calibration_manager_page.dart';
@@ -404,15 +405,15 @@ class _HomeDashboardState extends State<HomeDashboard>
 
       final postureText = reading.posture.trim();
       postureStatusNotifier.value =
-      postureText.isNotEmpty && postureText.toUpperCase() != 'UNKNOWN'
+          postureText.isNotEmpty && postureText.toUpperCase() != 'UNKNOWN'
           ? postureText
           : (reading.isBadPosture ? 'BAD POSTURE' : 'GOOD POSTURE');
 
       final isTherapyMode = reading.mode.trim().toUpperCase() == 'THERAPY';
       final isLiveMode =
           isTherapyMode ||
-              reading.mode.trim().toUpperCase() == 'TRAINING' ||
-              reading.mode.trim().toUpperCase() == 'POSTURE';
+          reading.mode.trim().toUpperCase() == 'TRAINING' ||
+          reading.mode.trim().toUpperCase() == 'POSTURE';
       final reportedRemainingSec = reading.therapyRemainingSeconds;
 
       _batteryLevel.value = reading.batteryPercentage.clamp(0, 100);
@@ -658,19 +659,19 @@ class _HomeDashboardState extends State<HomeDashboard>
   Future<void> _checkFirmwareLatestInSupabase(DeviceInfo info) async {
     _printDeviceInfoLog(
       'Checking Supabase firmware version for '
-          'model=${info.model}, hw=${info.hardwareRevision}, fw=${info.firmwareVersion}',
+      'model=${info.model}, hw=${info.hardwareRevision}, fw=${info.firmwareVersion}',
     );
 
     final manifest = await FirmwareManifestService()
         .fetchLatestForDeviceFromSupabase(
-      deviceModel: info.model,
-      hardwareRevision: info.hardwareRevision,
-    );
+          deviceModel: info.model,
+          hardwareRevision: info.hardwareRevision,
+        );
 
     if (manifest == null) {
       _printDeviceInfoLog(
         'Supabase firmware check: no active firmware row found for '
-            'model=${info.model}, hw=${info.hardwareRevision}',
+        'model=${info.model}, hw=${info.hardwareRevision}',
       );
       return;
     }
@@ -682,18 +683,18 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     _printDeviceInfoLog(
       'Supabase firmware check result: '
-          'current=${info.firmwareVersion}, '
-          'latest=${manifest.latestVersion}, '
-          'build=${manifest.buildNumber}, '
-          'updateAvailable=$hasUpdate',
+      'current=${info.firmwareVersion}, '
+      'latest=${manifest.latestVersion}, '
+      'build=${manifest.buildNumber}, '
+      'updateAvailable=$hasUpdate',
     );
 
     if (hasUpdate) {
       _printDeviceInfoLog(
         'Firmware update available: '
-            'current=${info.firmwareVersion}, latest=${manifest.latestVersion}, '
-            'notes=${manifest.releaseNotes.join(" | ")}, '
-            'url=${manifest.firmwareUrl}',
+        'current=${info.firmwareVersion}, latest=${manifest.latestVersion}, '
+        'notes=${manifest.releaseNotes.join(" | ")}, '
+        'url=${manifest.firmwareUrl}',
       );
     } else {
       _printDeviceInfoLog('Firmware is latest: ${info.firmwareVersion}');
@@ -703,7 +704,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _printDeviceInfoStatus(String reason) {
     _printDeviceInfoLog(
       'Device info status [$reason]: '
-          '${_deviceService.connectionStatus.value}',
+      '${_deviceService.connectionStatus.value}',
     );
   }
 
@@ -717,7 +718,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _syncLiveSessionTickerWithConnection() {
     final connected =
         _deviceService.connectionStatus.value ==
-            DeviceConnectionStatus.connected;
+        DeviceConnectionStatus.connected;
     final hasLiveSession = _deviceManager.activeSessionId.value != null;
     if (connected && hasLiveSession && _liveDisplayHasFrame) {
       _ensureLiveSessionTicker();
@@ -764,7 +765,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       // 🔥 CHANGE 2: Agar conditions follow nahi ho rahi hain, toh return karne ke bajay
       // ticker ko cancel karke band kar dein taaki battery aur memory bache.
       if (_deviceService.connectionStatus.value !=
-          DeviceConnectionStatus.connected ||
+              DeviceConnectionStatus.connected ||
           _deviceManager.activeSessionId.value == null ||
           !_liveDisplayHasFrame) {
         _liveSessionTicker?.cancel();
@@ -906,7 +907,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       gradient: gradient,
       positiveTrend: positive,
       trendNeutral:
-      !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
+          !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
     );
   }
 
@@ -1051,10 +1052,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   static StatItemData _lastSessionStatItem(
-      List<SessionData> sessions,
-      bool isLoading, {
-      VoidCallback? onTap,
-      }) {
+    List<SessionData> sessions,
+    bool isLoading, {
+    VoidCallback? onTap,
+  }) {
     const label = 'Last session';
 
     if (isLoading && sessions.isEmpty) {
@@ -1098,7 +1099,10 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  static StatItemData _trainingTimeStatItem(TodayStats? stats, {VoidCallback? onTap}) {
+  static StatItemData _trainingTimeStatItem(
+    TodayStats? stats, {
+    VoidCallback? onTap,
+  }) {
     return _durationStatItem(
       stats: stats,
       label: 'Training time',
@@ -1300,7 +1304,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   static const String _kXpLastLevel = 'xp_last_level';
   static const String _kXpTherapyPool = 'xp_therapy_pool';
   static const String _kXpTrainingPool = 'xp_training_pool';
-  static const String _kWeeklyRecapLastShownWeek = 'weekly_recap_last_shown_week';
+  static const String _kWeeklyRecapLastShownWeek =
+      'weekly_recap_last_shown_week';
 
   Future<void> _persistStreakCache(StreakStats stats) async {
     try {
@@ -1394,10 +1399,8 @@ class _HomeDashboardState extends State<HomeDashboard>
         context: context,
         barrierDismissible: false,
         barrierColor: Colors.black.withValues(alpha: 0.55),
-        builder: (_) => LevelUpPopup(
-          xpStats: stats,
-          resolveTarget: _resolveXpTileRect,
-        ),
+        builder: (_) =>
+            LevelUpPopup(xpStats: stats, resolveTarget: _resolveXpTileRect),
       );
     });
   }
@@ -1530,11 +1533,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _showXpDetailSheet() {
     final stats = _xpStats;
     if (stats == null || !mounted) return;
-    showXpDetailSheet(
-      context,
-      xpStats: stats,
-      repository: _sessionRepository,
-    );
+    showXpDetailSheet(context, xpStats: stats, repository: _sessionRepository);
   }
 
   static String _streakDayKey(DateTime d) =>
@@ -1554,7 +1553,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   /// live-posture card for a compact ongoing-therapy preview.
   bool get _isTherapyLive =>
       _selectedMode == ModeControlType.therapy &&
-          _therapyRemainingSeconds.value > 0;
+      _therapyRemainingSeconds.value > 0;
 
   /// Idempotent: spin up the 1 Hz ticker if it isn't already alive. Called
   /// from the BLE reading handler on every frame so the countdown keeps
@@ -1563,8 +1562,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   void _ensureTherapyCountdownRunning() {
     if (_therapyCountdownTimer?.isActive ?? false) return;
     _therapyCountdownTimer = Timer.periodic(const Duration(seconds: 1), (
-        timer,
-        ) {
+      timer,
+    ) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -1848,10 +1847,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                               onPressed: isConnecting
                                   ? null
                                   : () {
-                                setModalState(() => isConnecting = true);
-                                Navigator.of(context).pop();
-                                unawaited(_handleDeviceStatusTap());
-                              },
+                                      setModalState(() => isConnecting = true);
+                                      Navigator.of(context).pop();
+                                      unawaited(_handleDeviceStatusTap());
+                                    },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: popupPrimary,
                                 foregroundColor: Colors.white,
@@ -1862,13 +1861,13 @@ class _HomeDashboardState extends State<HomeDashboard>
                               ),
                               child: isConnecting
                                   ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
                                   : const Text('Connect'),
                             ),
                           ),
@@ -2195,10 +2194,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                             valueListenable: _deviceManager.activeSessionId,
                             builder: (context, activeSessionId, child) {
                               return ValueListenableBuilder<String>(
-                                valueListenable: _deviceService.activeProfileName,
+                                valueListenable:
+                                    _deviceService.activeProfileName,
                                 builder: (context, profile, child) {
                                   return ValueListenableBuilder<String>(
-                                    valueListenable: _deviceService.connectingLabel,
+                                    valueListenable:
+                                        _deviceService.connectingLabel,
                                     builder: (context, connectingLabel, child) {
                                       return TopHeaderBar(
                                         status: connectionStatus,
@@ -2263,44 +2264,44 @@ class _HomeDashboardState extends State<HomeDashboard>
                   // tap it to jump into the full immersive page.
                   child: _isTherapyLive
                       ? MiniOngoingTherapyCard(
-                    deviceService: _deviceService,
-                    totalMinutes: _therapyDurationMinutes,
-                    onTap: _openOngoingTherapyFromHome,
-                  )
-                  // : PostureGaugeCard(
-                  //     postureAngle: _postureAngle,
-                  //     postureStatus: _postureStatus,
-                  //     isBadPosture: _isBadPosture,
-                  //     controller: _controller,
-                  //   ),
+                          deviceService: _deviceService,
+                          totalMinutes: _therapyDurationMinutes,
+                          onTap: _openOngoingTherapyFromHome,
+                        )
+                      // : PostureGaugeCard(
+                      //     postureAngle: _postureAngle,
+                      //     postureStatus: _postureStatus,
+                      //     isBadPosture: _isBadPosture,
+                      //     controller: _controller,
+                      //   ),
                       : ValueListenableBuilder<double>(
-                    valueListenable: postureAngleNotifier,
+                          valueListenable: postureAngleNotifier,
 
-                    builder: (context, angle, _) =>
-                        ValueListenableBuilder<bool>(
-                          valueListenable: isBadPostureNotifier,
+                          builder: (context, angle, _) =>
+                              ValueListenableBuilder<bool>(
+                                valueListenable: isBadPostureNotifier,
 
-                          builder: (context, isBad, _) =>
-                              ValueListenableBuilder<String>(
-                                valueListenable: postureStatusNotifier,
+                                builder: (context, isBad, _) =>
+                                    ValueListenableBuilder<String>(
+                                      valueListenable: postureStatusNotifier,
 
-                                builder: (context, status, _) =>
-                                    ValueListenableBuilder<int>(
-                                      valueListenable:
-                                      difficultyDegNotifier,
+                                      builder: (context, status, _) =>
+                                          ValueListenableBuilder<int>(
+                                            valueListenable:
+                                                difficultyDegNotifier,
 
-                                      builder: (context, diff, _) =>
-                                          PostureGaugeCard(
-                                            postureAngle: angle,
-                                            postureStatus: status,
-                                            isBadPosture: isBad,
-                                            difficultyDeg: diff,
-                                            controller: _controller,
+                                            builder: (context, diff, _) =>
+                                                PostureGaugeCard(
+                                                  postureAngle: angle,
+                                                  postureStatus: status,
+                                                  isBadPosture: isBad,
+                                                  difficultyDeg: diff,
+                                                  controller: _controller,
+                                                ),
                                           ),
                                     ),
                               ),
                         ),
-                  ),
                 ),
                 _kSectionSpacing,
                 StaggeredFadeSlide(
@@ -2477,17 +2478,19 @@ class _HomeDashboardState extends State<HomeDashboard>
                             isLoading: _isLoadingOfflineSessions,
                             isSyncing: isSyncing,
                             isDeviceDisconnected:
-                            status == DeviceConnectionStatus.disconnected &&
+                                status == DeviceConnectionStatus.disconnected &&
                                 !_syncBannerDismissed,
                             isDeviceConnecting:
-                            status == DeviceConnectionStatus.connecting,
+                                status == DeviceConnectionStatus.connecting,
                             onViewAll: () => Navigator.of(context).push<void>(
                               MaterialPageRoute<void>(
                                 builder: (_) => const SessionsHistoryPage(),
                               ),
                             ),
-                            onSessionTap: (session) =>
-                                showSessionDetailSheet(context, session: session),
+                            onSessionTap: (session) => showSessionDetailSheet(
+                              context,
+                              session: session,
+                            ),
                             onSyncNow: () => unawaited(_handleSyncNow()),
                           );
                         },
@@ -2512,7 +2515,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     if (!mounted) return;
 
     final wasAlreadyConnected =
-        _deviceService.connectionStatus.value == DeviceConnectionStatus.connected;
+        _deviceService.connectionStatus.value ==
+        DeviceConnectionStatus.connected;
 
     if (wasAlreadyConnected) {
       setState(() => _pullConnectPhase = PullConnectPhase.syncing);
@@ -2535,7 +2539,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     await _handleSyncNow();
 
     final isConnectedNow =
-        _deviceService.connectionStatus.value == DeviceConnectionStatus.connected;
+        _deviceService.connectionStatus.value ==
+        DeviceConnectionStatus.connected;
 
     if (!mounted) return;
     if (isConnectedNow) {
@@ -2564,7 +2569,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         const SnackBar(
           content: Text(
             'Bluetooth connection cancelled. '
-                'Tap the connect button when ready.',
+            'Tap the connect button when ready.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -2573,14 +2578,11 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 }
 
-
-
 /// Compact preview of an in-progress therapy session shown in the home
 /// dashboard in place of the live-posture gauge. Mirrors the visual language
 /// of [OngoingTherapyPage] — soft pink gradient, gentle breathing orb —
 /// while staying small enough to sit in the stats column. Tapping anywhere
 /// on the card opens the full immersive page.
-
 
 class _WeeklyRecapSheet extends StatelessWidget {
   const _WeeklyRecapSheet({
@@ -2758,6 +2760,7 @@ class _RecapStat extends StatelessWidget {
 class _TherapyTimeTile extends StatelessWidget {
   final StatItemData item;
   final VoidCallback? onTap;
+
   const _TherapyTimeTile({required this.item, this.onTap});
 
   @override
@@ -2799,10 +2802,7 @@ class _TherapyTimeTile extends StatelessWidget {
                 item.unit != null && item.unit!.isNotEmpty
                     ? '${item.value} ${item.unit}'
                     : item.value,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: scheme.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
