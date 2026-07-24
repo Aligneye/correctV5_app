@@ -9,6 +9,7 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
+  String? _lastStreakNotifiedDay;
 
   static const int _streakReminderId = 1001;
   static const String _channelId = 'streak_reminder';
@@ -32,6 +33,18 @@ class NotificationService {
     int hour = 20,
     int minute = 0,
   }) async {
+    final today = DateTime.now();
+    final todayKey =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
+    // Fire at most once per calendar day
+    if (_lastStreakNotifiedDay == todayKey) return;
+
+    // Only show after the scheduled hour
+    if (today.hour < hour || (today.hour == hour && today.minute < minute)) {
+      return;
+    }
+
     try {
       await _plugin.cancel(_streakReminderId);
 
@@ -44,20 +57,14 @@ class NotificationService {
       );
       const details = NotificationDetails(android: androidDetails);
 
-      final now = DateTime.now();
-      var scheduled = DateTime(now.year, now.month, now.day, hour, minute);
-      if (scheduled.isBefore(now)) {
-        scheduled = scheduled.add(const Duration(days: 1));
-      }
-
-      // Use show with a future: schedule once for tonight.
-      // Re-scheduled each app open via updateStreakReminderForToday.
       await _plugin.show(
         _streakReminderId,
         'Streak Alert! 🔥',
-        'Aaj ka session abhi nahi hua. Streak tutne wali hai — ek chhota session karo!',
+        "You haven't done today's session yet. Your streak is at risk — do a quick session now!",
         details,
       );
+
+      _lastStreakNotifiedDay = todayKey;
     } catch (e) {
       debugPrint('NotificationService: scheduleDailyStreakReminder failed: $e');
     }
