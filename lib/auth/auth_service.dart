@@ -11,7 +11,7 @@ class AuthService {
     serverClientId: const String.fromEnvironment(
       'GOOGLE_WEB_CLIENT_ID',
       defaultValue:
-          '187361659101-t4ddosvvllvpbln81olnnf73ql62euqv.apps.googleusercontent.com',
+          '204892022204-f8u1iunqil1u4m6hflmt2gtg3gf8ov9d.apps.googleusercontent.com',
     ),
   );
   static Map<String, dynamic>? _pendingLoginPrefill;
@@ -52,37 +52,38 @@ class AuthService {
     );
   }
 
-  // static Future<void> signInWithGoogle() async {
-  //   if (kIsWeb) {
-  //     await _auth.signInWithOAuth(OAuthProvider.google);
-  //     return;
-  //   }
-  //
-  //   final googleUser = await _googleSignIn.signIn();
-  //   if (googleUser == null) {
-  //     throw const AuthException('Google sign-in was cancelled.');
-  //   }
-  //
-  //   final googleAuth = await googleUser.authentication;
-  //   final idToken = googleAuth.idToken;
-  //   if (idToken == null || idToken.isEmpty) {
-  //     throw const AuthException('Google sign-in failed: missing ID token.');
-  //   }
-  //
-  //   await _auth.signInWithIdToken(
-  //     provider: OAuthProvider.google,
-  //     idToken: idToken,
-  //     accessToken: googleAuth.accessToken,
-  //   );
-  // }
   static Future<void> signInWithGoogle() async {
-    await _auth.signInWithOAuth(
-      OAuthProvider.google,
-      redirectTo: kIsWeb
-          ? null
-          : 'io.supabase.flutter://login-callback/',
+    if (kIsWeb) {
+      await _auth.signInWithOAuth(OAuthProvider.google);
+      return;
+    }
+
+    final googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) {
+      throw const AuthException('Google sign-in was cancelled.');
+    }
+
+    final googleAuth = await googleUser.authentication;
+    final idToken = googleAuth.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      throw const AuthException('Google sign-in failed: missing ID token.');
+    }
+
+    await _auth.signInWithIdToken(
+      provider: OAuthProvider.google,
+      idToken: idToken,
+      accessToken: googleAuth.accessToken,
     );
   }
+
+  // static Future<void> signInWithGoogle() async {
+  //   await _auth.signInWithOAuth(
+  //     OAuthProvider.google,
+  //     redirectTo: kIsWeb
+  //         ? null
+  //         : 'io.supabase.flutter://login-callback/',
+  //   );
+  // }
 
   static void setPendingLoginPrefill({
     required String email,
