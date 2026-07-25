@@ -767,13 +767,33 @@ class AlignEyeDeviceService {
   final currentReading = ValueNotifier<PostureReading?>(null);
   final deviceInfo = ValueNotifier<DeviceInfo?>(null);
   final activeProfileName = ValueNotifier<String>('');
+  /// Notifier for RSSI-based signal strength (-1 = unknown, 0..100 = percentage).
+  final signalStrength = ValueNotifier<int>(-1);
+  /// True when RSSI drops below [_kWeakRssiThreshold] while connected.
+  final isWeakSignal = ValueNotifier<bool>(false);
   String _lastKnownMode = 'IDLE';
   String _lastKnownSubMode = 'INSTANT';
   String _lastKnownProfile = '';
   int _lastKnownBattery = -1;
   DateTime? _lastUiFrame;
   Timer? _dataWatchdogTimer;
+  Timer? _rssiTimer;
   DateTime? _lastDataReceivedAt;
+  bool _userInitiatedDisconnect = false;
+  bool get userInitiatedDisconnect => _userInitiatedDisconnect;
+  int _autoReconnectAttempts = 0;
+  static const int _kWeakRssiThreshold = -80; // dBm
+  // Backoff schedule: quick retries first, then settle at 5-min cadence.
+  // No hard cap — retries stop only when user disconnects/forgets.
+  static const List<Duration> _kReconnectDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 15),
+    Duration(seconds: 30),
+    Duration(minutes: 1),
+    Duration(minutes: 2),
+    Duration(minutes: 5),
+  ];
 
   /// Sticky cache of the latest therapy pattern plan + live index. Firmware
   /// publishes `t_seq` / `t_cur` only periodically (not every JSON frame),
@@ -1802,6 +1822,7 @@ class AlignEyeDeviceService {
 
         try {
           await _device!.connect(
+            license: License.nonprofit,
             timeout: const Duration(seconds: 8),
             autoConnect: shouldAutoConnect,
           );
@@ -1921,7 +1942,7 @@ class AlignEyeDeviceService {
         final last = _lastDataReceivedAt;
         if (last != null && DateTime.now().difference(last).inSeconds > 25) {
           if (currentIsCalibrating) return;
-          debugPrint('WATCHDOG: No data for 15s, forcing disconnect');
+          debugPrint('WATCHDOG: No data for 25s, forcing disconnect');
           disconnect();
         }
       });
@@ -1941,9 +1962,35 @@ class AlignEyeDeviceService {
       connectionStatus.value = DeviceConnectionStatus.connected;
       _connectionRetryCount = 0; // Reset retry count on success
 
+      if (!_userInitiatedDisconnect) {
+        _autoReconnectAttempts = 0;
+      }
+
       // Sync phone time to device immediately after every successful connection.
       sendDateTime().then((sent) {
         debugPrint(sent ? 'DateTime synced to device' : 'DateTime sync failed');
+      });
+
+      // RSSI monitor — poll every 5s to detect weak signal before dropout.
+      _rssiTimer?.cancel();
+      _rssiTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+        final dev = _device;
+        if (dev == null ||
+            connectionStatus.value != DeviceConnectionStatus.connected) return;
+        try {
+          final rssi = await dev.readRssi();
+          // Map dBm (-40 strong .. -100 very weak) to 0-100%
+          const best = -40;
+          const worst = -100;
+          final pct = ((rssi - worst) / (best - worst) * 100)
+              .clamp(0, 100)
+              .toInt();
+          signalStrength.value = pct;
+          isWeakSignal.value = rssi < _kWeakRssiThreshold;
+          if (rssi < _kWeakRssiThreshold) {
+            debugPrint('Weak BLE signal: $rssi dBm ($pct%)');
+          }
+        } catch (_) {}
       });
 
       Future.delayed(const Duration(milliseconds: 500), () {
@@ -1973,11 +2020,16 @@ class AlignEyeDeviceService {
 
   Future<void> disconnect({bool userInitiated = false}) async {
     debugPrint('Disconnecting (userInitiated: $userInitiated)');
+    if (userInitiated) {
+      _userInitiatedDisconnect = true;
+      _autoReconnectAttempts = 0;
+    }
 
     // Cancel any pending connection attempts
     _isConnecting = false;
     _connectionTimeoutTimer?.cancel();
     _reconnectTimer?.cancel();
+    _rssiTimer?.cancel();
 
     final deviceToDisconnect = _device;
 
@@ -2013,6 +2065,8 @@ class AlignEyeDeviceService {
     currentReading.value = null;
     deviceInfo.value = null;
     activeProfileName.value = '';
+    signalStrength.value = -1;
+    isWeakSignal.value = false;
     connectionStatus.value = DeviceConnectionStatus.disconnected;
 
     debugPrint('Disconnect completed');
@@ -2021,6 +2075,8 @@ class AlignEyeDeviceService {
   Future<void> forgetDevice() async {
     debugPrint('Forgetting AlignEye device');
 
+    _userInitiatedDisconnect = true;
+    _autoReconnectAttempts = 0;
     _connectionTimeoutTimer?.cancel();
     _reconnectTimer?.cancel();
 
@@ -2077,10 +2133,13 @@ class AlignEyeDeviceService {
     await _ackController.close();
     await _sessAvailController.close();
     await _cleanupScan();
+    _rssiTimer?.cancel();
     connectionStatus.dispose();
     currentReading.dispose();
     deviceInfo.dispose();
     activeProfileName.dispose();
+    signalStrength.dispose();
+    isWeakSignal.dispose();
   }
 
   Future<void> _ensureBluetoothOn() async {
@@ -2525,35 +2584,20 @@ class AlignEyeDeviceService {
     final serviceUuidLower = _kServiceUuid.toLowerCase();
     final charUuidLower = _kCharacteristicUuid.toLowerCase();
 
-    debugPrint('Searching for service: $serviceUuidLower');
-    debugPrint('Searching for characteristic: $charUuidLower');
-
     for (final service in services) {
-      final serviceUuid = service.uuid.toString().toLowerCase();
-      debugPrint('Checking service: $serviceUuid');
-
-      if (serviceUuid == serviceUuidLower) {
-        debugPrint('Found matching service!');
-        for (final characteristic in service.characteristics) {
-          final charUuid = characteristic.uuid.toString().toLowerCase();
-          debugPrint('  Checking characteristic: $charUuid');
-
-          if (charUuid == charUuidLower) {
-            debugPrint('  Found matching characteristic!');
-            // Verify it supports notifications
-            if (characteristic.properties.notify ||
-                characteristic.properties.indicate) {
-              debugPrint('  Characteristic supports notifications - SUCCESS!');
-              return characteristic;
-            } else {
-              debugPrint('  Characteristic does NOT support notifications');
-            }
-          }
+      if (service.uuid.toString().toLowerCase() != serviceUuidLower) continue;
+      for (final characteristic in service.characteristics) {
+        if (characteristic.uuid.toString().toLowerCase() != charUuidLower) continue;
+        if (characteristic.properties.notify ||
+            characteristic.properties.indicate) {
+          debugPrint('BLE: found notify characteristic');
+          return characteristic;
         }
+        debugPrint('BLE: characteristic found but no notify/indicate property');
       }
     }
 
-    debugPrint('Could not find matching service/characteristic');
+    debugPrint('BLE: notify characteristic not found');
     return null;
   }
 
@@ -2568,8 +2612,7 @@ class AlignEyeDeviceService {
     // _buffer += utf8.decode(data, allowMalformed: true);
     _buffer += rawData;
 
-    // if (_buffer.length > 2048) {
-    if (_buffer.length > 10000) {
+    if (_buffer.length > 8000) {
       debugPrint('BLE buffer overflow cleared: ${_buffer.length}B');
       _buffer = '';
       return;
@@ -2616,9 +2659,7 @@ class AlignEyeDeviceService {
       }
 
       if (end == -1) {
-        if (_buffer.length > 5000) {
-          debugPrint("BUFFER DATA:");
-          debugPrint(_buffer);
+        if (_buffer.length > 8000) {
           debugPrint('BLE stale buffer cleared: ${_buffer.length}B');
           _buffer = '';
         }
@@ -2922,11 +2963,11 @@ class AlignEyeDeviceService {
       _isConnecting = false;
       _connectionTimeoutTimer?.cancel();
       _connectionRetryCount = 0;
+      _autoReconnectAttempts = 0;
+      _userInitiatedDisconnect = false;
 
-      // Save state: user has connected again
       _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
 
-      // Verify connection is actually working
       _verifyConnection().then((isValid) {
         if (isValid) {
           connectionStatus.value = DeviceConnectionStatus.connected;
@@ -2938,10 +2979,34 @@ class AlignEyeDeviceService {
     } else if (state == BluetoothConnectionState.disconnected) {
       _isConnecting = false;
       _connectionTimeoutTimer?.cancel();
+      _rssiTimer?.cancel();
+      signalStrength.value = -1;
+      isWeakSignal.value = false;
 
-      // Only update status if we're not already disconnected
       if (connectionStatus.value != DeviceConnectionStatus.disconnected) {
         connectionStatus.value = DeviceConnectionStatus.disconnected;
+      }
+
+      // Auto-reconnect on accidental disconnects — no hard cap.
+      // Retries continue indefinitely until user explicitly disconnects/forgets.
+      if (!_userInitiatedDisconnect) {
+        final attempt = _autoReconnectAttempts;
+        _autoReconnectAttempts++;
+        final delay = _kReconnectDelays[attempt.clamp(0, _kReconnectDelays.length - 1)];
+        debugPrint(
+          'Auto-reconnect attempt ${attempt + 1} in ${delay.inSeconds}s',
+        );
+        _reconnectTimer?.cancel();
+        _reconnectTimer = Timer(delay, () async {
+          if (_userInitiatedDisconnect) return;
+          if (connectionStatus.value == DeviceConnectionStatus.connected) return;
+          debugPrint('Auto-reconnect: attempting connect (attempt ${attempt + 1})');
+          try {
+            await connect(remoteId: _device?.remoteId.toString());
+          } catch (e) {
+            debugPrint('Auto-reconnect attempt ${attempt + 1} failed: $e');
+          }
+        });
       }
     }
   }
@@ -3112,6 +3177,15 @@ class AlignEyeDeviceService {
       }
     } catch (e) {
       debugPrint('Error saving connection state: $e');
+    }
+  }
+
+  Future<bool> get hasEverConnected async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_keyHasEverConnected) ?? false;
+    } catch (_) {
+      return false;
     }
   }
 

@@ -54,4 +54,36 @@ class BluetoothServiceManager {
   Future<void> forgetDevice() async {
     await _deviceService.forgetDevice();
   }
+
+  /// Called on app resume — silently reconnects if user had a device before
+  /// and didn't intentionally disconnect. Checks BLE readiness first.
+  Future<void> tryAutoReconnectOnResume() async {
+    // Already connected or connecting — nothing to do
+    final status = _deviceService.connectionStatus.value;
+    if (status == DeviceConnectionStatus.connected ||
+        status == DeviceConnectionStatus.connecting) return;
+
+    // User intentionally disconnected — respect their choice
+    if (_deviceService.userInitiatedDisconnect) return;
+
+    // First time user — no device to reconnect to
+    final everConnected = await _deviceService.hasEverConnected;
+    if (!everConnected) return;
+
+    // Check BLE readiness — permissions + BT on
+    final readiness = await _deviceService.checkReadiness();
+    if (readiness != BleReadiness.ready) {
+      debugPrint(
+        'Auto-reconnect on resume skipped: BLE not ready ($readiness)',
+      );
+      return;
+    }
+
+    debugPrint('App resumed — attempting silent auto-reconnect');
+    try {
+      await _deviceService.connect();
+    } catch (e) {
+      debugPrint('Auto-reconnect on resume failed (silent): $e');
+    }
+  }
 }

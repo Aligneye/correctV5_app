@@ -119,6 +119,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       service.startService();
     } else if (state == AppLifecycleState.resumed) {
       service.invoke('stopService');
+      BluetoothServiceManager.instance.tryAutoReconnectOnResume();
     }
   }
 
@@ -285,6 +286,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   // Pull-to-refresh status banner state (see [PullConnectBanner]).
   PullConnectPhase _pullConnectPhase = PullConnectPhase.idle;
   String? _syncedLabel;
+  String? _failedReason;
   bool _syncBannerDismissed = false;
   String _lastMode = '';
   bool _isLoadingOfflineSessions = false;
@@ -536,6 +538,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     _deviceManager.isSyncing.addListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.addListener(_handleActiveSessionChanged);
     _deviceService.connectionStatus.addListener(_handleConnectionStatusChanged);
+    _deviceService.isWeakSignal.addListener(_handleWeakSignalChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _printDeviceInfoStatus('startup');
@@ -585,6 +588,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     _deviceService.connectionStatus.removeListener(
       _handleConnectionStatusChanged,
     );
+    _deviceService.isWeakSignal.removeListener(_handleWeakSignalChanged);
 
     _therapyCountdownTimer?.cancel();
     _therapyCountdownTimer = null;
@@ -630,6 +634,31 @@ class _HomeDashboardState extends State<HomeDashboard>
         DeviceConnectionStatus.connected) {
       unawaited(_loadOfflineSessions());
       unawaited(_logDeviceInfoAfterConnectionDelay());
+    }
+
+    // Clear weak signal banner if device disconnects
+    if (_deviceService.connectionStatus.value !=
+            DeviceConnectionStatus.connected &&
+        _pullConnectPhase == PullConnectPhase.weakSignal) {
+      if (mounted) setState(() => _pullConnectPhase = PullConnectPhase.idle);
+    }
+  }
+
+  void _handleWeakSignalChanged() {
+    if (!mounted) return;
+    final isWeak = _deviceService.isWeakSignal.value;
+    final isConnected =
+        _deviceService.connectionStatus.value ==
+        DeviceConnectionStatus.connected;
+    // Only show/hide weak signal banner when idle (not during connect flow)
+    if (_pullConnectPhase == PullConnectPhase.idle ||
+        _pullConnectPhase == PullConnectPhase.weakSignal) {
+      if (isWeak && isConnected) {
+        setState(() => _pullConnectPhase = PullConnectPhase.weakSignal);
+      } else if (!isWeak &&
+          _pullConnectPhase == PullConnectPhase.weakSignal) {
+        setState(() => _pullConnectPhase = PullConnectPhase.idle);
+      }
     }
   }
 
@@ -2180,6 +2209,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                 PullConnectBanner(
                   phase: _pullConnectPhase,
                   syncedLabel: _syncedLabel,
+                  failedReason: _failedReason,
                 ),
                 StaggeredFadeSlide(
                   controller: _controller,
@@ -2524,7 +2554,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         await _deviceManager.requestManualSync();
         if (!mounted) return;
         setState(() => _pullConnectPhase = PullConnectPhase.synced);
-        await Future.delayed(const Duration(milliseconds: 900));
+        await Future.delayed(const Duration(milliseconds: 1500));
       } catch (_) {
         if (!mounted) return;
         setState(() => _pullConnectPhase = PullConnectPhase.failed);
@@ -2535,7 +2565,58 @@ class _HomeDashboardState extends State<HomeDashboard>
       return;
     }
 
-    setState(() => _pullConnectPhase = PullConnectPhase.connecting);
+    // Check BLE readiness before attempting connect — show specific phase
+    final readiness = await _deviceService.checkReadiness();
+    if (!mounted) return;
+
+    if (readiness == BleReadiness.bluetoothOff) {
+      setState(() {
+        _pullConnectPhase = PullConnectPhase.bluetoothOff;
+        _failedReason = null;
+      });
+      // Try to turn BT on via the system dialog
+      try {
+        await FlutterBluePlus.turnOn();
+        await FlutterBluePlus.adapterState
+            .where((s) => s == BluetoothAdapterState.on)
+            .first
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        if (!mounted) return;
+        await Future.delayed(const Duration(seconds: 2));
+        setState(() => _pullConnectPhase = PullConnectPhase.idle);
+        return;
+      }
+    } else if (readiness == BleReadiness.permissionDenied ||
+        readiness == BleReadiness.permissionPermanentlyDenied ||
+        readiness == BleReadiness.locationServicesOff) {
+      setState(() {
+        _pullConnectPhase = PullConnectPhase.permissionDenied;
+        _failedReason = null;
+      });
+      if (readiness == BleReadiness.permissionPermanentlyDenied) {
+        await openAppSettings();
+      }
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() => _pullConnectPhase = PullConnectPhase.idle);
+      return;
+    } else if (readiness == BleReadiness.bluetoothUnsupported) {
+      setState(() {
+        _pullConnectPhase = PullConnectPhase.failed;
+        _failedReason = 'Bluetooth not supported';
+      });
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() => _pullConnectPhase = PullConnectPhase.idle);
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _pullConnectPhase = PullConnectPhase.connecting;
+      _failedReason = null;
+    });
     await _handleSyncNow();
 
     final isConnectedNow =
@@ -2544,10 +2625,19 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     if (!mounted) return;
     if (isConnectedNow) {
+      // Show weak signal state briefly if signal is poor
+      if (_deviceService.isWeakSignal.value) {
+        setState(() => _pullConnectPhase = PullConnectPhase.weakSignal);
+        await Future.delayed(const Duration(milliseconds: 1200));
+        if (!mounted) return;
+      }
       setState(() => _pullConnectPhase = PullConnectPhase.connected);
-      await Future.delayed(const Duration(milliseconds: 900));
+      await Future.delayed(const Duration(milliseconds: 1500));
     } else {
-      setState(() => _pullConnectPhase = PullConnectPhase.failed);
+      setState(() {
+        _pullConnectPhase = PullConnectPhase.failed;
+        _failedReason = null;
+      });
       await Future.delayed(const Duration(seconds: 2));
     }
 
