@@ -1167,20 +1167,20 @@ class _RelaxingOrb extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       formatTime(sessionRemainingSeconds),
-                      style: TextStyle(
-                        color: scheme.onSurface,
+                      style: const TextStyle(
+                        color: Colors.black,
                         fontSize: 54,
                         fontWeight: FontWeight.w300,
                         height: 1.0,
                         letterSpacing: -1.3,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                        fontFeatures: [FontFeature.tabularFigures()],
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'of ${totalMinutes}m',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
+                      style: const TextStyle(
+                        color: Colors.black54,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w500,
                         letterSpacing: 0.2,
