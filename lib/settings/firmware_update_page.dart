@@ -123,7 +123,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
     // 3. Compare versions
     final deviceFw = _deviceInfo?.firmwareVersion ?? '';
     final hasUpdate = deviceFw.isEmpty ||
-        FirmwareManifestService.isNewerVersion(manifest.latestVersion, deviceFw);
+        FirmwareManifestService.isNewerVersion(manifest.firmwareVersion, deviceFw);
 
     if (!hasUpdate) {
       _set(_UpdateStep.upToDate);
@@ -308,7 +308,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
         final postInfo = await deviceService.getDeviceInfo();
         if (!mounted) return;
 
-        final expectedVersion = manifest.latestVersion;
+        final expectedVersion = manifest.firmwareVersion;
         final actualVersion = postInfo?.firmwareVersion ?? '';
         if (actualVersion.isNotEmpty && actualVersion == expectedVersion) {
           _set(_UpdateStep.success);
@@ -593,7 +593,7 @@ class _StatusCard extends StatelessWidget {
         return _Spinner(label: 'Checking for updates…');
       case _UpdateStep.upToDate:
         return _UpToDate(
-          version: deviceInfo?.firmwareVersion ?? manifest?.latestVersion ?? '',
+          version: deviceInfo?.firmwareVersion ?? manifest?.firmwareVersion ?? '',
           onRetry: onRetry,
         );
       case _UpdateStep.updateAvailable:
@@ -628,7 +628,7 @@ class _StatusCard extends StatelessWidget {
         return _Spinner(label: 'Reconnecting to device…');
       case _UpdateStep.success:
         return _SuccessRow(
-          version: manifest?.latestVersion ?? '',
+          version: manifest?.firmwareVersion ?? '',
         );
       case _UpdateStep.failed:
         return _ErrorRow(
@@ -873,7 +873,7 @@ class _UpdateAvailable extends StatelessWidget {
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
-                          manifest.latestVersion,
+                          manifest.firmwareVersion,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -966,7 +966,7 @@ class _DownloadedReady extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                'Version ${manifest.latestVersion} is verified and ready to install.',
+                'Version ${manifest.firmwareVersion} is verified and ready to install.',
                 style: const TextStyle(
                   color: AppTheme.textMuted,
                   fontSize: 12,

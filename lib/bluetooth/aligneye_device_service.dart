@@ -756,7 +756,7 @@ class AlignEyeDeviceService {
       if (profile.isDefault) defaultProfile ??= profile;
     }
 
-    return (defaultProfile ?? active)?.name ?? '';
+    return (active ?? defaultProfile)?.name ?? '';
   }
 
   final connectionStatus = ValueNotifier<DeviceConnectionStatus>(

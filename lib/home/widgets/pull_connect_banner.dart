@@ -122,13 +122,14 @@ class PullConnectBanner extends StatelessWidget {
           icon: Icons.lock_outline_rounded,
           showSpinner: false,
         );
+      // TODO(weak-signal): re-enable when implementing weak signal banner
       case PullConnectPhase.weakSignal:
         return _BannerStyle(
-          background: bg(const Color(0xFFFFFBEB), const Color(0xFF2D1F00)),
-          border: bd(const Color(0xFFFDE68A), const Color(0xFF78460F)),
-          foreground: bg(const Color(0xFFD97706), const Color(0xFFFBBF24)),
-          label: 'Weak signal — move closer',
-          icon: Icons.signal_wifi_statusbar_connected_no_internet_4_rounded,
+          background: Colors.transparent,
+          border: Colors.transparent,
+          foreground: Colors.transparent,
+          label: '',
+          icon: Icons.info_outline,
           showSpinner: false,
         );
       case PullConnectPhase.idle:

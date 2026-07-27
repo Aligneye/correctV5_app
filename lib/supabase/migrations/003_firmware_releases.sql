@@ -5,25 +5,24 @@
 
 create table if not exists public.firmware_releases (
   id                        uuid primary key default gen_random_uuid(),
-  latest_version            text        not null,
-  build_number              integer     not null,
+  firmware_version          text,
+  app_version               text        not null,
   device_model              text        not null default '',
   hardware_revision         text        not null default '',
-  min_supported_app_version text        not null default '1.0.0',
-  min_battery_percent       integer     not null default 40,
   mandatory                 boolean     not null default false,
   firmware_url              text        not null,
   sha256                    text        not null,
-  file_size_bytes           integer     not null default 0,
   release_notes             jsonb       not null default '[]'::jsonb,
-  active                    boolean     not null default true,
+  "Active"                  boolean     not null default true,
+  github_tag                text,
+  github_release_url        text,
   created_at                timestamptz not null default now()
 );
 
--- Index used by fetchManifest: active rows ordered by build_number desc, limit 1.
-create index if not exists firmware_releases_active_build_idx
-  on public.firmware_releases (build_number desc)
-  where active = true;
+-- Index used by fetchManifest: active rows ordered by created_at desc, limit 1.
+create index if not exists firmware_releases_active_created_idx
+  on public.firmware_releases (created_at desc)
+  where "Active" = true;
 
 -- RLS: enable but allow public SELECT.
 alter table public.firmware_releases enable row level security;

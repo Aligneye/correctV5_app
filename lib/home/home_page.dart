@@ -537,7 +537,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     _deviceManager.isSyncing.addListener(_handleSyncingChanged);
     _deviceManager.activeSessionId.addListener(_handleActiveSessionChanged);
     _deviceService.connectionStatus.addListener(_handleConnectionStatusChanged);
-    _deviceService.isWeakSignal.addListener(_handleWeakSignalChanged);
+    // TODO(weak-signal): re-enable when implementing weak signal banner
+    // _deviceService.isWeakSignal.addListener(_handleWeakSignalChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _printDeviceInfoStatus('startup');
@@ -587,7 +588,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     _deviceService.connectionStatus.removeListener(
       _handleConnectionStatusChanged,
     );
-    _deviceService.isWeakSignal.removeListener(_handleWeakSignalChanged);
+    // TODO(weak-signal): re-enable when implementing weak signal banner
+    // _deviceService.isWeakSignal.removeListener(_handleWeakSignalChanged);
 
     _therapyCountdownTimer?.cancel();
     _therapyCountdownTimer = null;
@@ -635,31 +637,31 @@ class _HomeDashboardState extends State<HomeDashboard>
       unawaited(_logDeviceInfoAfterConnectionDelay());
     }
 
-    // Clear weak signal banner if device disconnects
-    if (_deviceService.connectionStatus.value !=
-            DeviceConnectionStatus.connected &&
-        _pullConnectPhase == PullConnectPhase.weakSignal) {
-      if (mounted) setState(() => _pullConnectPhase = PullConnectPhase.idle);
-    }
+    // TODO(weak-signal): clear weakSignal banner on disconnect — re-enable later
+    // if (_deviceService.connectionStatus.value !=
+    //         DeviceConnectionStatus.connected &&
+    //     _pullConnectPhase == PullConnectPhase.weakSignal) {
+    //   if (mounted) setState(() => _pullConnectPhase = PullConnectPhase.idle);
+    // }
   }
 
-  void _handleWeakSignalChanged() {
-    if (!mounted) return;
-    final isWeak = _deviceService.isWeakSignal.value;
-    final isConnected =
-        _deviceService.connectionStatus.value ==
-        DeviceConnectionStatus.connected;
-    // Only show/hide weak signal banner when idle (not during connect flow)
-    if (_pullConnectPhase == PullConnectPhase.idle ||
-        _pullConnectPhase == PullConnectPhase.weakSignal) {
-      if (isWeak && isConnected) {
-        setState(() => _pullConnectPhase = PullConnectPhase.weakSignal);
-      } else if (!isWeak &&
-          _pullConnectPhase == PullConnectPhase.weakSignal) {
-        setState(() => _pullConnectPhase = PullConnectPhase.idle);
-      }
-    }
-  }
+  // TODO(weak-signal): re-enable when implementing weak signal banner
+  // void _handleWeakSignalChanged() {
+  //   if (!mounted) return;
+  //   final isWeak = _deviceService.isWeakSignal.value;
+  //   final isConnected =
+  //       _deviceService.connectionStatus.value ==
+  //       DeviceConnectionStatus.connected;
+  //   if (_pullConnectPhase == PullConnectPhase.idle ||
+  //       _pullConnectPhase == PullConnectPhase.weakSignal) {
+  //     if (isWeak && isConnected) {
+  //       setState(() => _pullConnectPhase = PullConnectPhase.weakSignal);
+  //     } else if (!isWeak &&
+  //         _pullConnectPhase == PullConnectPhase.weakSignal) {
+  //       setState(() => _pullConnectPhase = PullConnectPhase.idle);
+  //     }
+  //   }
+  // }
 
   Future<void> _logDeviceInfoAfterConnectionDelay() async {
     if (_deviceInfoRequestInFlight) return;
@@ -705,22 +707,21 @@ class _HomeDashboardState extends State<HomeDashboard>
     }
 
     final hasUpdate = FirmwareManifestService.isNewerVersion(
-      manifest.latestVersion,
+      manifest.firmwareVersion,
       info.firmwareVersion,
     );
 
     _printDeviceInfoLog(
       'Supabase firmware check result: '
       'current=${info.firmwareVersion}, '
-      'latest=${manifest.latestVersion}, '
-      'build=${manifest.buildNumber}, '
+      'latest=${manifest.firmwareVersion}, '
       'updateAvailable=$hasUpdate',
     );
 
     if (hasUpdate) {
       _printDeviceInfoLog(
         'Firmware update available: '
-        'current=${info.firmwareVersion}, latest=${manifest.latestVersion}, '
+        'current=${info.firmwareVersion}, latest=${manifest.firmwareVersion}, '
         'notes=${manifest.releaseNotes.join(" | ")}, '
         'url=${manifest.firmwareUrl}',
       );
@@ -2659,12 +2660,12 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     if (!mounted) return;
     if (isConnectedNow) {
-      // Show weak signal state briefly if signal is poor
-      if (_deviceService.isWeakSignal.value) {
-        setState(() => _pullConnectPhase = PullConnectPhase.weakSignal);
-        await Future.delayed(const Duration(milliseconds: 1200));
-        if (!mounted) return;
-      }
+      // TODO(weak-signal): re-enable brief weak signal flash on connect
+      // if (_deviceService.isWeakSignal.value) {
+      //   setState(() => _pullConnectPhase = PullConnectPhase.weakSignal);
+      //   await Future.delayed(const Duration(milliseconds: 1200));
+      //   if (!mounted) return;
+      // }
       setState(() => _pullConnectPhase = PullConnectPhase.connected);
       await Future.delayed(const Duration(milliseconds: 1500));
     } else {

@@ -244,6 +244,9 @@ class _CalibrationPageState extends State<CalibrationPage>
       AngleHistoryService().setReferenceAngle(
         widget.deviceService.currentAngle,
       );
+      // Optimistically mark new profile as active, then refresh from firmware.
+      widget.deviceService.activeProfileName.value = _profileName;
+      unawaited(widget.deviceService.getProfiles());
       // Sync profile data to Supabase fire-and-forget (non-blocking).
       final doneReading = _lastDoneReading;
       if (doneReading != null) {
