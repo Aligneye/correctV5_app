@@ -522,6 +522,45 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
               );
             },
           ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Forget All Devices?'),
+                    content: const Text(
+                      'This will remove all saved pod data. You will need to pair your pod again.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        child: const Text(
+                          'Forget',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed == true) {
+                  await BluetoothServiceManager().forgetDevice();
+                }
+              },
+              icon: const Icon(Icons.delete_outline_rounded, size: 16),
+              label: const Text('Forget All Devices'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          ),
           const SizedBox(height: 18),
           Divider(height: 1, thickness: 1, color: scheme.outline),
           const SizedBox(height: 14),

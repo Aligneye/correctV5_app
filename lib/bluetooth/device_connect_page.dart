@@ -616,8 +616,35 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
             },
           ),
         ),
+        const SizedBox(height: 12),
+        Center(
+          child: GestureDetector(
+            onTap: _pairDifferentPod,
+            child: Text(
+              'Pair a different pod',
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                decoration: TextDecoration.underline,
+                decorationColor: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  Future<void> _pairDifferentPod() async {
+    await BluetoothServiceManager().forgetDevice();
+    if (!mounted) return;
+    setState(() {
+      _found = [];
+      _scanDone = false;
+      _connecting = false;
+    });
+    _startScan();
   }
 
   Widget _buildEmptyBody() {
@@ -662,8 +689,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           GestureDetector(
             onTap: _startScan,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
               decoration: BoxDecoration(
                 gradient: AppTheme.brandGradient,
                 borderRadius: BorderRadius.circular(14),
@@ -686,6 +712,20 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
             ),
           ),
         ],
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: _pairDifferentPod,
+          child: Text(
+            'Pair a different pod',
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              decoration: TextDecoration.underline,
+              decorationColor: scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -700,8 +740,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           height: 48,
           child: CircularProgressIndicator(
             strokeWidth: 2.5,
-            valueColor:
-                AlwaysStoppedAnimation<Color>(AppTheme.brandPrimary),
+            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.brandPrimary),
           ),
         ),
         const SizedBox(height: 20),
@@ -717,6 +756,20 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         Text(
           'Pairing with your Align Pod…',
           style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+        ),
+        const SizedBox(height: 24),
+        GestureDetector(
+          onTap: _pairDifferentPod,
+          child: Text(
+            'Pair a different pod',
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              decoration: TextDecoration.underline,
+              decorationColor: scheme.onSurfaceVariant,
+            ),
+          ),
         ),
       ],
     );

@@ -208,14 +208,22 @@ class _TopHeaderBarState extends State<TopHeaderBar>
       statusIcon = Icons.bluetooth_searching_rounded;
       statusLabel = 'Finding…';
     } else if (isConnecting) {
-      accentColor = const Color(0xFFF59E0B);
       final label = widget.connectingLabel;
-      if (label.startsWith('Scanning')) {
+      if (label == 'Found!') {
+        accentColor = const Color(0xFF22C55E);
+        statusIcon = Icons.check_circle_rounded;
+      } else if (label.startsWith('Scanning')) {
+        accentColor = const Color(0xFFF59E0B);
         statusIcon = Icons.bluetooth_searching_rounded;
       } else if (label.startsWith('Pairing')) {
+        accentColor = const Color(0xFFF59E0B);
         statusIcon = Icons.lock_rounded;
-      } else {
+      } else if (label.startsWith('Discovering')) {
+        accentColor = const Color(0xFFF59E0B);
         statusIcon = Icons.manage_search_rounded;
+      } else {
+        accentColor = const Color(0xFFF59E0B);
+        statusIcon = Icons.bluetooth_searching_rounded;
       }
       statusLabel = label;
     } else if (widget.isSyncing) {

@@ -885,7 +885,11 @@ class AlignEyeDeviceService {
   static const int _maxRetries = 1;
   static const Duration _connectionTimeout = Duration(seconds: 30);
   static const Duration _serviceDiscoveryTimeout = Duration(seconds: 8);
-  static const Duration _defaultScanTimeout = Duration(seconds: 3);
+  static const Duration _defaultScanTimeout = Duration(seconds: 6);
+  // Android throttles apps that start >5 scans within 30s. Enforce a minimum
+  // gap between consecutive scans to stay safely under that limit.
+  static const Duration _minScanCooldown = Duration(seconds: 8);
+  DateTime? _lastScanEndedAt;
 
   int? _cachedAndroidSdkInt;
 
@@ -1732,6 +1736,7 @@ class AlignEyeDeviceService {
       }
 
       _device = device;
+      connectingLabel.value = 'Found!';
       debugPrint(
         'Found device: ${_device!.platformName} (${_device!.remoteId})',
       );
@@ -1814,33 +1819,78 @@ class AlignEyeDeviceService {
 
       if (needsConnection &&
           currentState != BluetoothConnectionState.connected) {
-        // flutter_blue_plus asserts when autoConnect=true with the default MTU flow.
-        const bool shouldAutoConnect = false;
-        debugPrint(
-          'Connecting to device (autoConnect: $shouldAutoConnect, isPaired: $isPaired)...',
-        );
+        connectingLabel.value = 'Connecting…';
 
-        try {
-          await _device!.connect(
-            license: License.nonprofit,
-            timeout: const Duration(seconds: 8),
-            autoConnect: shouldAutoConnect,
+        // Attempt GATT connect with one retry on android-code 133.
+        // Error 133 means the previous GATT stack hasn't fully torn down yet —
+        // waiting 1.5s and trying once more almost always recovers it.
+        bool connected = false;
+        for (int attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) {
+            // GATT 133: device is busy or held by another client.
+            // Clear cache + disconnect, then on the last attempt fall back to
+            // scanning for any available pod (the bonded one may be in use).
+            debugPrint('GATT 133 — clearing cache before retry ${attempt + 1}/3...');
+            try { await _device!.clearGattCache(); } catch (_) {}
+            try { await _device!.disconnect(); } catch (_) {}
+            final waitMs = attempt == 1 ? 2000 : 3000;
+            await Future.delayed(Duration(milliseconds: waitMs));
+
+            // Last attempt: scan for any available pod instead of forcing the
+            // bonded one (which may be connected to another phone/client).
+            if (attempt == 2) {
+              debugPrint('GATT 133 persists — scanning for any available pod...');
+              connectingLabel.value = 'Scanning…';
+              final stuckDeviceId = _device!.remoteId.toString();
+              final fallback = await _scanForDevice(
+                preferPairedDevice: false,
+                prioritizePreferredDevice: false,
+                requirePairedDevice: false,
+                timeout: _defaultScanTimeout,
+                excludeDeviceId: stuckDeviceId,
+              );
+              if (fallback != null && fallback.remoteId != _device!.remoteId) {
+                debugPrint('Found alternate pod via scan: ${fallback.platformName}');
+                _device = fallback;
+                isPaired = await _isDevicePaired(_device!);
+              }
+              connectingLabel.value = 'Connecting…';
+            }
+          }
+
+          debugPrint(
+            'Connecting to device attempt ${attempt + 1}/3 '
+            '(${_device!.remoteId}, isPaired: $isPaired)...',
           );
-          debugPrint('Connect call completed, waiting for connection state...');
 
-          // Wait for connection to be established with timeout
-          await _device!.connectionState
-              .where((state) => state == BluetoothConnectionState.connected)
-              .first
-              .timeout(const Duration(seconds: 8));
-          debugPrint('Device connected successfully');
+          try {
+            await _device!.connect(
+              license: License.nonprofit,
+              timeout: const Duration(seconds: 10),
+              autoConnect: false,
+            );
+            debugPrint('Connect call completed, waiting for connection state...');
 
-          // Small delay to ensure connection is stable
-          await Future.delayed(const Duration(milliseconds: 300));
-        } catch (e) {
-          debugPrint('Connection failed: $e');
-          rethrow;
+            await _device!.connectionState
+                .where((state) => state == BluetoothConnectionState.connected)
+                .first
+                .timeout(const Duration(seconds: 10));
+
+            debugPrint('Device connected successfully on attempt ${attempt + 1}');
+            connected = true;
+            break;
+          } catch (e) {
+            debugPrint('Connection attempt ${attempt + 1} failed: $e');
+            if (attempt == 2) rethrow;
+            if (!e.toString().contains('133')) rethrow;
+          }
         }
+
+        if (!connected) {
+          throw Exception('Failed to connect after 3 attempts');
+        }
+
+        await Future.delayed(const Duration(milliseconds: 300));
       }
 
       // Set up connection state listener
@@ -2342,8 +2392,10 @@ class AlignEyeDeviceService {
     bool prioritizePreferredDevice = true,
     bool requirePairedDevice = false,
     Duration timeout = _defaultScanTimeout,
+    String? excludeDeviceId,
   }) async {
     final normalizedPreferredId = preferredRemoteId?.toLowerCase();
+    final normalizedExcludeId = excludeDeviceId?.toLowerCase();
 
     // First, prefer devices that are already connected.
     final connectedDevices = FlutterBluePlus.connectedDevices;
@@ -2420,13 +2472,16 @@ class AlignEyeDeviceService {
     }
 
     // Device is already paired at the OS level — connect to it directly
-    // instead of scanning. A paired-but-not-currently-connected pod may not
-    // be advertising in a way we'd reliably catch, and there's no reason to
-    // discover a "new" device when we already have a bonded match.
-    if (bondedMatches.isNotEmpty) {
+    // instead of scanning, unless it is explicitly excluded (e.g. because it
+    // returned GATT 133 and we need to find an alternate pod via scan).
+    final nonExcludedBonded = bondedMatches.where((d) =>
+        normalizedExcludeId == null ||
+        d.remoteId.toString().toLowerCase() != normalizedExcludeId).toList();
+
+    if (nonExcludedBonded.isNotEmpty) {
       BluetoothDevice? preferredBondedMatch;
       if (normalizedPreferredId != null) {
-        for (final device in bondedMatches) {
+        for (final device in nonExcludedBonded) {
           if (device.remoteId.toString().toLowerCase() ==
               normalizedPreferredId) {
             preferredBondedMatch = device;
@@ -2434,12 +2489,18 @@ class AlignEyeDeviceService {
           }
         }
       }
-      final bondedDevice = preferredBondedMatch ?? bondedMatches.first;
+      final bondedDevice = preferredBondedMatch ?? nonExcludedBonded.first;
       debugPrint(
         'Device already paired — skipping scan, connecting directly to '
             '${bondedDevice.platformName} (${bondedDevice.remoteId})',
       );
       return bondedDevice;
+    }
+
+    if (normalizedExcludeId != null && bondedMatches.isNotEmpty) {
+      debugPrint(
+        'Bonded device excluded ($normalizedExcludeId) — falling through to scan for alternate pod',
+      );
     }
 
     // Clean up any existing scan
@@ -2488,6 +2549,17 @@ class AlignEyeDeviceService {
       },
     );
 
+    // Enforce cooldown between consecutive scans to avoid Android's
+    // 5-scans-in-30s throttle that silently returns no results.
+    if (_lastScanEndedAt != null) {
+      final elapsed = DateTime.now().difference(_lastScanEndedAt!);
+      if (elapsed < _minScanCooldown) {
+        final wait = _minScanCooldown - elapsed;
+        debugPrint('Scan cooldown: waiting ${wait.inMilliseconds}ms');
+        await Future.delayed(wait);
+      }
+    }
+
     try {
       await FlutterBluePlus.startScan(timeout: timeout);
     } catch (e) {
@@ -2495,6 +2567,7 @@ class AlignEyeDeviceService {
       debugPrint('Please verify Bluetooth + Location permissions on Android');
       await _scanSubscription?.cancel();
       _scanSubscription = null;
+      _lastScanEndedAt = DateTime.now();
       return null;
     }
 
@@ -2513,6 +2586,7 @@ class AlignEyeDeviceService {
       }
     }
     await _cleanupScan();
+    _lastScanEndedAt = DateTime.now();
 
     if (candidates.isEmpty) {
       // A bonded pod may be in range without being caught by the short scan
@@ -2946,6 +3020,47 @@ class AlignEyeDeviceService {
                 }
               }
               break;
+
+            case 'SYNC':
+            // Device-initiated sync packet — carries current angle, battery,
+            // and active profile. App must ACK with {"cmd":"ACK_SYNC","seq":N}.
+              final syncSeq = decoded['seq'];
+              final syncBattery = decoded['battery'];
+              final syncAngle = (decoded['angle'] as num?)?.toDouble();
+              final syncProfile = decoded['profile']?.toString();
+
+              // Update battery cache
+              if (syncBattery != null) {
+                _lastKnownBattery =
+                    int.tryParse(syncBattery.toString()) ?? _lastKnownBattery;
+              }
+
+              // Update active profile name if provided
+              if (syncProfile != null && syncProfile.isNotEmpty) {
+                activeProfileName.value = syncProfile;
+              }
+
+              // Emit a lightweight reading with the synced data
+              final prev = currentReading.value;
+              final syncReading = PostureReading.fromJson({
+                'mode': prev?.mode ?? _lastKnownMode,
+                'battery': _lastKnownBattery,
+                if (syncAngle != null) 'angle': syncAngle,
+              }, current: prev);
+              _emitReading(syncReading, throttle: false);
+
+              // ACK back to firmware
+              if (syncSeq != null) {
+                _writeJsonCommand({'cmd': 'ACK_SYNC', 'seq': syncSeq})
+                    .catchError((e) {
+                  debugPrint('ACK_SYNC send failed: $e');
+                  return false;
+                });
+              }
+              debugPrint(
+                'SYNC received — battery=$_lastKnownBattery angle=$syncAngle profile=$syncProfile',
+              );
+              break;
           }
         }
       } catch (e) {
@@ -2982,6 +3097,7 @@ class AlignEyeDeviceService {
       _rssiTimer?.cancel();
       signalStrength.value = -1;
       isWeakSignal.value = false;
+      connectingLabel.value = 'Connecting…';
 
       if (connectionStatus.value != DeviceConnectionStatus.disconnected) {
         connectionStatus.value = DeviceConnectionStatus.disconnected;

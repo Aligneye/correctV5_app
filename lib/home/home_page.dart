@@ -41,7 +41,6 @@ import 'package:correctv1/home/widgets/xp_detail_sheet.dart';
 import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/notification_service.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
 
@@ -1616,10 +1615,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   Future<void> _handleDeviceStatusTap() async {
     final status = _deviceService.connectionStatus.value;
 
-    // When already connected, show the management sheet. In every other
-    // state (including while an auto-connect attempt is in flight) tapping
-    // the pill should take the user straight to the connect page — it will
-    // surface the ongoing attempt and auto-pop once the pod is connected.
     if (status == DeviceConnectionStatus.connected) {
       await _showConnectedSheet();
       return;
@@ -1627,8 +1622,18 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     if (!mounted) return;
 
-    if (!await _ensureBleReady()) return;
+    // If the user has previously paired a pod, show the disconnected sheet
+    // so they can choose to reconnect the saved pod or pair a new one.
+    final everConnected = await _deviceService.hasEverConnected;
+    if (!mounted) return;
 
+    if (everConnected) {
+      await _showDisconnectedSheet();
+      return;
+    }
+
+    // First-time user — go straight to the connect/scan page.
+    if (!await _ensureBleReady()) return;
     if (!mounted) return;
     await Navigator.of(
       context,
@@ -1726,6 +1731,35 @@ class _HomeDashboardState extends State<HomeDashboard>
         onForget: () async {
           Navigator.of(ctx).pop();
           await BluetoothServiceManager.instance.forgetDevice();
+          if (!mounted) return;
+          await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
+          );
+        },
+        onCancel: () => Navigator.of(ctx).pop(),
+      ),
+    );
+  }
+
+  Future<void> _showDisconnectedSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => DisconnectedDeviceSheet(
+        onReconnect: () async {
+          Navigator.of(ctx).pop();
+          if (!await _ensureBleReady()) return;
+          if (!mounted) return;
+          await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
+          );
+        },
+        onPairNew: () async {
+          Navigator.of(ctx).pop();
+          await BluetoothServiceManager.instance.forgetDevice();
+          if (!mounted) return;
+          if (!await _ensureBleReady()) return;
           if (!mounted) return;
           await Navigator.of(context).push<bool>(
             MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
