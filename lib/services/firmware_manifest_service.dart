@@ -6,53 +6,48 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class FirmwareManifest {
   final String deviceModel;
   final String hardwareRevision;
-  final String latestVersion;
-  final int buildNumber;
-  final String minSupportedAppVersion;
-  final int minBatteryPercent;
+  final String firmwareVersion;
+  final String appVersion;
   final bool mandatory;
   final String firmwareUrl;
   final String sha256;
-  final int fileSizeBytes;
   final List<String> releaseNotes;
+  final String? githubTag;
+  final String? githubReleaseUrl;
 
   const FirmwareManifest({
     required this.deviceModel,
     required this.hardwareRevision,
-    required this.latestVersion,
-    required this.buildNumber,
-    required this.minSupportedAppVersion,
-    required this.minBatteryPercent,
+    required this.firmwareVersion,
+    required this.appVersion,
     required this.mandatory,
     required this.firmwareUrl,
     required this.sha256,
-    required this.fileSizeBytes,
     required this.releaseNotes,
+    this.githubTag,
+    this.githubReleaseUrl,
   });
 
   factory FirmwareManifest.fromJson(Map<String, dynamic> json) {
     return FirmwareManifest(
       deviceModel: json['device_model']?.toString() ?? '',
       hardwareRevision: json['hardware_revision']?.toString() ?? '',
-      latestVersion: json['latest_version']?.toString() ?? '',
-      buildNumber: (json['build_number'] as num?)?.toInt() ?? 0,
-      minSupportedAppVersion:
-          json['min_supported_app_version']?.toString() ?? '1.0.0',
-      minBatteryPercent: (json['min_battery_percent'] as num?)?.toInt() ?? 40,
+      firmwareVersion: json['firmware_version']?.toString() ?? '',
+      appVersion: json['app_version']?.toString() ?? '1.0.0',
       mandatory: json['mandatory'] == true,
       firmwareUrl: json['firmware_url']?.toString() ?? '',
       sha256: json['sha256']?.toString() ?? '',
-      fileSizeBytes: (json['file_size_bytes'] as num?)?.toInt() ?? 0,
       releaseNotes: (json['release_notes'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
           const [],
+      githubTag: json['github_tag']?.toString(),
+      githubReleaseUrl: json['github_release_url']?.toString(),
     );
   }
 }
 
 class FirmwareManifestService {
-  // Replace with production CDN/Supabase URL when backend is ready.
   static const String _manifestUrl = String.fromEnvironment(
     'FIRMWARE_MANIFEST_URL',
     defaultValue: 'https://cdn.aligneye.com/firmware/manifest.json',
@@ -66,8 +61,8 @@ class FirmwareManifestService {
       final rows = await Supabase.instance.client
           .from('firmware_releases')
           .select()
-          .eq('active', true)
-          .order('build_number', ascending: false)
+          .eq('Active', true)
+          .order('created_at', ascending: false)
           .limit(20);
 
       for (final row in rows) {
@@ -94,8 +89,8 @@ class FirmwareManifestService {
       final rows = await Supabase.instance.client
           .from('firmware_releases')
           .select()
-          .eq('active', true)
-          .order('build_number', ascending: false)
+          .eq('Active', true)
+          .order('created_at', ascending: false)
           .limit(1);
       if (rows.isNotEmpty) {
         return FirmwareManifest.fromJson(rows.first);
@@ -122,7 +117,6 @@ class FirmwareManifestService {
   }
 
   /// Returns true when serverVersion is strictly newer than deviceVersion.
-  /// Compares semver-style: "1.0.1" > "1.0.0".
   static bool isNewerVersion(String serverVersion, String deviceVersion) {
     final server = _parseSemver(serverVersion);
     final device = _parseSemver(deviceVersion);
