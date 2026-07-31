@@ -120,10 +120,12 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
     }
     _manifest = manifest;
 
-    // 3. Compare versions
+    // 3. Compare versions — only update if server version is strictly newer
     final deviceFw = _deviceInfo?.firmwareVersion ?? '';
-    final hasUpdate = deviceFw.isEmpty ||
-        FirmwareManifestService.isNewerVersion(manifest.firmwareVersion, deviceFw);
+    final serverFw = manifest.firmwareVersion;
+    final hasUpdate = deviceFw.isNotEmpty &&
+        serverFw.isNotEmpty &&
+        FirmwareManifestService.isNewerVersion(serverFw, deviceFw);
 
     if (!hasUpdate) {
       _set(_UpdateStep.upToDate);

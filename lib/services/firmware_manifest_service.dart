@@ -37,10 +37,11 @@ class FirmwareManifest {
       mandatory: json['mandatory'] == true,
       firmwareUrl: json['firmware_url']?.toString() ?? '',
       sha256: json['sha256']?.toString() ?? '',
-      releaseNotes: (json['release_notes'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          const [],
+      releaseNotes: json['release_notes'] is List
+          ? (json['release_notes'] as List<dynamic>)
+              .map((e) => e.toString())
+              .toList()
+          : const [],
       githubTag: json['github_tag']?.toString(),
       githubReleaseUrl: json['github_release_url']?.toString(),
     );
@@ -58,12 +59,13 @@ class FirmwareManifestService {
     required String hardwareRevision,
   }) async {
     try {
-      final rows = await Supabase.instance.client
+      final response = await Supabase.instance.client
           .from('firmware_releases')
           .select()
           .eq('Active', true)
           .order('created_at', ascending: false)
           .limit(20);
+      final rows = response as List<dynamic>;
 
       for (final row in rows) {
         final manifest = FirmwareManifest.fromJson(row);
@@ -86,17 +88,18 @@ class FirmwareManifestService {
   Future<FirmwareManifest?> fetchManifest() async {
     // 1. Try Supabase first
     try {
-      final rows = await Supabase.instance.client
+      final response = await Supabase.instance.client
           .from('firmware_releases')
           .select()
           .eq('Active', true)
           .order('created_at', ascending: false)
           .limit(1);
+      final rows = response as List<dynamic>;
       if (rows.isNotEmpty) {
-        return FirmwareManifest.fromJson(rows.first);
+        return FirmwareManifest.fromJson(rows.first as Map<String, dynamic>);
       }
-    } catch (e) {
-      debugPrint('Supabase manifest fetch error (falling back to CDN): $e');
+    } catch (e, st) {
+      debugPrint('Supabase manifest fetch error (falling back to CDN): $e\n$st');
     }
 
     // 2. Fall back to CDN

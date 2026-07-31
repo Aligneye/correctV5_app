@@ -1297,14 +1297,17 @@ class _AngleDeviationDayCard extends StatefulWidget {
 class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard>
     with SingleTickerProviderStateMixin {
   static const _fallback = [75.0, 82.0, 78.0, 85.0, 93.0, 88.0, 80.0];
-  static const _xLabels = ['8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
   static const _plotHeight = 132.0;
+  static const _windows = [1, 6, 24];
+  static const _windowLabels = ['1h', '6h', '24h'];
 
   final _angleService = AngleHistoryService();
   List<double> _values = _fallback;
+  List<String> _xLabels = ['', '', '', '', '', '', ''];
   double _avgDeviation = 0;
   double _maxDeviation = 0;
   bool _hasRealData = false;
+  int _selectedWindow = 1; // index into _windows
 
   late final AnimationController _ctrl;
   late final Animation<double> _anim;
@@ -1328,20 +1331,17 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard>
 
   void _refresh() {
     final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId != null) {
-      _angleService.syncToSupabase(userId);
-    }
-    final raw = _angleService.todayHourlyDeviations();
-    final hasReal = _angleService.hasTodayData;
+    if (userId != null) _angleService.syncToSupabase(userId);
+    final hours = _windows[_selectedWindow];
+    final hasReal = _angleService.hasDataForLastHours(hours);
     setState(() {
-      _values = hasReal ? raw : _fallback;
+      _values = hasReal ? _angleService.deviationsForLastHours(hours) : _fallback;
+      _xLabels = _angleService.labelsForLastHours(hours);
       _hasRealData = hasReal;
-      _avgDeviation = _angleService.todayAverageDeviation;
-      _maxDeviation = _angleService.todayMaxDeviation;
+      _avgDeviation = _angleService.averageDeviationForLastHours(hours);
+      _maxDeviation = _angleService.maxDeviationForLastHours(hours);
     });
-    _ctrl
-      ..reset()
-      ..forward();
+    _ctrl..reset()..forward();
   }
 
   @override
@@ -1369,14 +1369,51 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Angle Deviation Throughout Day',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurface,
-              height: 1,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Angle Deviation',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                    height: 1,
+                  ),
+                ),
+              ),
+              for (var i = 0; i < _windowLabels.length; i++) ...[
+                GestureDetector(
+                  onTap: () {
+                    if (_selectedWindow == i) return;
+                    setState(() => _selectedWindow = i);
+                    _refresh();
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _selectedWindow == i
+                          ? _kAngleChartPurple.withOpacity(0.15)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      _windowLabels[i],
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _selectedWindow == i
+                            ? _kAngleChartPurple
+                            : const Color(0xFF98A2B3),
+                      ),
+                    ),
+                  ),
+                ),
+                if (i < _windowLabels.length - 1) const SizedBox(width: 2),
+              ],
+            ],
           ),
           const SizedBox(height: 20),
           Row(

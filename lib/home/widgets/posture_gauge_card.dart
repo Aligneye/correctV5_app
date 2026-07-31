@@ -257,10 +257,10 @@ class PostureGaugePainter extends CustomPainter {
     final dirY = math.sin(thresholdAngle);
     final halfBase = triSize / 2;
     final halfHeight = (triSize * math.sqrt(3) / 2) / 2;
-    final tipX = thresholdPoint.dx - dirX * halfHeight;
-    final tipY = thresholdPoint.dy - dirY * halfHeight;
-    final baseX = thresholdPoint.dx + dirX * halfHeight;
-    final baseY = thresholdPoint.dy + dirY * halfHeight;
+    final tipX = thresholdPoint.dx + dirX * halfHeight;
+    final tipY = thresholdPoint.dy + dirY * halfHeight;
+    final baseX = thresholdPoint.dx - dirX * halfHeight;
+    final baseY = thresholdPoint.dy - dirY * halfHeight;
     final perpX = -dirY * halfBase;
     final perpY = dirX * halfBase;
 
