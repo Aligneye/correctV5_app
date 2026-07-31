@@ -1869,6 +1869,7 @@ class AlignEyeDeviceService {
               license: License.nonprofit,
               timeout: const Duration(seconds: 10),
               autoConnect: false,
+              mtu: null, // skip auto-512 MTU; we request 247 after discovery
             );
             debugPrint('Connect call completed, waiting for connection state...');
 
