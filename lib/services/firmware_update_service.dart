@@ -66,11 +66,12 @@ class FirmwareUpdateService {
 
       debugPrint('FirmwareUpdateService: server version = ${manifest.firmwareVersion}');
 
-      // Step 3: Version compare
+      // Step 3: Version compare — only update if server version is strictly newer
       final deviceFw = info?.firmwareVersion ?? '';
-      final hasUpdate = deviceFw.isEmpty ||
-          FirmwareManifestService.isNewerVersion(
-              manifest.firmwareVersion, deviceFw);
+      final serverFw = manifest.firmwareVersion;
+      final hasUpdate = deviceFw.isNotEmpty &&
+          serverFw.isNotEmpty &&
+          FirmwareManifestService.isNewerVersion(serverFw, deviceFw);
 
       debugPrint('FirmwareUpdateService: hasUpdate = $hasUpdate');
 

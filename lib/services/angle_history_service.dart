@@ -103,6 +103,68 @@ class AngleHistoryService {
     }
   }
 
+  /// Returns 7 evenly-spaced average deviation buckets for the last [hours].
+  /// Always covers [now-hours .. now], so data shows regardless of time of day.
+  List<double> deviationsForLastHours(int hours) {
+    const buckets = 7;
+    final now = DateTime.now();
+    final windowStart = now.subtract(Duration(hours: hours));
+    final bucketDuration = Duration(minutes: (hours * 60) ~/ buckets);
+
+    return List.generate(buckets, (i) {
+      final start = windowStart.add(bucketDuration * i);
+      final end = start.add(bucketDuration);
+      final samples = _history
+          .where((p) => !p.time.isBefore(start) && p.time.isBefore(end))
+          .map((p) => p.deviation)
+          .toList();
+      if (samples.isEmpty) return 0.0;
+      return samples.reduce((a, b) => a + b) / samples.length;
+    });
+  }
+
+  /// Labels for the 7 buckets given [hours] window — start and end times.
+  List<String> labelsForLastHours(int hours) {
+    final now = DateTime.now();
+    final windowStart = now.subtract(Duration(hours: hours));
+    const buckets = 7;
+    final bucketDuration = Duration(minutes: (hours * 60) ~/ buckets);
+
+    String fmt(DateTime t) {
+      final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+      final suffix = t.hour < 12 ? 'am' : 'pm';
+      return t.minute == 0 ? '$h$suffix' : '$h:${t.minute.toString().padLeft(2, '0')}$suffix';
+    }
+
+    return List.generate(buckets, (i) {
+      // Only show label at first, middle, last bucket to avoid crowding.
+      if (i == 0) return fmt(windowStart);
+      if (i == buckets ~/ 2) return fmt(windowStart.add(bucketDuration * i));
+      if (i == buckets - 1) return fmt(now);
+      return '';
+    });
+  }
+
+  /// Average/max deviation over the last [hours].
+  double averageDeviationForLastHours(int hours) {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    final samples = _history.where((p) => p.time.isAfter(cutoff)).map((p) => p.deviation).toList();
+    if (samples.isEmpty) return 0.0;
+    return samples.reduce((a, b) => a + b) / samples.length;
+  }
+
+  double maxDeviationForLastHours(int hours) {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    final samples = _history.where((p) => p.time.isAfter(cutoff)).map((p) => p.deviation).toList();
+    if (samples.isEmpty) return 0.0;
+    return samples.reduce((a, b) => a > b ? a : b);
+  }
+
+  bool hasDataForLastHours(int hours) {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    return _history.any((p) => p.time.isAfter(cutoff));
+  }
+
   /// Returns 7 average deviation values for today:
   /// [8am, 10am, 12pm, 2pm, 4pm, 6pm, 8pm]
   /// Each slot covers a 2-hour window. Returns 0 if no data in that window.

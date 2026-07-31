@@ -706,10 +706,12 @@ class _HomeDashboardState extends State<HomeDashboard>
       return;
     }
 
-    final hasUpdate = FirmwareManifestService.isNewerVersion(
-      manifest.firmwareVersion,
-      info.firmwareVersion,
-    );
+    final hasUpdate = manifest.firmwareVersion.isNotEmpty &&
+        info.firmwareVersion.isNotEmpty &&
+        FirmwareManifestService.isNewerVersion(
+          manifest.firmwareVersion,
+          info.firmwareVersion,
+        );
 
     _printDeviceInfoLog(
       'Supabase firmware check result: '
@@ -2305,6 +2307,8 @@ class _HomeDashboardState extends State<HomeDashboard>
                         ? () => _showXpDetailSheet()
                         : null,
                     items: [
+                      _goodPostureStatItem(_todayStats),
+                      _sessionsStatItem(_todayStats),
                       _lastSessionStatItem(
                         _offlineSessions,
                         _isLoadingOfflineSessions,
@@ -2476,31 +2480,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                   ),
                 ),
                 _kSectionSpacing,
-                StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 450,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _TherapyTimeTile(
-                          item: _sessionsStatItem(_todayStats),
-                          onTap: () => Navigator.of(context).push<void>(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const SessionsHistoryPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _TherapyTimeTile(
-                          item: _goodPostureStatItem(_todayStats),
-                          onTap: () => widget.onNavigateToPage(2),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                // Sessions and Good Posture moved to top StatsSummaryCard row
                 _kSectionSpacing,
                 StaggeredFadeSlide(
                   controller: _controller,
@@ -2519,12 +2499,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                           ),
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _TherapyTimeTile(
-                          item: _trackedTimeStatItem(_todayStats),
-                        ),
-                      ),
+                      // const SizedBox(width: 16),
+                      // Expanded(
+                      //   child: _TherapyTimeTile(
+                      //     item: _trackedTimeStatItem(_todayStats),
+                      //   ),
+                      // ),
                     ],
                   ),
                 ),

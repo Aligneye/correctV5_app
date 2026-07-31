@@ -776,6 +776,7 @@ class AlignEyeDeviceService {
   String _lastKnownProfile = '';
   int _lastKnownBattery = -1;
   DateTime? _lastUiFrame;
+  double _lastEmittedAngle = double.nan;
   Timer? _dataWatchdogTimer;
   Timer? _rssiTimer;
   DateTime? _lastDataReceivedAt;
@@ -1992,7 +1993,13 @@ class AlignEyeDeviceService {
         final last = _lastDataReceivedAt;
         if (last != null && DateTime.now().difference(last).inSeconds > 25) {
           if (currentIsCalibrating) return;
-          debugPrint('WATCHDOG: No data for 25s, forcing disconnect');
+          // Don't drop mid-therapy — device stops advertising during active
+          // therapy frames, so a brief hiccup would kill the session. Give
+          // therapy a longer grace period (60s) instead.
+          final isTherapy = currentMode.toUpperCase() == 'THERAPY';
+          final threshold = isTherapy ? 60 : 25;
+          if (DateTime.now().difference(last).inSeconds < threshold) return;
+          debugPrint('WATCHDOG: No data for ${threshold}s, forcing disconnect');
           disconnect();
         }
       });
@@ -2085,6 +2092,8 @@ class AlignEyeDeviceService {
 
     // Clean up subscriptions first
     _buffer = '';
+    _lastEmittedAngle = double.nan;
+    _lastUiFrame = null;
     await _notifySubscription?.cancel();
     _notifySubscription = null;
 
@@ -2764,9 +2773,7 @@ class AlignEyeDeviceService {
               break;
 
             case 'L':
-            // Fast live posture packet
-            // Update angle, mode, difficulty_angle, posture immediately.
-            // Do not throttle this packet.
+            // Fast live posture packet — throttled + angle smoothed.
               if (decoded['mode'] == null) decoded['mode'] = _lastKnownMode;
               if (decoded['sub_mode'] == null && _lastKnownSubMode.isNotEmpty) {
                 decoded['sub_mode'] = _lastKnownSubMode;
@@ -2776,6 +2783,17 @@ class AlignEyeDeviceService {
               }
               if (decoded['battery'] == null && _lastKnownBattery >= 0) {
                 decoded['battery'] = _lastKnownBattery;
+              }
+
+              // Raw passthrough — firmware already smooths with its own LPF.
+              // Only drop packets where angle change < 0.1° (flicker guard).
+              final rawAngle = double.tryParse(
+                decoded['angle']?.toString() ?? '',
+              );
+              if (rawAngle != null) {
+                if (!_lastEmittedAngle.isNaN &&
+                    (rawAngle - _lastEmittedAngle).abs() < 0.1) break;
+                _lastEmittedAngle = rawAngle;
               }
 
               final reading = PostureReading.fromJson(
@@ -3084,6 +3102,9 @@ class AlignEyeDeviceService {
       _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
 
       _verifyConnection().then((isValid) {
+        // Guard: if a disconnect ran while we were verifying, don't resurface
+        // connected state — that's the ghost-connected race.
+        if (connectionStatus.value == DeviceConnectionStatus.disconnected) return;
         if (isValid) {
           connectionStatus.value = DeviceConnectionStatus.connected;
         } else {
@@ -3327,13 +3348,16 @@ class AlignEyeDeviceService {
       return;
     }
 
+    // Throttle: max 30fps (33ms between emits)
     final now = DateTime.now();
-    if (_lastUiFrame == null ||
-        now.difference(_lastUiFrame!).inMilliseconds >= 100) {
-      _lastUiFrame = now;
-      _readingController.add(reading);
+    if (_lastUiFrame != null &&
+        now.difference(_lastUiFrame!).inMilliseconds < 33) {
+      return;
     }
+    _lastUiFrame = now;
+    _readingController.add(reading);
   }
+
 
   void _updateTherapyCache(PostureReading reading) {
     final isTherapy = reading.mode.trim().toUpperCase() == 'THERAPY';
