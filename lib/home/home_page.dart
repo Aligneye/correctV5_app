@@ -887,30 +887,32 @@ class _HomeDashboardState extends State<HomeDashboard>
     unawaited(_loadOfflineSessions());
   }
 
-  static StatItemData _goodPostureStatItem(TodayStats? stats) {
+  static StatItemData _goodPostureStatItem(TodayStats? stats, {VoidCallback? onTap}) {
     const gradient = AppTheme.alignWalkGradient;
     const icon = Icons.auto_awesome_rounded;
     const label = 'Good posture';
 
     if (stats == null) {
-      return const StatItemData(
+      return StatItemData(
         value: '-',
         label: label,
         trendText: 'Loading…',
         icon: icon,
         gradient: gradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
     if (!stats.hasTodayPostureData) {
-      return const StatItemData(
+      return StatItemData(
         value: '—',
         label: label,
         trendText: 'Do a training',
         icon: icon,
         gradient: gradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
@@ -939,6 +941,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       positiveTrend: positive,
       trendNeutral:
           !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
+      onTap: onTap,
     );
   }
 
@@ -1023,30 +1026,32 @@ class _HomeDashboardState extends State<HomeDashboard>
     return '${hours.toStringAsFixed(1)}h';
   }
 
-  static StatItemData _sessionsStatItem(TodayStats? stats) {
+  static StatItemData _sessionsStatItem(TodayStats? stats, {VoidCallback? onTap}) {
     const gradient = AppTheme.meditationGradient;
     const icon = Icons.model_training;
     const label = 'Sessions done';
 
     if (stats == null) {
-      return const StatItemData(
+      return StatItemData(
         value: '—',
         label: label,
         trendText: 'Loading…',
         icon: icon,
         gradient: gradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
     if (!stats.hasTodaySessions) {
-      return const StatItemData(
+      return StatItemData(
         value: '0',
         label: label,
         trendText: 'Do a session',
         icon: icon,
         gradient: gradient,
         trendNeutral: true,
+        onTap: onTap,
       );
     }
 
@@ -1079,6 +1084,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       gradient: gradient,
       positiveTrend: positive,
       trendNeutral: neutral,
+      onTap: onTap,
     );
   }
 
@@ -2307,8 +2313,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                         ? () => _showXpDetailSheet()
                         : null,
                     items: [
-                      _goodPostureStatItem(_todayStats),
-                      _sessionsStatItem(_todayStats),
+                      _goodPostureStatItem(_todayStats, onTap: () => widget.onNavigateToPage(2)),
+                      _sessionsStatItem(_todayStats, onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const SessionsHistoryPage(),
+                        ),
+                      )),
                       _lastSessionStatItem(
                         _offlineSessions,
                         _isLoadingOfflineSessions,
@@ -2320,7 +2330,6 @@ class _HomeDashboardState extends State<HomeDashboard>
                           ),
                         ),
                       ),
-                      _trainingTimeStatItem(_todayStats),
                     ],
                   ),
                 ),
