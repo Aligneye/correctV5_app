@@ -1313,7 +1313,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         unawaited(_persistStreakCache(streakStats));
       }
       if (xpStats != null) {
-        unawaited(_maybeShowLevelUpPopup(xpStats));
+        // unawaited(_maybeShowLevelUpPopup(xpStats)); // disabled with level system
         unawaited(_persistXpCache(xpStats));
       }
       unawaited(_maybeShowWeeklyRecap());
@@ -2482,32 +2482,26 @@ class _HomeDashboardState extends State<HomeDashboard>
                 _kSectionSpacing,
                 // Sessions and Good Posture moved to top StatsSummaryCard row
                 _kSectionSpacing,
-                StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 475,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _TherapyTimeTile(
-                          item: _therapyTimeStatItem(_todayStats),
-                          onTap: () => Navigator.of(context).push<void>(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const SessionsHistoryPage(
-                                initialFilter: SessionFilter.therapy,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      // const SizedBox(width: 16),
-                      // Expanded(
-                      //   child: _TherapyTimeTile(
-                      //     item: _trackedTimeStatItem(_todayStats),
-                      //   ),
-                      // ),
-                    ],
-                  ),
-                ),
+                // StaggeredFadeSlide(
+                //   controller: _controller,
+                //   delayMs: 475,
+                //   child: Row(
+                //     children: [
+                //       Expanded(
+                //         child: _TherapyTimeTile(
+                //           item: _therapyTimeStatItem(_todayStats),
+                //           onTap: () => Navigator.of(context).push<void>(
+                //             MaterialPageRoute<void>(
+                //               builder: (_) => const SessionsHistoryPage(
+                //                 initialFilter: SessionFilter.therapy,
+                //               ),
+                //             ),
+                //           ),
+                //         ),
+                //       ),
+                //     ],
+                //   ),
+                // ),
                 _kSectionSpacing,
                 StaggeredFadeSlide(
                   controller: _controller,
