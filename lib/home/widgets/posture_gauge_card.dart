@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 const _kPrimaryGreen = AppTheme.goodPostureEnd;
 const _kBadPostureRed = AppTheme.destructive;
 
-class PostureGaugeCard extends StatelessWidget {
+class PostureGaugeCard extends StatefulWidget {
   final double postureAngle;
   final String postureStatus;
   final bool isBadPosture;
@@ -25,10 +25,35 @@ class PostureGaugeCard extends StatelessWidget {
   });
 
   @override
+  State<PostureGaugeCard> createState() => _PostureGaugeCardState();
+}
+
+class _PostureGaugeCardState extends State<PostureGaugeCard> {
+  // L packets arrive roughly every 500ms. Small step-to-step deltas (normal
+  // drift) get the full 500ms so the needle glides without pausing between
+  // packets. Large deltas (e.g. a fast 0->90 movement that lands in a single
+  // packet) get a much shorter duration so the gauge catches up quickly
+  // instead of stretching a big jump across the same 500ms as a tiny one.
+  static const double _maxStepMs = 500;
+  static const double _minStepMs = 150;
+  static const double _fastCatchUpDeg = 90;
+
+  double? _lastAngle;
+
+  Duration _durationFor(double delta) {
+    final t = (delta.abs() / _fastCatchUpDeg).clamp(0.0, 1.0);
+    final ms = _maxStepMs - t * (_maxStepMs - _minStepMs);
+    return Duration(milliseconds: ms.round());
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accentColor = isBadPosture ? _kBadPostureRed : _kPrimaryGreen;
-    final clampedAngle = postureAngle.clamp(-90.0, 90.0);
+    final accentColor =
+        widget.isBadPosture ? _kBadPostureRed : _kPrimaryGreen;
+    final clampedAngle = widget.postureAngle.clamp(-90.0, 90.0);
+    final duration = _durationFor(clampedAngle - (_lastAngle ?? clampedAngle));
+    _lastAngle = clampedAngle;
 
     return HomeSurfaceCard(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
@@ -46,7 +71,7 @@ class PostureGaugeCard extends StatelessWidget {
               height: 220,
               width: 220,
               child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 500),
+                duration: duration,
                 curve: Curves.linear,
                 tween: Tween<double>(end: clampedAngle),
                 builder: (context, value, child) {
@@ -54,7 +79,7 @@ class PostureGaugeCard extends StatelessWidget {
                     painter: PostureGaugePainter(
                       angle: value,
                       accentColor: accentColor,
-                      difficultyDeg: difficultyDeg,
+                      difficultyDeg: widget.difficultyDeg,
                     ),
                   );
                 },
@@ -63,7 +88,7 @@ class PostureGaugeCard extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           StaggeredFadeSlide(
-            controller: controller,
+            controller: widget.controller,
             delayMs: 500,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -91,8 +116,8 @@ class PostureGaugeCard extends StatelessWidget {
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
                     child: Text(
-                      'Posture Status: $postureStatus',
-                      key: ValueKey(postureStatus),
+                      'Posture Status: ${widget.postureStatus}',
+                      key: ValueKey(widget.postureStatus),
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
@@ -102,7 +127,7 @@ class PostureGaugeCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Bad posture above ${difficultyDeg}°',
+                  'Bad posture above ${widget.difficultyDeg}°',
                   style: TextStyle(
                     color: scheme.onSurfaceVariant,
                     fontSize: 12,
@@ -276,10 +301,10 @@ class PostureGaugePainter extends CustomPainter {
         ..style = PaintingStyle.fill,
     );
 
-    // Draw angle value in center
+    // Draw angle value in center (as integer)
     final valuePainter = TextPainter(
       text: TextSpan(
-        text: "${clampedAngle.toStringAsFixed(1)}°",
+        text: "${clampedAngle.round()}°",
         style: TextStyle(
           fontSize: 34,
           fontWeight: FontWeight.w600,
