@@ -76,15 +76,6 @@ class AuthService {
     );
   }
 
-  // static Future<void> signInWithGoogle() async {
-  //   await _auth.signInWithOAuth(
-  //     OAuthProvider.google,
-  //     redirectTo: kIsWeb
-  //         ? null
-  //         : 'io.supabase.flutter://login-callback/',
-  //   );
-  // }
-
   static void setPendingLoginPrefill({
     required String email,
     required String password,
