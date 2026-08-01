@@ -64,8 +64,8 @@ class StatsSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // index 0 = streak tile, index 1 = xp tile, index 2+ = stat items
-    final totalCount = items.length + 2;
+    // index 0 = streak tile, index 1+ = stat items (xp tile disabled)
+    final totalCount = items.length + 1;
     return SizedBox(
       height: 156,
       child: ListView.separated(
@@ -88,16 +88,16 @@ class StatsSummaryCard extends StatelessWidget {
               ),
             );
           }
-          if (index == 1) {
-            return SizedBox(
-              key: xpTileKey,
-              width: 132,
-              child: XpLevelTile(xpStats: xpStats, onTap: onXpTap),
-            );
-          }
+          // if (index == 1) {
+          //   return SizedBox(
+          //     key: xpTileKey,
+          //     width: 132,
+          //     child: XpLevelTile(xpStats: xpStats, onTap: onXpTap),
+          //   );
+          // }
           return SizedBox(
             width: 132,
-            child: _SummaryMetricTile(item: items[index - 2]),
+            child: _SummaryMetricTile(item: items[index - 1]),
           );
         },
       ),

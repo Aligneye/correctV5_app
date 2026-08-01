@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 const _kPrimaryGreen = AppTheme.goodPostureEnd;
 const _kBadPostureRed = AppTheme.destructive;
 
-class PostureGaugeCard extends StatelessWidget {
+class PostureGaugeCard extends StatefulWidget {
   final double postureAngle;
   final String postureStatus;
   final bool isBadPosture;
@@ -25,10 +25,31 @@ class PostureGaugeCard extends StatelessWidget {
   });
 
   @override
+  State<PostureGaugeCard> createState() => _PostureGaugeCardState();
+}
+
+class _PostureGaugeCardState extends State<PostureGaugeCard> {
+  static const double _millisecondsPerDegree = 3;
+  double? _displayedAngle;
+
+  Duration _durationFor(double delta) {
+    final distance = delta.abs();
+    if (distance == 0) return Duration.zero;
+
+    // Keep the needle at a constant 5ms per degree:
+    // 90 degrees = 450ms, 30 degrees = 150ms.
+    final milliseconds = (distance * _millisecondsPerDegree).round();
+    return Duration(milliseconds: math.max(1, milliseconds));
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accentColor = isBadPosture ? _kBadPostureRed : _kPrimaryGreen;
-    final clampedAngle = postureAngle.clamp(-90.0, 90.0);
+    final accentColor = widget.isBadPosture ? _kBadPostureRed : _kPrimaryGreen;
+    final clampedAngle = widget.postureAngle.clamp(-90.0, 90.0);
+    final duration = _durationFor(
+      clampedAngle - (_displayedAngle ?? clampedAngle),
+    );
 
     return HomeSurfaceCard(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
@@ -46,15 +67,16 @@ class PostureGaugeCard extends StatelessWidget {
               height: 220,
               width: 220,
               child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 130),
+                duration: duration,
                 curve: Curves.linear,
                 tween: Tween<double>(end: clampedAngle),
                 builder: (context, value, child) {
+                  _displayedAngle = value;
                   return CustomPaint(
                     painter: PostureGaugePainter(
                       angle: value,
                       accentColor: accentColor,
-                      difficultyDeg: difficultyDeg,
+                      difficultyDeg: widget.difficultyDeg,
                     ),
                   );
                 },
@@ -63,7 +85,7 @@ class PostureGaugeCard extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           StaggeredFadeSlide(
-            controller: controller,
+            controller: widget.controller,
             delayMs: 500,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -91,8 +113,8 @@ class PostureGaugeCard extends StatelessWidget {
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
                     child: Text(
-                      'Posture Status: $postureStatus',
-                      key: ValueKey(postureStatus),
+                      'Posture Status: ${widget.postureStatus}',
+                      key: ValueKey(widget.postureStatus),
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
@@ -102,7 +124,7 @@ class PostureGaugeCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Bad posture above ${difficultyDeg}°',
+                  'Bad posture above ${widget.difficultyDeg}°',
                   style: TextStyle(
                     color: scheme.onSurfaceVariant,
                     fontSize: 12,

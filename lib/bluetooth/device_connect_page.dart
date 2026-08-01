@@ -184,8 +184,14 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         },
       );
 
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 12));
-      await FlutterBluePlus.isScanning.where((s) => !s).first;
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 12),
+        withServices: [Guid(_kPodServiceUuid)],
+      );
+      await FlutterBluePlus.isScanning
+          .where((s) => !s)
+          .first
+          .timeout(const Duration(seconds: 15), onTimeout: () => false);
       if (mounted) {
         setState(() {
           _scanning = false;

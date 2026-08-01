@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -776,7 +775,6 @@ class AlignEyeDeviceService {
   String _lastKnownProfile = '';
   int _lastKnownBattery = -1;
   DateTime? _lastUiFrame;
-  double _lastEmittedAngle = double.nan;
   Timer? _dataWatchdogTimer;
   Timer? _rssiTimer;
   DateTime? _lastDataReceivedAt;
@@ -2093,7 +2091,6 @@ class AlignEyeDeviceService {
 
     // Clean up subscriptions first
     _buffer = '';
-    _lastEmittedAngle = double.nan;
     _lastUiFrame = null;
     await _notifySubscription?.cancel();
     _notifySubscription = null;
@@ -2786,17 +2783,6 @@ class AlignEyeDeviceService {
                 decoded['battery'] = _lastKnownBattery;
               }
 
-              // Raw passthrough — firmware already smooths with its own LPF.
-              // Only drop packets where angle change < 0.1° (flicker guard).
-              final rawAngle = double.tryParse(
-                decoded['angle']?.toString() ?? '',
-              );
-              if (rawAngle != null) {
-                if (!_lastEmittedAngle.isNaN &&
-                    (rawAngle - _lastEmittedAngle).abs() < 0.1) break;
-                _lastEmittedAngle = rawAngle;
-              }
-
               final reading = PostureReading.fromJson(
                 decoded,
                 current: currentReading.value,
@@ -2989,26 +2975,19 @@ class AlignEyeDeviceService {
 
             case 'STATUS':
             // Periodic health snapshot (battery + raw IMU), sent every 5s in
-            // any mode. Update battery cache and emit a lightweight reading so
-            // the IDLE gauge stays live without needing an L or T packet.
+            // any mode. Update battery/raw-axis cache only — the gauge angle
+            // must always come from the calibration-relative L packet, so
+            // 'angle' is intentionally omitted here (PostureReading.fromJson
+            // carries the previous angle forward when the key is absent).
               final rawBattery = decoded['battery'];
               if (rawBattery != null) {
                 _lastKnownBattery =
                     int.tryParse(rawBattery.toString()) ?? _lastKnownBattery;
               }
 
-              // Compute a posture angle from the raw accelerometer axes so
-              // the home-screen gauge animates in IDLE mode at 5s cadence.
-              // Formula: tilt angle = arctan2(sqrt(x²+z²), y) * 180/π
-              // This matches the convention used in the L packet's angle field
-              // (device Y-axis points along the spine, so deviation from
-              // vertical is the angle between Y and the gravity vector).
               final rawX = (decoded['x'] as num?)?.toDouble() ?? 0.0;
               final rawY = (decoded['y'] as num?)?.toDouble() ?? 0.0;
               final rawZ = (decoded['z'] as num?)?.toDouble() ?? 0.0;
-              final xzMag = math.sqrt(rawX * rawX + rawZ * rawZ);
-              final idleAngle = math.atan2(xzMag, rawY.abs()) *
-                  180.0 / math.pi;
 
               final prev = currentReading.value;
               // Only emit in IDLE — in active modes the L/T packets already
@@ -3023,7 +3002,6 @@ class AlignEyeDeviceService {
                     'raw_x_g': rawX,
                     'raw_y_g': rawY,
                     'raw_z_g': rawZ,
-                    'angle': idleAngle,
                   },
                   current: prev,
                 );

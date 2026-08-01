@@ -295,14 +295,20 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
       onCompleted: () async {
         if (!mounted) return;
         _set(_UpdateStep.reconnecting);
-        await Future<void>.delayed(const Duration(seconds: 4));
+        await Future<void>.delayed(const Duration(seconds: 10));
         if (!mounted) return;
 
-        // Reconnect to the device in application mode
-        try {
-          await deviceService.connect();
-        } catch (e) {
-          debugPrint('Failed to reconnect after DFU completion: $e');
+        // Reconnect with retry — pod may still be booting
+        for (int i = 0; i < 3; i++) {
+          try {
+            await deviceService.connect();
+            break;
+          } catch (e) {
+            debugPrint('Reconnect attempt ${i + 1} failed: $e');
+            if (i < 2 && mounted) {
+              await Future<void>.delayed(const Duration(seconds: 4));
+            }
+          }
         }
         if (!mounted) return;
 
