@@ -46,7 +46,7 @@ class PostureGaugeCard extends StatelessWidget {
               height: 220,
               width: 220,
               child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 130),
+                duration: const Duration(milliseconds: 500),
                 curve: Curves.linear,
                 tween: Tween<double>(end: clampedAngle),
                 builder: (context, value, child) {
@@ -276,10 +276,10 @@ class PostureGaugePainter extends CustomPainter {
         ..style = PaintingStyle.fill,
     );
 
-    // Draw angle value in center (as integer)
+    // Draw angle value in center
     final valuePainter = TextPainter(
       text: TextSpan(
-        text: "${clampedAngle.round()}°",
+        text: "${clampedAngle.toStringAsFixed(1)}°",
         style: TextStyle(
           fontSize: 34,
           fontWeight: FontWeight.w600,
