@@ -10,6 +10,7 @@ import 'package:correctv1/services/firmware_download_service.dart';
 import 'package:correctv1/services/firmware_manifest_service.dart';
 import 'package:correctv1/services/firmware_update_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:io';
 
 // ── Update state machine ────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
   @override
   void dispose() {
+    WakelockPlus.disable();
     _entryController.dispose();
     super.dispose();
   }
@@ -242,6 +244,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
     }
 
     HapticFeedback.mediumImpact();
+    WakelockPlus.enable(); // screen on raho jab tak update complete na ho
 
     // ENTER_DFU
     _set(_UpdateStep.enteringDfu);
@@ -318,6 +321,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
 
         final expectedVersion = manifest.firmwareVersion;
         final actualVersion = postInfo?.firmwareVersion ?? '';
+        WakelockPlus.disable();
         if (actualVersion.isNotEmpty && actualVersion == expectedVersion) {
           _set(_UpdateStep.success);
           HapticFeedback.heavyImpact();
@@ -326,7 +330,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
         }
       },
       onError: (msg) {
-        // Distinguish between zip-send failure and general upgrade failure
+        WakelockPlus.disable();
         final lower = msg.toLowerCase();
         if (lower.contains('dfu') && lower.contains('start') ||
             lower.contains('zip') ||
@@ -377,7 +381,41 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    final isUpdating = _step == _UpdateStep.enteringDfu ||
+        _step == _UpdateStep.transferring ||
+        _step == _UpdateStep.reconnecting;
+
+    return PopScope(
+      canPop: !isUpdating,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop || !isUpdating) return;
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Update in progress'),
+            content: const Text(
+              'Going back now may corrupt the firmware and brick your device. Are you sure?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Stay'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text(
+                  'Go back anyway',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        );
+        if ((confirm ?? false) && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
         decoration: BoxDecoration(
@@ -393,12 +431,14 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () {
+                      onPressed: isUpdating ? null : () {
                         HapticFeedback.lightImpact();
                         Navigator.of(context).pop();
                       },
                       icon: const Icon(Icons.arrow_back_rounded),
-                      color: scheme.onSurface,
+                      color: isUpdating
+                          ? scheme.onSurface.withValues(alpha: 0.3)
+                          : scheme.onSurface,
                       padding: EdgeInsets.zero,
                       constraints:
                           const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -475,6 +515,7 @@ class _FirmwareUpdatePageState extends State<FirmwareUpdatePage>
           ),
         ),
       ),
+    ),
     );
   }
 }

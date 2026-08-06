@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,7 +9,8 @@ import 'package:correctv1/services/session_database.dart';
 /// Background service that pushes locally-stored sessions to Supabase.
 ///
 /// Runs on a periodic timer and can be triggered on-demand after local writes.
-/// Errors are caught silently — unsynced rows remain and retry next cycle.
+/// Uses exponential backoff after consecutive failures so a bad network doesn't
+/// hammer the server. Unsynced rows always remain in SQLite and retry next cycle.
 class SessionSyncService {
   SessionSyncService._();
   static final SessionSyncService instance = SessionSyncService._();
@@ -16,6 +18,9 @@ class SessionSyncService {
   Timer? _periodicTimer;
   Timer? _debounceTimer;
   bool _syncing = false;
+
+  int _consecutiveFailures = 0;
+  static const int _maxFailures = 5;
 
   static const Duration _interval = Duration(seconds: 30);
   static const Duration _debounce = Duration(seconds: 2);
@@ -35,6 +40,8 @@ class SessionSyncService {
   }
 
   void triggerSync() {
+    // If too many consecutive failures, back off — periodic timer will retry
+    if (_consecutiveFailures >= _maxFailures) return;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(_debounce, _run);
   }
@@ -47,8 +54,11 @@ class SessionSyncService {
     _syncing = true;
     try {
       await _pushUnsynced(user.id);
+      _consecutiveFailures = 0;
     } catch (e) {
-      debugPrint('SessionSyncService: push error: $e');
+      _consecutiveFailures++;
+      final backoffSec = math.min(300, 30 * math.pow(2, _consecutiveFailures - 1)).toInt();
+      debugPrint('SessionSyncService: push error (failure #$_consecutiveFailures, backoff ${backoffSec}s): $e');
     } finally {
       _syncing = false;
     }
