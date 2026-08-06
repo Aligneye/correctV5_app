@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:correctv1/bluetooth/device_connect_page.dart';
@@ -13,11 +16,6 @@ import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/services/theme_service.dart';
 import 'package:correctv1/legal/medical_disclaimer_page.dart';
 
-const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
-const _kSectionSpacing = SizedBox(height: 24);
-const _kInnerSpacing = SizedBox(height: 16);
-const _kPrimaryBlue = AppTheme.brandPrimary;
-
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -26,33 +24,36 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  bool _lowPowerMode = false;
-  bool _vibrationAlerts = true;
+    with TickerProviderStateMixin {
+  late final AnimationController _entryCtrl;
+  late final AnimationController _ringCtrl;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+    _entryCtrl = AnimationController(
       vsync: this,
-    );
-    _controller.forward();
+      duration: const Duration(milliseconds: 900),
+    )..forward();
+    _ringCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _entryCtrl.dispose();
+    _ringCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _confirmLogout(BuildContext context) async {
+  Future<void> _confirmLogout() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Log Out'),
-        content: const Text('Are you sure you want to log out?'),
+        title: const Text('Log out?'),
+        content: const Text('You will need to sign in again.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -60,15 +61,13 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Log Out'),
+            child: const Text('Log out',
+                style: TextStyle(color: Color(0xFFEF4444))),
           ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      await AuthService.signOut();
-    }
+    if (confirmed == true) await AuthService.signOut();
   }
 
   @override
@@ -82,337 +81,433 @@ class _SettingsPageState extends State<SettingsPage>
         child: SafeArea(
           bottom: false,
           child: SingleChildScrollView(
-            padding: _kPagePadding,
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
             physics: const BouncingScrollPhysics(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Header ──────────────────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 0,
-                  child: const _SettingsHeader(),
-                ),
-                _kSectionSpacing,
-
-                // ── Device Info Card ────────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 100,
-                  child: const _DeviceInfoCard(),
-                ),
-                _kSectionSpacing,
-
-                // ── Battery & Temperature Row ───────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 200,
-                  child: const _BatteryTemperatureRow(),
-                ),
-                _kSectionSpacing,
-
-                // ── Connection Settings Card ────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 300,
-                  child: _ConnectionSettingsCard(
-                    lowPowerMode: _lowPowerMode,
-                    vibrationAlerts: _vibrationAlerts,
-                    onLowPowerModeChanged: (v) =>
-                        setState(() => _lowPowerMode = v),
-                    onVibrationAlertsChanged: (v) {
-                      if (v) HapticFeedback.lightImpact();
-                      setState(() => _vibrationAlerts = v);
-                    },
-                  ),
-                ),
-                _kSectionSpacing,
-
-                // ── Appearance Card ─────────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 400,
-                  child: const _AppearanceCard(),
-                ),
-                _kSectionSpacing,
-
-                // ── Firmware Update Card ────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 450,
-                  child: const _FirmwareUpdateCard(),
-                ),
-                _kSectionSpacing,
-
-                // ── Alignment Calibration Card ──────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 500,
-                  child: const _AlignmentCalibrationCard(),
-                ),
-                _kSectionSpacing,
-
-                // ── Medical Disclaimer ──────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 550,
-                  child: const _MedicalDisclaimerCard(),
-                ),
-                _kSectionSpacing,
-
-                // ── Logout Button ───────────────────────────────────
-                _StaggeredFadeSlide(
-                  controller: _controller,
-                  delayMs: 600,
-                  child: _GradientButton(
-                    label: 'Log Out',
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+            child: AnimatedBuilder(
+              animation: _entryCtrl,
+              builder: (context, _) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _fade(0.0, _ProfileHeroCard(ringCtrl: _ringCtrl)),
+                  const SizedBox(height: 28),
+                  _fade(0.15, _SectionLabel(label: 'DEVICE')),
+                  const SizedBox(height: 10),
+                  _fade(0.2, _DeviceSection()),
+                  const SizedBox(height: 24),
+                  _fade(0.35, _SectionLabel(label: 'APPEARANCE')),
+                  const SizedBox(height: 10),
+                  _fade(0.4, _AppearanceSection()),
+                  const SizedBox(height: 24),
+                  _fade(0.5, _SectionLabel(label: 'LEGAL')),
+                  const SizedBox(height: 10),
+                  _fade(0.55, _LegalSection()),
+                  const SizedBox(height: 32),
+                  _fade(
+                    0.65,
+                    Center(
+                      child: GestureDetector(
+                        onTap: _confirmLogout,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'Log out',
+                            style: TextStyle(
+                              color: const Color(0xFFEF4444)
+                                  .withValues(alpha: 0.85),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                    onTap: () => _confirmLogout(context),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  _fade(0.7, const _AppVersionLabel()),
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
   }
-}
 
-// ── Surface Card (identical to home_page) ───────────────────────────────────
-
-class _SurfaceCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets padding;
-
-  const _SurfaceCard({required this.child, required this.padding});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
-        color: isDark ? scheme.surface : Colors.white.withValues(alpha: 0.60),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(
-          color: isDark ? scheme.outline : AppTheme.glassBorder,
-        ),
-        boxShadow: isDark
-            ? [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.30),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : const [
-                BoxShadow(
-                  color: Color(0x0D000000),
-                  blurRadius: 24,
-                  offset: Offset(0, 8),
-                ),
-                BoxShadow(
-                  color: Color(0x05000000),
-                  blurRadius: 12,
-                  offset: Offset(0, 2),
-                ),
-              ],
-      ),
-      child: child,
+  Widget _fade(double start, Widget child) {
+    final v = Curves.easeOutCubic.transform(
+      ((_entryCtrl.value - start) / (1.0 - start)).clamp(0.0, 1.0),
+    );
+    return Opacity(
+      opacity: v,
+      child:
+          Transform.translate(offset: Offset(0, 16 * (1 - v)), child: child),
     );
   }
 }
 
-// ── Staggered Animation (identical to home_page) ────────────────────────────
+// ── Profile Hero ──────────────────────────────────────────────────────────────
 
-class _StaggeredFadeSlide extends StatelessWidget {
-  final Animation<double> controller;
-  final int delayMs;
-  final Widget child;
+class _ProfileHeroCard extends StatelessWidget {
+  final AnimationController ringCtrl;
+  const _ProfileHeroCard({required this.ringCtrl});
 
-  const _StaggeredFadeSlide({
-    required this.controller,
-    required this.delayMs,
-    required this.child,
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+    final user = Supabase.instance.client.auth.currentUser;
+    final email = user?.email ?? '';
+    final name = user?.userMetadata?['full_name'] as String? ??
+        email.split('@').first.replaceAll(RegExp(r'[._\-]'), ' ');
+    final avatarUrl = user?.userMetadata?['avatar_url'] as String?;
+    final initials = _initials(email);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1F26) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: isDark
+              ? const Color(0xFF2A2D35)
+              : const Color(0xFF9333EA).withValues(alpha: 0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF9333EA)
+                .withValues(alpha: isDark ? 0.12 : 0.07),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          AnimatedBuilder(
+            animation: ringCtrl,
+            builder: (context, _) => CustomPaint(
+              painter: _GradientRingPainter(progress: ringCtrl.value),
+              child: Padding(
+                padding: const EdgeInsets.all(3),
+                child: ClipOval(
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: avatarUrl != null
+                        ? Image.network(avatarUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (ctx, err, st) =>
+                                _InitialsAvatar(initials: initials))
+                        : _InitialsAvatar(initials: initials),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _capitalize(name),
+                  style: TextStyle(
+                    color: scheme.onSurface,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  email,
+                  style: TextStyle(
+                      color: scheme.onSurfaceVariant, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          ValueListenableBuilder<DeviceConnectionStatus>(
+            valueListenable:
+                BluetoothServiceManager().deviceService.connectionStatus,
+            builder: (context, status, _) {
+              final connected = status == DeviceConnectionStatus.connected;
+              if (!connected) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: scheme.outline),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text('No pod',
+                          style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          )),
+                    ],
+                  ),
+                );
+              }
+              return ValueListenableBuilder<String>(
+                valueListenable:
+                    BluetoothServiceManager().deviceService.activeProfileName,
+                builder: (context, profileName, _) {
+                  final label =
+                      profileName.isNotEmpty ? profileName : 'Pod';
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color:
+                          const Color(0xFF22C55E).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF22C55E)
+                            .withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Color(0xFF22C55E),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(label,
+                            style: const TextStyle(
+                              color: Color(0xFF22C55E),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _initials(String email) {
+    final parts =
+        email.split('@').first.split(RegExp(r'[._\-]'));
+    if (parts.length >= 2 &&
+        parts[0].isNotEmpty &&
+        parts[1].isNotEmpty) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    final s = email.split('@').first;
+    return s.length >= 2 ? s.substring(0, 2).toUpperCase() : '?';
+  }
+
+  static String _capitalize(String s) => s
+      .split(' ')
+      .map((w) =>
+          w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+      .join(' ');
+}
+
+class _InitialsAvatar extends StatelessWidget {
+  final String initials;
+  const _InitialsAvatar({required this.initials});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 56,
+        height: 56,
+        decoration: const BoxDecoration(
+          gradient: AppTheme.brandGradient,
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: Text(initials,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700)),
+      );
+}
+
+class _GradientRingPainter extends CustomPainter {
+  final double progress;
+  const _GradientRingPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..shader = SweepGradient(
+        colors: const [
+          Color(0xFF9333EA),
+          Color(0xFF2563EB),
+          Color(0xFFEC4899),
+          Color(0xFF9333EA),
+        ],
+        transform: GradientRotation(progress * 2 * math.pi),
+      ).createShader(Offset.zero & size);
+    canvas.drawOval((Offset.zero & size).deflate(1.25), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GradientRingPainter old) =>
+      old.progress != progress;
+}
+
+// ── Section Label ─────────────────────────────────────────────────────────────
+
+class _SectionLabel extends StatelessWidget {
+  final String label;
+  const _SectionLabel({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: Theme.of(context)
+              .colorScheme
+              .onSurfaceVariant
+              .withValues(alpha: 0.6),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Group Card ────────────────────────────────────────────────────────────────
+
+class _GroupCard extends StatelessWidget {
+  final List<Widget> children;
+  const _GroupCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1F26) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? const Color(0xFF2A2D35)
+              : const Color(0xFFE5E7EB),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color:
+                Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          for (int i = 0; i < children.length; i++) ...[
+            children[i],
+            if (i < children.length - 1)
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 56,
+                color:
+                    scheme.outline.withValues(alpha: 0.5),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Row Item ──────────────────────────────────────────────────────────────────
+
+class _RowItem extends StatelessWidget {
+  final LinearGradient gradient;
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool destructive;
+
+  const _RowItem({
+    required this.gradient,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.destructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, child) {
-        final start = delayMs / 1000.0;
-        final value = Curves.easeOut.transform(
-          ((controller.value - start) / 0.6).clamp(0.0, 1.0),
-        );
-
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 20 * (1 - value)),
-            child: child,
-          ),
-        );
-      },
-      child: child,
-    );
-  }
-}
-
-// ── Header ──────────────────────────────────────────────────────────────────
-
-class _SettingsHeader extends StatelessWidget {
-  const _SettingsHeader();
-
-  @override
-  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final user = Supabase.instance.client.auth.currentUser;
-    final email = user?.email ?? '';
-    final initials = _extractInitials(email);
-    final avatarUrl = user?.userMetadata?['avatar_url'] as String?;
-
-    return Row(
-      children: [
-        // Profile avatar
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: avatarUrl == null ? AppTheme.brandGradient : null,
-            border: Border.all(color: scheme.outline, width: 1.5),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: avatarUrl != null
-              ? Image.network(
-                  avatarUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Center(
-                    child: Text(
-                      initials,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                )
-              : Center(
-                  child: Text(
-                    initials,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-        ),
-        const Spacer(),
-        Text(
-          'Settings',
-          style: TextStyle(
-            color: scheme.onSurface,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const Spacer(),
-        // Help icon
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: scheme.outline, width: 1.5),
-          ),
-          child: Icon(
-            Icons.help_outline_rounded,
-            color: scheme.onSurface,
-            size: 20,
-          ),
-        ),
-      ],
-    );
-  }
-
-  static String _extractInitials(String email) {
-    final name = email.split('@').first;
-    if (name.isEmpty) return '?';
-    final parts = name.split(RegExp(r'[._\-]'));
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return name.substring(0, name.length >= 2 ? 2 : 1).toUpperCase();
-  }
-}
-
-// ── Device Info Card ────────────────────────────────────────────────────────
-
-class _DeviceInfoCard extends StatefulWidget {
-  const _DeviceInfoCard();
-
-  @override
-  State<_DeviceInfoCard> createState() => _DeviceInfoCardState();
-}
-
-class _DeviceInfoCardState extends State<_DeviceInfoCard> {
-  String _appVersion = 'Loading...';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAppVersion();
-  }
-
-  Future<void> _loadAppVersion() async {
-    try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      if (mounted) {
-        setState(() {
-          _appVersion = 'v${packageInfo.version}';
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _appVersion = 'v1.0.0';
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return _SurfaceCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          // Device row
-          Row(
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap != null
+            ? () {
+                HapticFeedback.selectionClick();
+                onTap!();
+              }
+            : null,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          child: Row(
             children: [
               Container(
-                width: 48,
-                height: 48,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  color: AppTheme.connectedBg,
-                  borderRadius: BorderRadius.circular(14),
+                  gradient: destructive ? null : gradient,
+                  color: destructive
+                      ? const Color(0xFFEF4444).withValues(alpha: 0.12)
+                      : null,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(
-                  Icons.bluetooth_rounded,
-                  color: _kPrimaryBlue,
-                  size: 24,
-                ),
+                child: Icon(icon,
+                    size: 18,
+                    color: destructive
+                        ? const Color(0xFFEF4444)
+                        : Colors.white),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -420,200 +515,269 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Align Pod',
+                      title,
                       style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 16,
+                        color: destructive
+                            ? const Color(0xFFEF4444)
+                            : scheme.onSurface,
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _appVersion,
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 12),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
-              ValueListenableBuilder<DeviceConnectionStatus>(
-                valueListenable:
-                    BluetoothServiceManager().deviceService.connectionStatus,
-                builder: (context, status, _) {
-                  final isConnected =
-                      status == DeviceConnectionStatus.connected;
-
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isConnected
-                          ? AppTheme.successBg
-                          : Colors.red.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: isConnected
-                                ? AppTheme.successText
-                                : Colors.red,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          isConnected ? 'Connected' : 'Disconnected',
-                          style: TextStyle(
-                            color: isConnected
-                                ? AppTheme.successText
-                                : Colors.red,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+              if (trailing != null)
+                trailing!
+              else if (onTap != null)
+                Icon(Icons.chevron_right_rounded,
+                    size: 18,
+                    color: scheme.onSurfaceVariant
+                        .withValues(alpha: 0.5)),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
 
-          const SizedBox(height: 12),
-          ValueListenableBuilder<DeviceConnectionStatus>(
-            valueListenable:
-            BluetoothServiceManager().deviceService.connectionStatus,
-            builder: (context, status, _) {
-              final isConnected = status == DeviceConnectionStatus.connected;
-              return SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () async {
-                    if (isConnected) {
-                      await BluetoothServiceManager().disconnectByUser();
-                    } else {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const DeviceConnectPage(),
+// ── Device Section ────────────────────────────────────────────────────────────
+
+class _DeviceSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final svc = BluetoothServiceManager().deviceService;
+
+    return _GroupCard(children: [
+      // Pod connect / disconnect
+      ValueListenableBuilder<DeviceConnectionStatus>(
+        valueListenable: svc.connectionStatus,
+        builder: (context, status, _) {
+          final connected = status == DeviceConnectionStatus.connected;
+          return _RowItem(
+            gradient: AppTheme.brandGradient,
+            icon: Icons.bluetooth_rounded,
+            title: 'Align Pod',
+            subtitle: connected ? 'Connected' : 'Tap to connect',
+            trailing: _StatusDot(connected: connected),
+            onTap: () async {
+              if (connected) {
+                await BluetoothServiceManager().disconnectByUser();
+              } else {
+                final readiness = await svc.checkReadiness();
+                if (!context.mounted) return;
+                if (readiness == BleReadiness.bluetoothOff) {
+                  try {
+                    await FlutterBluePlus.turnOn();
+                    await FlutterBluePlus.adapterState
+                        .where((s) => s == BluetoothAdapterState.on)
+                        .first
+                        .timeout(const Duration(seconds: 8));
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content:
+                              Text('Please enable Bluetooth to connect.'),
+                          behavior: SnackBarBehavior.floating,
                         ),
                       );
                     }
-                  },
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor:
-                      isConnected ? AppTheme.destructive : AppTheme.goodPostureEnd,
-                      foregroundColor: Colors.white,
-                      side: BorderSide(
-                        color: isConnected ? AppTheme.destructive : AppTheme.goodPostureEnd,
-                      ),
-                    ),
-                  child: Text(isConnected ? 'Disconnect' : 'Connect'),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Forget All Devices?'),
-                    content: const Text(
-                      'This will remove all saved pod data. You will need to pair your pod again.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        child: const Text(
-                          'Forget',
-                          style: TextStyle(color: Colors.red),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed == true) {
-                  await BluetoothServiceManager().forgetDevice();
+                    return;
+                  }
+                  if (!context.mounted) return;
                 }
-              },
-              icon: const Icon(Icons.delete_outline_rounded, size: 16),
-              label: const Text('Forget All Devices'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const DeviceConnectPage(),
+                ));
+              }
+            },
+          );
+        },
+      ),
+      // Firmware
+      ValueListenableBuilder(
+        valueListenable: svc.deviceInfo,
+        builder: (context, info, _) {
+          final fw = (info?.firmwareVersion.isNotEmpty == true)
+              ? 'Firmware v${info!.firmwareVersion}'
+              : null;
+          return _RowItem(
+            gradient: AppTheme.trackingGradient,
+            icon: Icons.download_rounded,
+            title: 'Firmware Update',
+            subtitle: fw,
+            onTap: () {
+              svc.getDeviceInfo();
+              Navigator.of(context).push(_slideRoute(
+                const FirmwareUpdatePage(),
+              ));
+            },
+          );
+        },
+      ),
+      // Calibration with active profile subtitle
+      ValueListenableBuilder<String>(
+        valueListenable: svc.activeProfileName,
+        builder: (context, profileName, _) => _RowItem(
+          gradient: AppTheme.goodPostureGradient,
+          icon: Icons.wifi_tethering_rounded,
+          title: 'Alignment Calibration',
+          subtitle: profileName.isNotEmpty ? profileName : null,
+          onTap: () async {
+            if (svc.connectionStatus.value !=
+                DeviceConnectionStatus.connected) {
+              await showPodDisconnectedDialog(context);
+              return;
+            }
+            if (!context.mounted) return;
+            Navigator.of(context).push(_slideRoute(
+              CalibrationManagerPage(deviceService: svc),
+            ));
+          },
+        ),
+      ),
+      // About Device
+      ValueListenableBuilder(
+        valueListenable: svc.deviceInfo,
+        builder: (context, info, _) => _RowItem(
+          gradient: AppTheme.vibrationTherapyGradient,
+          icon: Icons.info_outline_rounded,
+          title: 'About Device',
+          subtitle: (info?.serial.isNotEmpty == true)
+              ? 'SN: ${info!.serial}'
+              : null,
+          onTap: () => _showAboutSheet(context, info),
+        ),
+      ),
+      // Forget device
+      _RowItem(
+        gradient: AppTheme.therapyGradient,
+        icon: Icons.delete_outline_rounded,
+        title: 'Forget Device',
+        destructive: true,
+        onTap: () async {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Forget device?'),
+              content: const Text(
+                  'Removes all saved pod data. You will need to pair again.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Forget',
+                        style: TextStyle(color: Colors.red))),
+              ],
+            ),
+          );
+          if (confirmed == true) {
+            await BluetoothServiceManager().forgetDevice();
+          }
+        },
+      ),
+    ]);
+  }
+}
+
+class _StatusDot extends StatelessWidget {
+  final bool connected;
+  const _StatusDot({required this.connected});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: connected
+              ? const Color(0xFF22C55E)
+              : const Color(0xFF6B7280),
+        ),
+      );
+}
+
+
+void _showAboutSheet(BuildContext context, DeviceInfo? info) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _AboutSheet(info: info),
+  );
+}
+
+class _AboutSheet extends StatelessWidget {
+  final DeviceInfo? info;
+  const _AboutSheet({required this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+
+    final rows = <(String, String)>[
+      if (info?.serial.isNotEmpty == true) ('Serial Number', info!.serial),
+      if (info?.model.isNotEmpty == true) ('Model', info!.model),
+      if (info?.hardwareRevision.isNotEmpty == true)
+        ('Hardware', info!.hardwareRevision),
+      if (info?.firmwareVersion.isNotEmpty == true)
+        ('Firmware', info!.firmwareVersion),
+      if (info?.firmwareBuildDate.isNotEmpty == true)
+        ('Build Date', info!.firmwareBuildDate),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1F26) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+          24, 0, 24, 24 + MediaQuery.of(context).padding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 20),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: scheme.outline,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
-          const SizedBox(height: 18),
-          Divider(height: 1, thickness: 1, color: scheme.outline),
-          const SizedBox(height: 14),
-          ValueListenableBuilder<DeviceConnectionStatus>(
-            valueListenable:
-            BluetoothServiceManager().deviceService.connectionStatus,
-            builder: (context, status, _) {
-              final isConnected = status == DeviceConnectionStatus.connected;
-              if (!isConnected) return const SizedBox.shrink();
-              return Column(
-                children: [
-                  ValueListenableBuilder<String>(
-                    valueListenable: BluetoothServiceManager()
-                        .deviceService
-                        .activeProfileName,
-                    builder: (context, profile, _) {
-                      return _InfoRow(
-                        label: 'Active Profile',
-                        value: profile.isNotEmpty ? profile : '-',
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  ValueListenableBuilder<DeviceInfo?>(
-                    valueListenable:
-                    BluetoothServiceManager().deviceService.deviceInfo,
-                    builder: (context, info, _) {
-                      return Column(
-                        children: [
-                          _InfoRow(
-                            label: 'Firmware Version',
-                            value: info != null
-                                ? 'v${info.firmwareVersion}'
-                                : '-',
-                          ),
-                          const SizedBox(height: 14),
-                          _InfoRow(
-                            label: 'Hardware Revision',
-                            value: info?.hardwareRevision ?? '-',
-                          ),
-                          const SizedBox(height: 14),
-                          _InfoRow(
-                            label: 'Serial Number',
-                            value: info?.serial ?? '-',
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ],
-              );
-            },
+          const Text(
+            'About Device',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
           ),
+          const SizedBox(height: 20),
+          if (rows.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Connect your Align Pod to see device info.',
+                style:
+                    TextStyle(color: scheme.onSurfaceVariant, fontSize: 14),
+              ),
+            )
+          else
+            ...rows.map((r) => _InfoRow(label: r.$1, value: r.$2)),
+          const SizedBox(height: 8),
         ],
       ),
     );
@@ -623,501 +787,43 @@ class _DeviceInfoCardState extends State<_DeviceInfoCard> {
 class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
-
   const _InfoRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: scheme.onSurfaceVariant,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            color: scheme.onSurface,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Firmware Update Card ────────────────────────────────────────────────────
-
-class _FirmwareUpdateCard extends StatelessWidget {
-  const _FirmwareUpdateCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return _SurfaceCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.brandGradient,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                ),
-                child: const Icon(
-                  Icons.download_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Firmware Update',
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Check for latest updates',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          _kInnerSpacing,
-          _GradientButton(
-            label: 'Check for Updates',
-            gradient: AppTheme.trackingGradient,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              BluetoothServiceManager().deviceService.getDeviceInfo();
-              Navigator.of(context).push(
-                PageRouteBuilder(
-                  transitionDuration: const Duration(milliseconds: 320),
-                  reverseTransitionDuration: const Duration(milliseconds: 260),
-                  pageBuilder: (_, animation, __) => const FirmwareUpdatePage(),
-                  transitionsBuilder: (_, animation, __, child) =>
-                      FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position:
-                              Tween<Offset>(
-                                begin: const Offset(0.04, 0),
-                                end: Offset.zero,
-                              ).animate(
-                                CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeOutCubic,
-                                ),
-                              ),
-                          child: child,
-                        ),
-                      ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Alignment Calibration Card ──────────────────────────────────────────────
-
-class _AlignmentCalibrationCard extends StatelessWidget {
-  const _AlignmentCalibrationCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return _SurfaceCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.goodPostureGradient,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                ),
-                child: const Icon(
-                  Icons.wifi_tethering_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Alignment Calibration',
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Reset posture baseline',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          _kInnerSpacing,
-          // Info tip box
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTheme.connectedBg.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-              border: Border.all(
-                color: AppTheme.brandPrimary.withValues(alpha: 0.15),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  color: _kPrimaryBlue,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Sit in your ideal posture position before calibrating. '
-                    'This will set your baseline reference angle.',
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          _kInnerSpacing,
-          _GradientButton(
-            label: 'Start Calibration',
-            gradient: AppTheme.trainingGradient,
-            onTap: () async {
-              HapticFeedback.selectionClick();
-              final deviceService = BluetoothServiceManager().deviceService;
-              if (deviceService.connectionStatus.value !=
-                  DeviceConnectionStatus.connected) {
-                await showPodDisconnectedDialog(context);
-                return;
-              }
-              if (!context.mounted) return;
-              Navigator.of(context).push(
-                PageRouteBuilder(
-                  transitionDuration: const Duration(milliseconds: 320),
-                  reverseTransitionDuration: const Duration(milliseconds: 260),
-                  pageBuilder: (_, animation, __) =>
-                      CalibrationManagerPage(deviceService: deviceService),
-                  transitionsBuilder: (_, animation, __, child) =>
-                      FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position:
-                              Tween<Offset>(
-                                begin: const Offset(0.04, 0),
-                                end: Offset.zero,
-                              ).animate(
-                                CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeOutCubic,
-                                ),
-                              ),
-                          child: child,
-                        ),
-                      ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Battery & Temperature Row ───────────────────────────────────────────────
-
-class _BatteryTemperatureRow extends StatelessWidget {
-  const _BatteryTemperatureRow();
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<PostureReading?>(
-      valueListenable: BluetoothServiceManager().deviceService.currentReading,
-      builder: (context, reading, _) {
-        final scheme = Theme.of(context).colorScheme;
-        final battery = reading?.batteryPercentage ?? 0;
-        final batteryColor = battery > 30
-            ? AppTheme.successText
-            : const Color(0xFFEF4444);
-        return Row(
-          children: [
-            // Battery card
-            Expanded(
-              child: _SurfaceCard(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppTheme.successBg,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.battery_std_rounded,
-                        color: AppTheme.successText,
-                        size: 18,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      '$battery%',
-                      style: TextStyle(
-                        color: batteryColor,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Battery',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: battery / 100,
-                        minHeight: 6,
-                        backgroundColor: AppTheme.brandPrimary.withValues(
-                          alpha: 0.15,
-                        ),
-                        valueColor: AlwaysStoppedAnimation<Color>(batteryColor),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      battery > 0 ? '$battery% remaining' : 'Not connected',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            // Temperature card
-            Expanded(
-              child: _SurfaceCard(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppTheme.connectedBg,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.thermostat_rounded,
-                        color: _kPrimaryBlue,
-                        size: 18,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      '23°C',
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Temperature',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.successText,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Normal range',
-                          style: TextStyle(
-                            color: AppTheme.successText,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-// ── Connection Settings Card ────────────────────────────────────────────────
-
-class _ConnectionSettingsCard extends StatelessWidget {
-  final bool lowPowerMode;
-  final bool vibrationAlerts;
-  final ValueChanged<bool> onLowPowerModeChanged;
-  final ValueChanged<bool> onVibrationAlertsChanged;
-
-  const _ConnectionSettingsCard({
-    required this.lowPowerMode,
-    required this.vibrationAlerts,
-    required this.onLowPowerModeChanged,
-    required this.onVibrationAlertsChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return _SurfaceCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Connection Settings',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 20),
-          _ToggleRow(
-            label: 'Low Power Mode',
-            value: lowPowerMode,
-            onChanged: onLowPowerModeChanged,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Divider(height: 1, thickness: 1, color: scheme.outline),
-          ),
-          _ToggleRow(
-            label: 'Vibration Alerts',
-            value: vibrationAlerts,
-            onChanged: onVibrationAlertsChanged,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToggleRow extends StatelessWidget {
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _ToggleRow({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: scheme.onSurface,
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-            ),
+          Expanded(
+            flex: 2,
+            child: Text(label,
+                style: TextStyle(
+                    color: scheme.onSurfaceVariant, fontSize: 13)),
           ),
-          Transform.scale(
-            scale: 0.85,
-            child: Switch.adaptive(value: value, onChanged: onChanged),
+          Expanded(
+            flex: 3,
+            child: GestureDetector(
+              onLongPress: () {
+                Clipboard.setData(ClipboardData(text: value));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$label copied'),
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: Text(
+                value,
+                style: TextStyle(
+                    color: scheme.onSurface,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
           ),
         ],
       ),
@@ -1125,260 +831,163 @@ class _ToggleRow extends StatelessWidget {
   }
 }
 
-// ── Appearance Card ─────────────────────────────────────────────────────────
+PageRouteBuilder<void> _slideRoute(Widget page) => PageRouteBuilder(
+      transitionDuration: const Duration(milliseconds: 320),
+      reverseTransitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (ctx, anim, sec) => page,
+      transitionsBuilder: (ctx, anim, sec, child) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0.04, 0),
+            end: Offset.zero,
+          ).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
+        ),
+      ),
+    );
 
-class _AppearanceCard extends StatelessWidget {
-  const _AppearanceCard();
+// ── Appearance Section ────────────────────────────────────────────────────────
 
+class _AppearanceSection extends StatelessWidget {
   static const _options = [
-    (ThemeMode.system, 'System', Icons.brightness_auto_rounded),
-    (ThemeMode.light, 'Light', Icons.light_mode_rounded),
-    (ThemeMode.dark, 'Dark', Icons.dark_mode_rounded),
+    (ThemeMode.system, 'System'),
+    (ThemeMode.light, 'Light'),
+    (ThemeMode.dark, 'Dark'),
   ];
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final scheme = Theme.of(context).colorScheme;
-
-    return _SurfaceCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF818CF8), Color(0xFF3B82F6)],
-                  ),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                ),
-                child: const Icon(
-                  Icons.palette_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Appearance',
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Choose your preferred theme',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Divider(height: 1, thickness: 1, color: scheme.outline),
-          const SizedBox(height: 14),
-          ValueListenableBuilder<ThemeMode>(
-            valueListenable: ThemeService.instance.themeMode,
-            builder: (context, currentMode, _) {
-              return Row(
-                children: [
-                  for (final option in _options) ...[
-                    Expanded(
-                      child: _ThemeModeChip(
-                        label: option.$2,
-                        icon: option.$3,
-                        isSelected: currentMode == option.$1,
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          ThemeService.instance.setMode(option.$1);
-                        },
-                      ),
-                    ),
-                    if (option.$1 != ThemeMode.dark) const SizedBox(width: 8),
-                  ],
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ThemeModeChip extends StatelessWidget {
-  const _ThemeModeChip({
-    required this.label,
-    required this.icon,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          gradient: isSelected
-              ? const LinearGradient(
-                  colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
-                )
-              : null,
-          color: isSelected ? null : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-          border: Border.all(
-            color: isSelected ? Colors.transparent : scheme.outline,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    return _GroupCard(children: [
+      Padding(
+        padding:
+            const EdgeInsets.fromLTRB(16, 13, 16, 13),
+        child: Row(
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isSelected ? Colors.white : scheme.onSurfaceVariant,
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF818CF8), Color(0xFF3B82F6)]),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.palette_rounded,
+                  size: 18, color: Colors.white),
             ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : scheme.onSurfaceVariant,
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text('Theme',
+                  style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+            ),
+            ValueListenableBuilder<ThemeMode>(
+              valueListenable: ThemeService.instance.themeMode,
+              builder: (context, currentMode, _) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: _options.map((opt) {
+                  final sel = currentMode == opt.$1;
+                  return GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      ThemeService.instance.setMode(opt.$1);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      margin: const EdgeInsets.only(left: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient:
+                            sel ? AppTheme.brandGradient : null,
+                        color: sel
+                            ? null
+                            : isDark
+                                ? Colors.white
+                                    .withValues(alpha: 0.08)
+                                : const Color(0xFFF3F4F6),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        opt.$2,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: sel
+                              ? Colors.white
+                              : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           ],
         ),
       ),
-    );
+    ]);
   }
 }
 
-// ── Gradient Button ─────────────────────────────────────────────────────────
+// ── Legal Section ─────────────────────────────────────────────────────────────
 
-class _GradientButton extends StatelessWidget {
-  final String label;
-  final LinearGradient gradient;
-  final VoidCallback onTap;
-
-  const _GradientButton({
-    required this.label,
-    required this.gradient,
-    required this.onTap,
-  });
-
+class _LegalSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: gradient,
-            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-            boxShadow: [
-              BoxShadow(
-                color: gradient.colors.first.withValues(alpha: 0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
+    return _GroupCard(children: [
+      _RowItem(
+        gradient: AppTheme.meditationGradient,
+        icon: Icons.shield_outlined,
+        title: 'Medical Disclaimer',
+        subtitle: 'Health & wellness information',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+              builder: (_) => const MedicalDisclaimerPage()),
         ),
       ),
-    );
+    ]);
   }
 }
 
-// ── Medical Disclaimer Card ──────────────────────────────────────────────────
+// ── App Version ───────────────────────────────────────────────────────────────
 
-class _MedicalDisclaimerCard extends StatelessWidget {
-  const _MedicalDisclaimerCard();
+class _AppVersionLabel extends StatefulWidget {
+  const _AppVersionLabel();
+
+  @override
+  State<_AppVersionLabel> createState() => _AppVersionLabelState();
+}
+
+class _AppVersionLabelState extends State<_AppVersionLabel> {
+  String _v = '';
+
+  @override
+  void initState() {
+    super.initState();
+    PackageInfo.fromPlatform()
+        .then((i) {
+          if (mounted) setState(() => _v = 'Align Pod v${i.version}');
+        })
+        .catchError((_) {});
+  }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return _SurfaceCard(
-      padding: EdgeInsets.zero,
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Image.asset(
-            'assets/appIcon.png',
-            width: 52,
-            height: 52,
-            fit: BoxFit.cover,
-          ),
-        ),
-        title: Text(
-          'Medical Disclaimer',
+    if (_v.isEmpty) return const SizedBox.shrink();
+    return Center(
+      child: Text(_v,
           style: TextStyle(
-            color: scheme.onSurface,
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Text(
-          'Health & wellness information',
-          style: TextStyle(
-            color: scheme.onSurfaceVariant,
-            fontSize: 13,
-          ),
-        ),
-        trailing: Icon(
-          Icons.chevron_right_rounded,
-          color: scheme.onSurfaceVariant,
-        ),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const MedicalDisclaimerPage(),
-            ),
-          );
-        },
-      ),
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurfaceVariant
+                  .withValues(alpha: 0.4),
+              fontSize: 12)),
     );
   }
 }

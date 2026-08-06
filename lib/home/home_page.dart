@@ -41,6 +41,8 @@ import 'package:correctv1/home/widgets/xp_detail_sheet.dart';
 import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/notification_service.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+
+import '../services/session_sync_service.dart';
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
 const _kSectionSpacing = SizedBox(height: 24);
 
@@ -119,6 +121,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.resumed) {
       service.invoke('stopService');
       BluetoothServiceManager.instance.tryAutoReconnectOnResume();
+      SessionSyncService.instance.triggerSync();
     }
   }
 
@@ -2568,16 +2571,18 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     if (wasAlreadyConnected) {
       setState(() => _pullConnectPhase = PullConnectPhase.syncing);
-      try {
-        await _deviceManager.requestManualSync();
+      // Silently refresh calibration profile + session sync in parallel
+      await Future.wait([
+        _deviceManager.requestManualSync(),
+        _deviceService.getProfiles().catchError((_) => false),
+      ]).then((_) {
         if (!mounted) return;
         setState(() => _pullConnectPhase = PullConnectPhase.synced);
-        await Future.delayed(const Duration(milliseconds: 1500));
-      } catch (_) {
+      }).catchError((_) {
         if (!mounted) return;
         setState(() => _pullConnectPhase = PullConnectPhase.failed);
-        await Future.delayed(const Duration(seconds: 2));
-      }
+      });
+      await Future.delayed(const Duration(milliseconds: 1500));
       if (!mounted) return;
       setState(() => _pullConnectPhase = PullConnectPhase.idle);
       return;

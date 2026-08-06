@@ -166,10 +166,16 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       _scanDone = false;
       _found = [];
     });
+
+    // Hard deadline — UI will always exit scanning state after this,
+    // regardless of what the BLE stack does (fixes MIUI/ColorOS freeze)
+    final scanDeadline = Timer(const Duration(seconds: 13), () {
+      if (!mounted || !_scanning) return;
+      FlutterBluePlus.stopScan().ignore();
+      setState(() { _scanning = false; _scanDone = true; });
+    });
+
     try {
-      // Listen before starting the scan so fast/early advertisements are not
-      // missed. The service UUID is the pod's stable cross-platform identity;
-      // advertised and cached platform names are fallbacks only.
       await _scanSub?.cancel();
       _scanSub = FlutterBluePlus.scanResults.listen(
         (results) {
@@ -177,36 +183,23 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           final pods = results.where(_isAlignPod).toList()
             ..sort((a, b) => b.rssi.compareTo(a.rssi));
           setState(() => _found = pods);
+          // Pod found — stop scan immediately so UI becomes tappable
+          if (pods.isNotEmpty && _scanning) {
+            FlutterBluePlus.stopScan().ignore();
+            scanDeadline.cancel();
+            if (mounted) setState(() { _scanning = false; _scanDone = true; });
+          }
         },
         onError: (Object error, StackTrace stackTrace) {
           debugPrint('BLE scan results error: $error');
-          debugPrintStack(stackTrace: stackTrace);
         },
       );
 
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 12),
-        withServices: [Guid(_kPodServiceUuid)],
-      );
-      await FlutterBluePlus.isScanning
-          .where((s) => !s)
-          .first
-          .timeout(const Duration(seconds: 15), onTimeout: () => false);
-      if (mounted) {
-        setState(() {
-          _scanning = false;
-          _scanDone = true;
-        });
-      }
-    } catch (error, stackTrace) {
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 12));
+    } catch (error) {
       debugPrint('BLE scan failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      if (mounted) {
-        setState(() {
-          _scanning = false;
-          _scanDone = true;
-        });
-      }
+      scanDeadline.cancel();
+      if (mounted) setState(() { _scanning = false; _scanDone = true; });
     }
   }
 
