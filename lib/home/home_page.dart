@@ -2575,6 +2575,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       await Future.wait([
         _deviceManager.requestManualSync(),
         _deviceService.getProfiles().catchError((_) => false),
+        _deviceService.getDeviceInfo().catchError((_) => null),
       ]).then((_) {
         if (!mounted) return;
         setState(() => _pullConnectPhase = PullConnectPhase.synced);
