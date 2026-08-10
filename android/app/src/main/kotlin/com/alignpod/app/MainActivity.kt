@@ -3,16 +3,48 @@ package com.alignpod.app
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import com.google.android.play.core.integrity.IntegrityManagerFactory
+import com.google.android.play.core.integrity.IntegrityTokenRequest
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.correctv1.bluetooth/unpair"
+    private val INTEGRITY_CHANNEL = "com.alignpod.app/integrity"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
+
+        // Play Integrity channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INTEGRITY_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "requestIntegrityToken") {
+                    val nonce = call.argument<String>("nonce")
+                    val cloudProjectNumber = call.argument<Int>("cloudProjectNumber")?.toLong()
+                        ?: 204892022204L
+                    if (nonce == null) {
+                        result.error("INVALID_ARGUMENT", "nonce is null", null)
+                        return@setMethodCallHandler
+                    }
+                    val manager = IntegrityManagerFactory.create(applicationContext)
+                    val request = IntegrityTokenRequest.builder()
+                        .setNonce(nonce)
+                        .setCloudProjectNumber(cloudProjectNumber)
+                        .build()
+                    manager.requestIntegrityToken(request)
+                        .addOnSuccessListener { response ->
+                            result.success(response.token())
+                        }
+                        .addOnFailureListener { e ->
+                            result.error("INTEGRITY_ERROR", e.message, null)
+                        }
+                } else {
+                    result.notImplemented()
+                }
+            }
+
+        // Bluetooth unpair channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "removeBond") {
                 val address = call.argument<String>("address")

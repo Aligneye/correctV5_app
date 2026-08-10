@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:correctv1/services/integrity_service.dart';
 
 
 class AuthService {
@@ -20,6 +21,12 @@ class AuthService {
     required String email,
     required String password,
   }) async {
+    final passed = await IntegrityService.verifyDeviceIntegrity();
+    if (!passed) {
+      throw const AuthException(
+        'Device verification failed. Please use a genuine app installation.',
+      );
+    }
     await _auth.signInWithPassword(email: email, password: password);
   }
 
@@ -56,6 +63,13 @@ class AuthService {
     if (kIsWeb) {
       await _auth.signInWithOAuth(OAuthProvider.google);
       return;
+    }
+
+    final passed = await IntegrityService.verifyDeviceIntegrity();
+    if (!passed) {
+      throw const AuthException(
+        'Device verification failed. Please use a genuine app installation.',
+      );
     }
 
     final googleUser = await _googleSignIn.signIn();
