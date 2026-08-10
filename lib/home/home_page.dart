@@ -1965,6 +1965,11 @@ class _HomeDashboardState extends State<HomeDashboard>
     required int therapyDurationMinutes,
     required int difficultyDegrees,
   }) async {
+    if (_deviceService.connectionStatus.value !=
+        DeviceConnectionStatus.connected) {
+      if (mounted) await showPodDisconnectedDialog(context);
+      return;
+    }
     final modeLabel = switch (mode) {
       ModeControlType.track => 'IDLE',
       ModeControlType.posture => 'TRAINING',
