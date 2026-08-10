@@ -58,7 +58,7 @@ class _PostureCheckHeroCard extends StatelessWidget {
     return GestureDetector(
       onTap: () => launchUrl(
         Uri.parse('https://aligneye.com/posture-check'),
-        mode: LaunchMode.inAppWebView,
+        mode: LaunchMode.externalApplication,
       ),
       child: Container(
         height: 320,
