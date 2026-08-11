@@ -283,7 +283,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   final _liveDisplayDurationSec = ValueNotifier<int>(0);
   bool _liveDisplayHasFrame = false;
   bool _hasShownStartupConnectSheet = false;
-  bool _isFindingDevice = false;
 
   // Pull-to-refresh status banner state (see [PullConnectBanner]).
   PullConnectPhase _pullConnectPhase = PullConnectPhase.idle;
@@ -1803,21 +1802,12 @@ class _HomeDashboardState extends State<HomeDashboard>
       return;
     }
 
-    setState(() {
-      _isFindingDevice = true;
-    });
     bool hasUnpairedNearby = false;
     try {
       hasUnpairedNearby = await _deviceService.hasUnpairedTargetDeviceNearby(
         timeout: const Duration(milliseconds: 2500),
       );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isFindingDevice = false;
-        });
-      }
-    }
+    } catch (_) {}
     if (!mounted || !hasUnpairedNearby) {
       return;
     }
@@ -2279,7 +2269,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                                     builder: (context, connectingLabel, child) {
                                       return TopHeaderBar(
                                         status: connectionStatus,
-                                        isFindingDevice: _isFindingDevice,
+                                        isFindingDevice: false,
                                         isSyncing: isSyncing,
                                         isLive: false,
                                         batteryLevel: _batteryLevel.value,
@@ -2355,29 +2345,42 @@ class _HomeDashboardState extends State<HomeDashboard>
                       //     isBadPosture: _isBadPosture,
                       //     controller: _controller,
                       //   ),
-                      : ValueListenableBuilder<double>(
-                          valueListenable: postureAngleNotifier,
+                      : ValueListenableBuilder<DeviceConnectionStatus>(
+                          valueListenable:
+                              _deviceService.connectionStatus,
+                          builder: (context, connStatus, _) =>
+                              ValueListenableBuilder<double>(
+                                valueListenable: postureAngleNotifier,
 
-                          builder: (context, angle, _) =>
-                              ValueListenableBuilder<bool>(
-                                valueListenable: isBadPostureNotifier,
+                                builder: (context, angle, _) =>
+                                    ValueListenableBuilder<bool>(
+                                      valueListenable: isBadPostureNotifier,
 
-                                builder: (context, isBad, _) =>
-                                    ValueListenableBuilder<String>(
-                                      valueListenable: postureStatusNotifier,
-
-                                      builder: (context, status, _) =>
-                                          ValueListenableBuilder<int>(
+                                      builder: (context, isBad, _) =>
+                                          ValueListenableBuilder<String>(
                                             valueListenable:
-                                                difficultyDegNotifier,
+                                                postureStatusNotifier,
 
-                                            builder: (context, diff, _) =>
-                                                PostureGaugeCard(
-                                                  postureAngle: angle,
-                                                  postureStatus: status,
-                                                  isBadPosture: isBad,
-                                                  difficultyDeg: diff,
-                                                  controller: _controller,
+                                            builder: (context, status, _) =>
+                                                ValueListenableBuilder<int>(
+                                                  valueListenable:
+                                                      difficultyDegNotifier,
+
+                                                  builder:
+                                                      (context, diff, _) =>
+                                                          PostureGaugeCard(
+                                                            postureAngle:
+                                                                angle,
+                                                            postureStatus:
+                                                                status,
+                                                            isBadPosture: isBad,
+                                                            difficultyDeg: diff,
+                                                            controller:
+                                                                _controller,
+                                                            isConnected: connStatus ==
+                                                                DeviceConnectionStatus
+                                                                    .connected,
+                                                          ),
                                                 ),
                                           ),
                                     ),
@@ -2393,6 +2396,11 @@ class _HomeDashboardState extends State<HomeDashboard>
                     selectedPostureTiming: _selectedPostureTiming,
                     selectedDifficulty: _selectedDifficulty,
                     onModeSelected: (mode) {
+                      if (_deviceService.connectionStatus.value !=
+                          DeviceConnectionStatus.connected) {
+                        showPodDisconnectedDialog(context);
+                        return;
+                      }
                       setState(() => _selectedMode = mode);
                       _pendingMode = mode;
                       _pendingModeTimer?.cancel();
@@ -2575,6 +2583,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       await Future.wait([
         _deviceManager.requestManualSync(),
         _deviceService.getProfiles().catchError((_) => false),
+        _deviceService.getDeviceInfo().catchError((_) => null),
       ]).then((_) {
         if (!mounted) return;
         setState(() => _pullConnectPhase = PullConnectPhase.synced);

@@ -14,6 +14,7 @@ class PostureGaugeCard extends StatefulWidget {
   final bool isBadPosture;
   final int difficultyDeg;
   final Animation<double> controller;
+  final bool isConnected;
 
   const PostureGaugeCard({
     super.key,
@@ -22,6 +23,7 @@ class PostureGaugeCard extends StatefulWidget {
     required this.isBadPosture,
     required this.difficultyDeg,
     required this.controller,
+    this.isConnected = true,
   });
 
   @override
@@ -31,24 +33,41 @@ class PostureGaugeCard extends StatefulWidget {
 class _PostureGaugeCardState extends State<PostureGaugeCard> {
   static const double _millisecondsPerDegree = 3;
   double? _displayedAngle;
+  double? _lastKnownAngle;
 
   Duration _durationFor(double delta) {
     final distance = delta.abs();
     if (distance == 0) return Duration.zero;
-
-    // Keep the needle at a constant 5ms per degree:
-    // 90 degrees = 450ms, 30 degrees = 150ms.
     final milliseconds = (distance * _millisecondsPerDegree).round();
     return Duration(milliseconds: math.max(1, milliseconds));
   }
 
   @override
+  void didUpdateWidget(covariant PostureGaugeCard old) {
+    super.didUpdateWidget(old);
+    if (old.isConnected && !widget.isConnected) {
+      _lastKnownAngle = _displayedAngle ?? widget.postureAngle;
+    }
+    if (!old.isConnected && widget.isConnected) {
+      _lastKnownAngle = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accentColor = widget.isBadPosture ? _kBadPostureRed : _kPrimaryGreen;
-    final clampedAngle = widget.postureAngle.clamp(-90.0, 90.0);
+    final isConnected = widget.isConnected;
+
+    final accentColor = !isConnected
+        ? const Color(0xFF94A3B8)
+        : widget.isBadPosture
+            ? _kBadPostureRed
+            : _kPrimaryGreen;
+
+    final targetAngle =
+        isConnected ? widget.postureAngle.clamp(-90.0, 90.0) : 0.0;
     final duration = _durationFor(
-      clampedAngle - (_displayedAngle ?? clampedAngle),
+      targetAngle - (_displayedAngle ?? targetAngle),
     );
 
     return HomeSurfaceCard(
@@ -68,8 +87,8 @@ class _PostureGaugeCardState extends State<PostureGaugeCard> {
               width: 220,
               child: TweenAnimationBuilder<double>(
                 duration: duration,
-                curve: Curves.linear,
-                tween: Tween<double>(end: clampedAngle),
+                curve: Curves.easeOutCubic,
+                tween: Tween<double>(end: targetAngle),
                 builder: (context, value, child) {
                   _displayedAngle = value;
                   return CustomPaint(
@@ -77,6 +96,7 @@ class _PostureGaugeCardState extends State<PostureGaugeCard> {
                       angle: value,
                       accentColor: accentColor,
                       difficultyDeg: widget.difficultyDeg,
+                      isConnected: isConnected,
                     ),
                   );
                 },
@@ -98,37 +118,57 @@ class _PostureGaugeCardState extends State<PostureGaugeCard> {
                     vertical: 12,
                   ),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [accentColor.withValues(alpha: 0.9), accentColor],
-                    ),
+                    gradient: isConnected
+                        ? LinearGradient(
+                            colors: [
+                              accentColor.withValues(alpha: 0.9),
+                              accentColor,
+                            ],
+                          )
+                        : null,
+                    color: isConnected ? null : scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(20),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x1F000000),
-                        blurRadius: 12,
-                        offset: Offset(0, 6),
-                      ),
-                    ],
+                    boxShadow: isConnected
+                        ? const [
+                            BoxShadow(
+                              color: Color(0x1F000000),
+                              blurRadius: 12,
+                              offset: Offset(0, 6),
+                            ),
+                          ]
+                        : null,
                   ),
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
                     child: Text(
-                      'Posture Status: ${widget.postureStatus}',
-                      key: ValueKey(widget.postureStatus),
-                      style: const TextStyle(
-                        color: Colors.white,
+                      isConnected
+                          ? 'Posture Status: ${widget.postureStatus}'
+                          : 'Pod disconnected',
+                      key: ValueKey(
+                          isConnected ? widget.postureStatus : 'disconnected'),
+                      style: TextStyle(
+                        color:
+                            isConnected ? Colors.white : scheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  'Bad posture above ${widget.difficultyDeg}°',
-                  style: TextStyle(
-                    color: scheme.onSurfaceVariant,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: Text(
+                    isConnected
+                        ? 'Bad posture above ${widget.difficultyDeg}°'
+                        : _lastKnownAngle != null
+                            ? 'Last: ${_lastKnownAngle!.round()}°'
+                            : 'Connect pod to track posture',
+                    key: ValueKey(isConnected),
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
@@ -144,11 +184,13 @@ class PostureGaugePainter extends CustomPainter {
   final double angle;
   final Color accentColor;
   final int difficultyDeg;
+  final bool isConnected;
 
   PostureGaugePainter({
     required this.angle,
     required this.accentColor,
     required this.difficultyDeg,
+    this.isConnected = true,
   });
 
   @override
@@ -199,8 +241,8 @@ class PostureGaugePainter extends CustomPainter {
     // Clamp angle to -90 to 90 range
     final clampedAngle = angle.clamp(-90.0, 90.0);
 
-    // Convert angle to radians
-    final angleRad = clampedAngle * math.pi / 180.0;
+    // Map -90..90 → -π..π (full half-circle sweep each side)
+    final angleRad = clampedAngle * math.pi / 90.0;
 
     // Start angle is at the top (-π/2 in canvas coordinates)
     const startAngle = -math.pi / 2;
@@ -266,42 +308,44 @@ class PostureGaugePainter extends CustomPainter {
         ..strokeWidth = 2,
     );
     // Draw red threshold marker at the difficulty angle (bad-posture cutoff)
-    final thresholdRad = difficultyDeg.abs() * math.pi / 180.0;
-    final thresholdAngle = startAngle + thresholdRad;
-    final innerRadius = radius - strokeWidth / 2 - 10;
-    final thresholdPoint = Offset(
-      center.dx + innerRadius * math.cos(thresholdAngle),
-      center.dy + innerRadius * math.sin(thresholdAngle),
-    );
-    final trianglePath = Path();
-    const triSize = 10.0;
-    final dirX = math.cos(thresholdAngle);
-    final dirY = math.sin(thresholdAngle);
-    final halfBase = triSize / 2;
-    final halfHeight = (triSize * math.sqrt(3) / 2) / 2;
-    final tipX = thresholdPoint.dx + dirX * halfHeight;
-    final tipY = thresholdPoint.dy + dirY * halfHeight;
-    final baseX = thresholdPoint.dx - dirX * halfHeight;
-    final baseY = thresholdPoint.dy - dirY * halfHeight;
-    final perpX = -dirY * halfBase;
-    final perpY = dirX * halfBase;
+    if (isConnected) {
+      final thresholdRad = difficultyDeg.abs() * math.pi / 90.0;
+      final thresholdAngle = startAngle + thresholdRad;
+      final innerRadius = radius - strokeWidth / 2 - 10;
+      final thresholdPoint = Offset(
+        center.dx + innerRadius * math.cos(thresholdAngle),
+        center.dy + innerRadius * math.sin(thresholdAngle),
+      );
+      final trianglePath = Path();
+      const triSize = 10.0;
+      final dirX = math.cos(thresholdAngle);
+      final dirY = math.sin(thresholdAngle);
+      final halfBase = triSize / 2;
+      final halfHeight = (triSize * math.sqrt(3) / 2) / 2;
+      final tipX = thresholdPoint.dx + dirX * halfHeight;
+      final tipY = thresholdPoint.dy + dirY * halfHeight;
+      final baseX = thresholdPoint.dx - dirX * halfHeight;
+      final baseY = thresholdPoint.dy - dirY * halfHeight;
+      final perpX = -dirY * halfBase;
+      final perpY = dirX * halfBase;
 
-    trianglePath.moveTo(tipX, tipY);
-    trianglePath.lineTo(baseX + perpX, baseY + perpY);
-    trianglePath.lineTo(baseX - perpX, baseY - perpY);
-    trianglePath.close();
+      trianglePath.moveTo(tipX, tipY);
+      trianglePath.lineTo(baseX + perpX, baseY + perpY);
+      trianglePath.lineTo(baseX - perpX, baseY - perpY);
+      trianglePath.close();
 
-    canvas.drawPath(
-      trianglePath,
-      Paint()
-        ..color = AppTheme.destructive
-        ..style = PaintingStyle.fill,
-    );
+      canvas.drawPath(
+        trianglePath,
+        Paint()
+          ..color = AppTheme.destructive
+          ..style = PaintingStyle.fill,
+      );
+    }
 
-    // Draw angle value in center (as integer)
+    // Draw angle value in center (or "—" when disconnected)
     final valuePainter = TextPainter(
       text: TextSpan(
-        text: "${clampedAngle.round()}°",
+        text: isConnected ? "${clampedAngle.round()}°" : "—",
         style: TextStyle(
           fontSize: 34,
           fontWeight: FontWeight.w600,
@@ -345,6 +389,7 @@ class PostureGaugePainter extends CustomPainter {
     return oldDelegate is PostureGaugePainter &&
         (oldDelegate.angle != angle ||
             oldDelegate.accentColor != accentColor ||
-            oldDelegate.difficultyDeg != difficultyDeg);
+            oldDelegate.difficultyDeg != difficultyDeg ||
+            oldDelegate.isConnected != isConnected);
   }
 }
