@@ -31,7 +31,7 @@ class PostureGaugeCard extends StatefulWidget {
 }
 
 class _PostureGaugeCardState extends State<PostureGaugeCard> {
-  static const double _millisecondsPerDegree = 3;
+  static const double _millisecondsPerDegree = 1.5;
   double? _displayedAngle;
   double? _lastKnownAngle;
 
