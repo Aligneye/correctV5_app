@@ -8,6 +8,7 @@ import 'package:correctv1/services/background_service.dart';
 import 'package:correctv1/services/notification_service.dart';
 import 'package:correctv1/legal/disclaimer_prefs.dart';
 import 'package:correctv1/legal/disclaimer_gate_page.dart';
+import 'package:correctv1/services/app_update_service.dart';
 
 class SplashScreen extends StatefulWidget {
   final String supabaseUrl;
@@ -62,6 +63,7 @@ class _SplashScreenState extends State<SplashScreen>
     SessionSyncService.instance.start();
     await initBackgroundService();
     await NotificationService.instance.initialize();
+    AppUpdateService.instance.checkForUpdate(); // fire-and-forget
   }
 
   void _navigate() {
