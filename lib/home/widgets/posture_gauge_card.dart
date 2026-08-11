@@ -241,8 +241,8 @@ class PostureGaugePainter extends CustomPainter {
     // Clamp angle to -90 to 90 range
     final clampedAngle = angle.clamp(-90.0, 90.0);
 
-    // Convert angle to radians
-    final angleRad = clampedAngle * math.pi / 180.0;
+    // Map -90..90 → -π..π (full half-circle sweep each side)
+    final angleRad = clampedAngle * math.pi / 90.0;
 
     // Start angle is at the top (-π/2 in canvas coordinates)
     const startAngle = -math.pi / 2;
@@ -309,7 +309,7 @@ class PostureGaugePainter extends CustomPainter {
     );
     // Draw red threshold marker at the difficulty angle (bad-posture cutoff)
     if (isConnected) {
-      final thresholdRad = difficultyDeg.abs() * math.pi / 180.0;
+      final thresholdRad = difficultyDeg.abs() * math.pi / 90.0;
       final thresholdAngle = startAngle + thresholdRad;
       final innerRadius = radius - strokeWidth / 2 - 10;
       final thresholdPoint = Offset(
