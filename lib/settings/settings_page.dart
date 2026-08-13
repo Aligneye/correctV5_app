@@ -79,9 +79,9 @@ class _SettingsPageState extends State<SettingsPage>
           gradient: AppTheme.pageBackgroundGradientFor(context),
         ),
         child: SafeArea(
-          bottom: false,
+          bottom: true,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
             physics: const BouncingScrollPhysics(),
             child: AnimatedBuilder(
               animation: _entryCtrl,
@@ -572,6 +572,28 @@ class _DeviceSection extends StatelessWidget {
             trailing: _StatusDot(connected: connected),
             onTap: () async {
               if (connected) {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Disconnect pod?'),
+                    content: const Text(
+                        'Your Align Pod will be disconnected.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text(
+                          'Disconnect',
+                          style: TextStyle(color: Color(0xFFEF4444)),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm != true) return;
                 await BluetoothServiceManager().disconnectByUser();
               } else {
                 final readiness = await svc.checkReadiness();

@@ -331,7 +331,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           gradient: AppTheme.pageBackgroundGradientFor(context),
         ),
         child: SafeArea(
-          bottom: false,
+          bottom: true,
           child: Column(
             children: [
               _buildAppBar(),

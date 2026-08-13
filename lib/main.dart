@@ -9,10 +9,11 @@ import 'package:correctv1/services/theme_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarContrastEnforced: false,
-  ));
+  // Lock to portrait — prevents layout breaks on landscape
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   FlutterBluePlus.setLogLevel(LogLevel.none);
   await ThemeService.instance.load();
   runApp(const MyApp());
@@ -42,9 +43,21 @@ class MyApp extends StatelessWidget {
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           builder: (context, child) {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            // Status bar & nav bar icons follow light/dark theme on all phones
+            SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness:
+                  isDark ? Brightness.light : Brightness.dark,
+              systemNavigationBarColor: Colors.transparent,
+              systemNavigationBarIconBrightness:
+                  isDark ? Brightness.light : Brightness.dark,
+              systemNavigationBarContrastEnforced: false,
+            ));
             return MediaQuery(
-              data: MediaQuery.of(context)
-                  .copyWith(textScaler: TextScaler.noScaling),
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.noScaling,
+              ),
               child: child ?? const SizedBox.shrink(),
             );
           },

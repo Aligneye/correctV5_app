@@ -392,7 +392,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return Scaffold(
       backgroundColor: null,
       body: SafeArea(
-        bottom: false,
+        bottom: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
