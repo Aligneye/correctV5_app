@@ -1820,6 +1820,15 @@ class AlignEyeDeviceService {
           currentState != BluetoothConnectionState.connected) {
         connectingLabel.value = 'Connecting…';
 
+        // Clear stale GATT cache before every connect on Android. Without this,
+        // reconnects after a user disconnect reuse stale service handles and
+        // immediately drop. "Forget + reconnect" works because forgetting clears
+        // the bond + cache; this replicates that cache-clear without forgetting.
+        if (Platform.isAndroid) {
+          try { await _device!.clearGattCache(); } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+
         // Attempt GATT connect with one retry on android-code 133.
         // Error 133 means the previous GATT stack hasn't fully torn down yet —
         // waiting 1.5s and trying once more almost always recovers it.
@@ -3072,17 +3081,18 @@ class AlignEyeDeviceService {
     debugPrint('Connection state changed: $state');
 
     if (state == BluetoothConnectionState.connected) {
-      _isConnecting = false;
-      _connectionTimeoutTimer?.cancel();
       _connectionRetryCount = 0;
       _autoReconnectAttempts = 0;
       _userInitiatedDisconnect = false;
-
       _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
 
+      // If connect() flow is still running (discovering services / enabling
+      // notifications), let it set connectionStatus at the end. Firing here
+      // would notify DeviceManager mid-setup and trigger BLE writes that race
+      // with the CCCD write, causing android-code 133 drops.
+      if (_isConnecting) return;
+
       _verifyConnection().then((isValid) {
-        // Guard: if a disconnect ran while we were verifying, don't resurface
-        // connected state — that's the ghost-connected race.
         if (connectionStatus.value == DeviceConnectionStatus.disconnected) return;
         if (isValid) {
           connectionStatus.value = DeviceConnectionStatus.connected;

@@ -106,7 +106,7 @@ class _SessionsHistoryPageState extends State<SessionsHistoryPage> {
     return Scaffold(
       backgroundColor: null,
       body: SafeArea(
-        bottom: false,
+        bottom: true,
         child: Column(
           children: [
             _buildHeader(),

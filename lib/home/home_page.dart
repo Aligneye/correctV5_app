@@ -41,6 +41,7 @@ import 'package:correctv1/home/widgets/xp_detail_sheet.dart';
 import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/notification_service.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/session_sync_service.dart';
 const _kPagePadding = EdgeInsets.fromLTRB(24, 24, 24, 100);
@@ -622,6 +623,20 @@ class _HomeDashboardState extends State<HomeDashboard>
     if (id == null) {
       _stopLiveSessionTicker(clearFrame: true);
       unawaited(_loadOfflineSessions());
+      // Session just ended — fire session complete notification
+      final durationMin = _liveDisplayDurationSec.value ~/ 60;
+      if (durationMin >= 1) {
+        final modeStr = _selectedMode == ModeControlType.therapy
+            ? 'therapy'
+            : _selectedMode == ModeControlType.posture
+                ? 'training'
+                : 'tracking';
+        unawaited(NotificationService.instance.showSessionComplete(
+          durationMin: durationMin,
+          currentStreak: _streakStats?.currentStreak ?? 0,
+          sessionType: modeStr,
+        ));
+      }
     } else {
       _liveDisplaySessionId = id;
       _syncLiveSessionTickerWithConnection();
@@ -1320,6 +1335,26 @@ class _HomeDashboardState extends State<HomeDashboard>
         await _maybeShowStreakPopup(streakStats);
         unawaited(_persistStreakCache(streakStats));
       }
+      if (todayStats != null) {
+        unawaited(NotificationService.instance.maybeSendDailySummary(
+          goodPct: todayStats.todayPct.round(),
+          sessionCount: todayStats.todaySessionCount,
+          trackedMinutes: todayStats.todayTrackedSec ~/ 60,
+        ));
+        unawaited(NotificationService.instance.maybeSendWeeklySummary(
+          totalSessions: todayStats.todaySessionCount,
+          avgGoodPct: todayStats.todayPct.round(),
+        ));
+      }
+      // Inactivity reminder — last session time from loaded sessions
+      final lastSessionTime = sessions
+          .where((s) => !s.isLive && s.startTs != null)
+          .map((s) => s.startTs!)
+          .fold<DateTime?>(null, (latest, ts) =>
+              latest == null || ts.isAfter(latest) ? ts : latest);
+      unawaited(NotificationService.instance.maybeShowInactivityReminder(
+        lastSessionTime: lastSessionTime,
+      ));
       if (xpStats != null) {
         // unawaited(_maybeShowLevelUpPopup(xpStats)); // disabled with level system
         unawaited(_persistXpCache(xpStats));
@@ -1337,6 +1372,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   static const String _kStreakPrefsLastDay = 'streak_popup_last_day';
   static const String _kStreakPrefsLastValue = 'streak_popup_last_value';
   static const String _kStreakPrefsCachedHighest = 'streak_cached_highest';
+  static const String _kStreakPrefsCachedUserId = 'streak_cached_user_id';
 
   static const String _kXpTotal = 'xp_total';
   static const String _kXpLevel = 'xp_level';
@@ -1349,8 +1385,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   Future<void> _persistStreakCache(StreakStats stats) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
       await prefs.setInt(_kStreakPrefsLastValue, stats.currentStreak);
       await prefs.setInt(_kStreakPrefsCachedHighest, stats.highestStreak);
+      await prefs.setString(_kStreakPrefsCachedUserId, userId);
     } catch (e) {
       debugPrint('HomeDashboard: _persistStreakCache error: $e');
     }
@@ -1359,6 +1397,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   Future<void> _hydrateCachedStreak() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+      final cachedUserId = prefs.getString(_kStreakPrefsCachedUserId) ?? '';
+      // Don't show another user's cached streak to this user
+      if (cachedUserId != currentUserId) return;
       final cachedStreak = prefs.getInt(_kStreakPrefsLastValue) ?? 0;
       final cachedHighest = prefs.getInt(_kStreakPrefsCachedHighest) ?? 0;
       if (!mounted || _streakStats != null) return;

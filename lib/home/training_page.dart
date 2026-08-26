@@ -179,7 +179,7 @@ class _TrainingPageState extends State<TrainingPage>
           color: scheme.surface,
         ),
         child: SafeArea(
-          bottom: false,
+          bottom: true,
           child: ListView(
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(28, 20, 21, 22),

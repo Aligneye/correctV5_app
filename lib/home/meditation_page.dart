@@ -120,7 +120,7 @@ class _MeditationPageState extends State<MeditationPage>
       body: Container(
         color: Theme.of(context).scaffoldBackgroundColor,
         child: SafeArea(
-          bottom: false,
+          bottom: true,
           child: ListView(
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(23, 20, 22, 28),

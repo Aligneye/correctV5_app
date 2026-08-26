@@ -14,22 +14,23 @@ class ModernNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SafeArea(
-      bottom: true,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 68, maxHeight: 68),
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          boxShadow: [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 12,
-              offset: Offset(0, -2),
-            ),
-          ],
-          border: Border(top: BorderSide(color: scheme.outline, width: 1)),
-        ),
-        child: Row(
+    return ColoredBox(
+      color: scheme.surface,
+      child: SafeArea(
+        bottom: true,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 68, maxHeight: 68),
+          decoration: BoxDecoration(
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x14000000),
+                blurRadius: 12,
+                offset: Offset(0, -2),
+              ),
+            ],
+            border: Border(top: BorderSide(color: scheme.outline, width: 1)),
+          ),
+          child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _NavItem(
@@ -63,6 +64,7 @@ class ModernNavBar extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }
