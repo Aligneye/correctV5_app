@@ -3161,9 +3161,9 @@ class AlignEyeDeviceService {
           throw Exception('Device is null');
         }
 
-        services = await _device!.discoverServices().timeout(
-          _serviceDiscoveryTimeout,
-        );
+        services = await _device!.discoverServices(
+          subscribeToServicesChanged: false,
+        ).timeout(_serviceDiscoveryTimeout);
 
         debugPrint('Found ${services.length} services');
 
