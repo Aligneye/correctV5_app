@@ -1962,6 +1962,11 @@ class AlignEyeDeviceService {
         } catch (e) {
           if (e.toString().contains('MTU too low')) rethrow;
           debugPrint('MTU request failed (non-fatal): $e');
+          // Our client-side timeout fired, but Android's native MTU
+          // negotiation may still be in flight. Issuing setNotifyValue
+          // immediately can collide with that pending op and drop the
+          // connection (android-code 133). Give it time to settle.
+          await Future.delayed(const Duration(milliseconds: 800));
         }
       }
 
