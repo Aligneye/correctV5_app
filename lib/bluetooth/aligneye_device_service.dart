@@ -1950,7 +1950,16 @@ class AlignEyeDeviceService {
       if (Platform.isAndroid) {
         debugPrint('Requesting MTU 247 (post-discovery)...');
         try {
-          final mtu = await _device!.requestMtu(247, timeout: 3);
+          // Generous timeout: FBP abandons its OWN Dart-side wait when this
+          // fires, but the native MTU negotiation keeps running in the
+          // background regardless. A short timeout here just means we give
+          // up listening early — it does not cancel the real operation. If
+          // we then immediately issue setNotifyValue, that native call can
+          // interleave with the still-in-flight MTU negotiation and the
+          // stack drops the link (android-code 133) once the late MTU
+          // callback finally lands. Waiting longer for genuine completion
+          // is the real fix, not a short race-and-abandon.
+          final mtu = await _device!.requestMtu(247, timeout: 8);
           debugPrint('MTU negotiated: $mtu');
           if (mtu < 140) {
             debugPrint('MTU too low ($mtu < 140) — disconnecting');
@@ -1962,11 +1971,9 @@ class AlignEyeDeviceService {
         } catch (e) {
           if (e.toString().contains('MTU too low')) rethrow;
           debugPrint('MTU request failed (non-fatal): $e');
-          // Our client-side timeout fired, but Android's native MTU
-          // negotiation may still be in flight. Issuing setNotifyValue
-          // immediately can collide with that pending op and drop the
-          // connection (android-code 133). Give it time to settle.
-          await Future.delayed(const Duration(milliseconds: 800));
+          // Extra buffer in case the native callback is still trickling in
+          // even after our generous 8s wait above.
+          await Future.delayed(const Duration(milliseconds: 1500));
         }
       }
 
