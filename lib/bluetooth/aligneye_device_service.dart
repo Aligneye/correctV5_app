@@ -1779,6 +1779,11 @@ class AlignEyeDeviceService {
         if (pairingCompleted) {
           isPaired = true;
           debugPrint('Pairing completed successfully before connect');
+          // The encrypted link right after a fresh bond isn't always fully
+          // settled — GATT ops issued immediately (discoverServices, MTU)
+          // can trigger an instant disconnect. Give it a moment, especially
+          // important after a stale-bond-clear-and-retry cycle.
+          await Future.delayed(const Duration(milliseconds: 800));
         } else if (defaultTargetPlatform == TargetPlatform.android) {
           // The pod's characteristic requires an encrypted link, so an
           // unbonded connection is guaranteed to be terminated by Android
