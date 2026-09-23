@@ -130,6 +130,14 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   Future<void> _startScan() async {
     if (_scanning) return;
 
+    // If a previous DeviceConnectPage instance was just popped, its
+    // dispose() fired a fire-and-forget stopScan() that may still be
+    // in-flight. If it resolves after our startScan() below, it kills
+    // this fresh scan within milliseconds (seen as instant "No pods
+    // detected" on back-then-reopen). Awaiting a stop here first drains
+    // that stale request before we start our own.
+    await FlutterBluePlus.stopScan();
+
     final readiness = await _btManager.deviceService.checkReadiness();
     if (!mounted) return;
 
