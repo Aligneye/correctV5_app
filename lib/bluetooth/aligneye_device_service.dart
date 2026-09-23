@@ -725,9 +725,23 @@ void _bleConsoleLog(String message) {
 
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
-      : _deviceNamePrefix = deviceNamePrefix;
+      : _deviceNamePrefix = deviceNamePrefix {
+    // Native side pushes this the instant Android reports BOND_NONE while a
+    // bond was in progress (real auth/SMP failure), instead of us finding
+    // out only after a blind 10s poll times out.
+    _bondChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onBondFailed') {
+        final address = (call.arguments as Map?)?['address'] as String?;
+        final reason = (call.arguments as Map?)?['reason'];
+        debugPrint('Native reported bond failed for $address (reason: $reason)');
+        _bondFailedAddress = address;
+      }
+      return null;
+    });
+  }
 
   final String _deviceNamePrefix;
+  String? _bondFailedAddress;
   final _readingController = StreamController<PostureReading>.broadcast();
   final _profileListController =
   StreamController<List<FirmwareProfile>>.broadcast();
@@ -2311,6 +2325,7 @@ class AlignEyeDeviceService {
 
       final address = device.remoteId.toString();
       debugPrint('Requesting bond for device: $address');
+      _bondFailedAddress = null;
       final started = await _bondChannel.invokeMethod<bool>('createBond', {
         'address': address,
       });
@@ -2320,11 +2335,17 @@ class AlignEyeDeviceService {
         return false;
       }
 
-      // Wait for Android bond state to settle.
+      // Wait for Android bond state to settle. Bail out immediately if the
+      // native receiver reports an explicit BOND_NONE-while-bonding failure
+      // instead of blindly polling for the full 10s.
       for (int attempt = 0; attempt < 10; attempt++) {
         await Future.delayed(const Duration(seconds: 1));
         if (await _isDevicePaired(device)) {
           return true;
+        }
+        if (_bondFailedAddress == address) {
+          debugPrint('Bond explicitly failed for $address — stopping early');
+          return false;
         }
       }
 
