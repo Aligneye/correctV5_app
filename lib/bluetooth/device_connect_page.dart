@@ -41,6 +41,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   late final Animation<double> _ring3;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
+  Timer? _settleTimer;
 
   List<ScanResult> _found = [];
   bool _scanning = false;
@@ -174,11 +175,14 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       _scanDone = false;
       _found = [];
     });
+    _settleTimer?.cancel();
+    _settleTimer = null;
 
     // Hard deadline — UI will always exit scanning state after this,
     // regardless of what the BLE stack does (fixes MIUI/ColorOS freeze)
     final scanDeadline = Timer(const Duration(seconds: 13), () {
       if (!mounted || !_scanning) return;
+      _settleTimer?.cancel();
       FlutterBluePlus.stopScan().ignore();
       setState(() { _scanning = false; _scanDone = true; });
     });
@@ -191,11 +195,16 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           final pods = results.where(_isAlignPod).toList()
             ..sort((a, b) => b.rssi.compareTo(a.rssi));
           setState(() => _found = pods);
-          // Pod found — stop scan immediately so UI becomes tappable
-          if (pods.isNotEmpty && _scanning) {
-            FlutterBluePlus.stopScan().ignore();
-            scanDeadline.cancel();
-            if (mounted) setState(() { _scanning = false; _scanDone = true; });
+          // Give a short settle window after the first match instead of
+          // stopping instantly — a user with more than one pod needs time
+          // for the others to also show up in the results list.
+          if (pods.isNotEmpty && _scanning && _settleTimer == null) {
+            _settleTimer = Timer(const Duration(seconds: 2), () {
+              if (!mounted || !_scanning) return;
+              FlutterBluePlus.stopScan().ignore();
+              scanDeadline.cancel();
+              setState(() { _scanning = false; _scanDone = true; });
+            });
           }
         },
         onError: (Object error, StackTrace stackTrace) {
@@ -300,6 +309,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   void dispose() {
     _pulseCtrl.dispose();
     _scanSub?.cancel();
+    _settleTimer?.cancel();
     _btManager.deviceService.connectionStatus.removeListener(_onStatusChange);
     FlutterBluePlus.stopScan().ignore();
     super.dispose();
