@@ -2371,6 +2371,16 @@ class AlignEyeDeviceService {
     }
 
     await _bondChannel.invokeMethod<bool>('removeBond', {'address': address});
+
+    // removeBond() only starts the OS unbonding process — it does not wait
+    // for it to finish. Without this, an immediate reconnect right after
+    // "forget" can still see the device as bonded (FlutterBluePlus.bondedDevices
+    // hasn't updated yet) and skip straight back to the paired fast path.
+    for (int attempt = 0; attempt < 10; attempt++) {
+      if (!(await _isDevicePaired(device))) return;
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+    debugPrint('Unbond confirmation timed out for $address — proceeding anyway');
   }
 
   Future<bool> _ensurePermissions() async {
