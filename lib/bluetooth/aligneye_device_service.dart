@@ -1973,10 +1973,20 @@ class AlignEyeDeviceService {
           // stack drops the link (android-code 133) once the late MTU
           // callback finally lands. Waiting longer for genuine completion
           // is the real fix, not a short race-and-abandon.
-          final mtu = await _device!.requestMtu(247, timeout: 8);
+          var mtu = await _device!.requestMtu(247, timeout: 8);
           debugPrint('MTU negotiated: $mtu');
           if (mtu < 140) {
-            debugPrint('MTU too low ($mtu < 140) — disconnecting');
+            // Right after a fresh bond, the encrypted link sometimes isn't
+            // fully settled yet and the peripheral rejects the first MTU
+            // request (native status=133, falls back to mtu=23). Give it a
+            // moment to settle and retry once before treating it as fatal.
+            debugPrint('MTU too low ($mtu < 140) on first attempt — retrying once after link settles');
+            await Future.delayed(const Duration(milliseconds: 1000));
+            mtu = await _device!.requestMtu(247, timeout: 8);
+            debugPrint('MTU negotiated (retry): $mtu');
+          }
+          if (mtu < 140) {
+            debugPrint('MTU still too low ($mtu < 140) after retry — disconnecting');
             _isConnecting = false;
             _connectionTimeoutTimer?.cancel();
             await disconnect();
