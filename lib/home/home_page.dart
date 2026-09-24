@@ -121,7 +121,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       service.startService();
     } else if (state == AppLifecycleState.resumed) {
       service.invoke('stopService');
-      BluetoothServiceManager.instance.tryAutoReconnectOnResume();
       SessionSyncService.instance.triggerSync();
     }
   }

@@ -725,9 +725,23 @@ void _bleConsoleLog(String message) {
 
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
-      : _deviceNamePrefix = deviceNamePrefix;
+      : _deviceNamePrefix = deviceNamePrefix {
+    // Native side pushes this the instant Android reports BOND_NONE while a
+    // bond was in progress (real auth/SMP failure), instead of us finding
+    // out only after a blind 10s poll times out.
+    _bondChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onBondFailed') {
+        final address = (call.arguments as Map?)?['address'] as String?;
+        final reason = (call.arguments as Map?)?['reason'];
+        debugPrint('Native reported bond failed for $address (reason: $reason)');
+        _bondFailedAddress = address;
+      }
+      return null;
+    });
+  }
 
   final String _deviceNamePrefix;
+  String? _bondFailedAddress;
   final _readingController = StreamController<PostureReading>.broadcast();
   final _profileListController =
   StreamController<List<FirmwareProfile>>.broadcast();
@@ -1765,6 +1779,11 @@ class AlignEyeDeviceService {
         if (pairingCompleted) {
           isPaired = true;
           debugPrint('Pairing completed successfully before connect');
+          // The encrypted link right after a fresh bond isn't always fully
+          // settled — GATT ops issued immediately (discoverServices, MTU)
+          // can trigger an instant disconnect. Give it a moment, especially
+          // important after a stale-bond-clear-and-retry cycle.
+          await Future.delayed(const Duration(milliseconds: 800));
         } else if (defaultTargetPlatform == TargetPlatform.android) {
           // The pod's characteristic requires an encrypted link, so an
           // unbonded connection is guaranteed to be terminated by Android
@@ -1950,10 +1969,29 @@ class AlignEyeDeviceService {
       if (Platform.isAndroid) {
         debugPrint('Requesting MTU 247 (post-discovery)...');
         try {
-          final mtu = await _device!.requestMtu(247, timeout: 3);
+          // Generous timeout: FBP abandons its OWN Dart-side wait when this
+          // fires, but the native MTU negotiation keeps running in the
+          // background regardless. A short timeout here just means we give
+          // up listening early — it does not cancel the real operation. If
+          // we then immediately issue setNotifyValue, that native call can
+          // interleave with the still-in-flight MTU negotiation and the
+          // stack drops the link (android-code 133) once the late MTU
+          // callback finally lands. Waiting longer for genuine completion
+          // is the real fix, not a short race-and-abandon.
+          var mtu = await _device!.requestMtu(247, timeout: 8);
           debugPrint('MTU negotiated: $mtu');
           if (mtu < 140) {
-            debugPrint('MTU too low ($mtu < 140) — disconnecting');
+            // Right after a fresh bond, the encrypted link sometimes isn't
+            // fully settled yet and the peripheral rejects the first MTU
+            // request (native status=133, falls back to mtu=23). Give it a
+            // moment to settle and retry once before treating it as fatal.
+            debugPrint('MTU too low ($mtu < 140) on first attempt — retrying once after link settles');
+            await Future.delayed(const Duration(milliseconds: 1000));
+            mtu = await _device!.requestMtu(247, timeout: 8);
+            debugPrint('MTU negotiated (retry): $mtu');
+          }
+          if (mtu < 140) {
+            debugPrint('MTU still too low ($mtu < 140) after retry — disconnecting');
             _isConnecting = false;
             _connectionTimeoutTimer?.cancel();
             await disconnect();
@@ -1962,6 +2000,9 @@ class AlignEyeDeviceService {
         } catch (e) {
           if (e.toString().contains('MTU too low')) rethrow;
           debugPrint('MTU request failed (non-fatal): $e');
+          // Extra buffer in case the native callback is still trickling in
+          // even after our generous 8s wait above.
+          await Future.delayed(const Duration(milliseconds: 1500));
         }
       }
 
@@ -2299,6 +2340,7 @@ class AlignEyeDeviceService {
 
       final address = device.remoteId.toString();
       debugPrint('Requesting bond for device: $address');
+      _bondFailedAddress = null;
       final started = await _bondChannel.invokeMethod<bool>('createBond', {
         'address': address,
       });
@@ -2308,11 +2350,17 @@ class AlignEyeDeviceService {
         return false;
       }
 
-      // Wait for Android bond state to settle.
+      // Wait for Android bond state to settle. Bail out immediately if the
+      // native receiver reports an explicit BOND_NONE-while-bonding failure
+      // instead of blindly polling for the full 10s.
       for (int attempt = 0; attempt < 10; attempt++) {
         await Future.delayed(const Duration(seconds: 1));
         if (await _isDevicePaired(device)) {
           return true;
+        }
+        if (_bondFailedAddress == address) {
+          debugPrint('Bond explicitly failed for $address — stopping early');
+          return false;
         }
       }
 
@@ -2338,6 +2386,16 @@ class AlignEyeDeviceService {
     }
 
     await _bondChannel.invokeMethod<bool>('removeBond', {'address': address});
+
+    // removeBond() only starts the OS unbonding process — it does not wait
+    // for it to finish. Without this, an immediate reconnect right after
+    // "forget" can still see the device as bonded (FlutterBluePlus.bondedDevices
+    // hasn't updated yet) and skip straight back to the paired fast path.
+    for (int attempt = 0; attempt < 10; attempt++) {
+      if (!(await _isDevicePaired(device))) return;
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+    debugPrint('Unbond confirmation timed out for $address — proceeding anyway');
   }
 
   Future<bool> _ensurePermissions() async {
@@ -3161,9 +3219,9 @@ class AlignEyeDeviceService {
           throw Exception('Device is null');
         }
 
-        services = await _device!.discoverServices().timeout(
-          _serviceDiscoveryTimeout,
-        );
+        services = await _device!.discoverServices(
+          subscribeToServicesChanged: false,
+        ).timeout(_serviceDiscoveryTimeout);
 
         debugPrint('Found ${services.length} services');
 
