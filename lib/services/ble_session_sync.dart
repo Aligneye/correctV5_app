@@ -253,6 +253,9 @@ class BleSessionSync {
   // ── command write ─────────────────────────────────────────────────────────
 
   Future<bool> _send(Map<String, dynamic> cmd) async {
+    // Stopped by dispose() (disconnect/forget) — don't keep writing to the
+    // old pod from the retry loop.
+    if (!_running) return false;
     final char = _char;
     if (char == null) return false;
     try {

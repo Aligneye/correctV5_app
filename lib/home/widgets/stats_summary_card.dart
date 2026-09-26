@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:correctv1/home/widgets/surface_card.dart';
 import 'package:correctv1/home/widgets/celebration_confetti.dart';
-import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -74,7 +73,7 @@ class StatsSummaryCard extends StatelessWidget {
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.only(right: 24),
         itemCount: totalCount,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           if (index == 0) {
             return SizedBox(

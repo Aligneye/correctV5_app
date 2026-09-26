@@ -142,9 +142,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) =>
+        pageBuilder: (_, animation, _) =>
             FadeTransition(opacity: animation, child: const TherapyPage()),
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -166,13 +166,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) => FadeTransition(
+        pageBuilder: (_, animation, _) => FadeTransition(
           opacity: animation,
           child: TrainingPage(
             deviceService: BluetoothServiceManager().deviceService,
           ),
         ),
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -194,9 +194,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) =>
+        pageBuilder: (_, animation, _) =>
             FadeTransition(opacity: animation, child: const MeditationPage()),
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -1665,6 +1665,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   Future<void> _handleDeviceStatusTap() async {
+    if (_deviceService.isResetting.value) {
+      _showBleSnackBar('Clearing old pod data — please wait a moment.');
+      return;
+    }
     final status = _deviceService.connectionStatus.value;
 
     if (status == DeviceConnectionStatus.connected) {
@@ -2924,7 +2928,7 @@ class _TherapyTimeTile extends StatelessWidget {
   final StatItemData item;
   final VoidCallback? onTap;
 
-  const _TherapyTimeTile({required this.item, this.onTap});
+  const _TherapyTimeTile({required this.item}) : onTap = null;
 
   @override
   Widget build(BuildContext context) {

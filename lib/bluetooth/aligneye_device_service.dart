@@ -784,6 +784,10 @@ class AlignEyeDeviceService {
   final signalStrength = ValueNotifier<int>(-1);
   /// True when RSSI drops below [_kWeakRssiThreshold] while connected.
   final isWeakSignal = ValueNotifier<bool>(false);
+  /// True while [forgetDevice] is wiping the old pod (disconnect, GATT
+  /// cache, bond, in-memory state). UI keeps Connect/Scan disabled until
+  /// it's false so a new pod never starts on half-cleared state.
+  final isResetting = ValueNotifier<bool>(false);
   String _lastKnownMode = 'IDLE';
   String _lastKnownSubMode = 'INSTANT';
   String _lastKnownProfile = '';
@@ -1223,14 +1227,16 @@ class AlignEyeDeviceService {
   }
 
   Future<bool> getProfiles() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({'cmd': 'GET_CALIBRATION_PROFILE'});
   }
 
   Future<bool> getTherapyPlan() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({'cmd': 'GET_THERAPY_PLAN'});
   }
 
@@ -1273,20 +1279,23 @@ class AlignEyeDeviceService {
   }
 
   Future<bool> setDefaultProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({'cmd': 'PROFILE_SET_DEFAULT', 'id': profileId});
   }
 
   Future<bool> selectProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({'cmd': 'PROFILE_SELECT', 'id': profileId});
   }
 
   Future<bool> renameProfile(int profileId, String name) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({
       'cmd': 'PROFILE_RENAME',
       'id': profileId,
@@ -1295,14 +1304,16 @@ class AlignEyeDeviceService {
   }
 
   Future<bool> deleteProfile(int profileId) async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({'cmd': 'PROFILE_DELETE', 'id': profileId});
   }
 
   Future<bool> clearAllProfiles() async {
-    if (connectionStatus.value != DeviceConnectionStatus.connected)
+    if (connectionStatus.value != DeviceConnectionStatus.connected) {
       return false;
+    }
     return _writeJsonCommand({'cmd': 'PROFILE_CLEAR_ALL'});
   }
 
@@ -1640,6 +1651,10 @@ class AlignEyeDeviceService {
   }
 
   Future<void> connect({String? remoteId}) async {
+    if (isResetting.value) {
+      debugPrint('connect() ignored — forget/reset still clearing old pod');
+      return;
+    }
     // Prevent concurrent connection attempts
     if (_isConnecting) {
       debugPrint('Connection already in progress, ignoring duplicate request');
@@ -2131,7 +2146,9 @@ class AlignEyeDeviceService {
       _rssiTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
         final dev = _device;
         if (dev == null ||
-            connectionStatus.value != DeviceConnectionStatus.connected) return;
+            connectionStatus.value != DeviceConnectionStatus.connected) {
+          return;
+        }
         try {
           final rssi = await dev.readRssi();
           // Map dBm (-40 strong .. -100 very weak) to 0-100%
@@ -2253,8 +2270,24 @@ class AlignEyeDeviceService {
   }
 
   Future<void> forgetDevice() async {
-    debugPrint('Forgetting AlignEye device');
+    if (isResetting.value) {
+      debugPrint('[FORGET] already in progress — ignoring duplicate call');
+      return;
+    }
+    debugPrint('[FORGET] ▶ start — clearing everything for ${_device?.remoteId}');
+    isResetting.value = true;
+    try {
+      await _forgetDeviceInner();
+    } finally {
+      // Unblock connect() and the UI only now that all teardown
+      // (disconnect + GATT cache + unbond + in-memory cache) is done.
+      _isConnecting = false;
+      isResetting.value = false;
+      debugPrint('[FORGET] ✔ done — ready for a fresh pod');
+    }
+  }
 
+  Future<void> _forgetDeviceInner() async {
     _userInitiatedDisconnect = true;
     _connectGeneration++;
     _connectionTimeoutTimer?.cancel();
@@ -2268,6 +2301,16 @@ class AlignEyeDeviceService {
     _dataWatchdogTimer?.cancel();
 
     final deviceToForget = _device;
+
+    // Detach from the old pod's streams first. Without this its notify and
+    // connection-state listeners stayed alive after forget, so late frames or
+    // a late "disconnected" event from the OLD pod could land in the state of
+    // the NEXT pod being connected.
+    await _notifySubscription?.cancel();
+    _notifySubscription = null;
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+    await _cleanupScan();
 
     // Signal "disconnected" immediately, before the actual native disconnect
     // below. Listeners (DeviceManager's session sync, live-session recorder)
@@ -2292,6 +2335,18 @@ class AlignEyeDeviceService {
     );
 
     if (deviceToForget != null) {
+      // Android keeps the pod's service/handle table cached per address; clear
+      // it while the link is still up (it can't be cleared once disconnected)
+      // so a re-pair of this pod starts with a fresh discovery.
+      if (Platform.isAndroid) {
+        try {
+          await deviceToForget.clearGattCache();
+          debugPrint('[FORGET] GATT cache cleared for ${deviceToForget.remoteId}');
+        } catch (e) {
+          debugPrint('[FORGET] GATT cache clear skipped: $e');
+        }
+      }
+
       try {
         await deviceToForget.disconnect();
       } catch (_) {}
@@ -2317,12 +2372,10 @@ class AlignEyeDeviceService {
       debugPrint('Failed to unpair bonded devices: $e');
     }
 
-    // Unblock connect() only now that all teardown (disconnect + unpair)
-    // is done — same reasoning as disconnect(): resetting this earlier
-    // would let a new connect() start while this cleanup is still running.
-    _isConnecting = false;
-
-    debugPrint('Device forgotten successfully');
+    // Last: wipe in-memory pod state. Done after the native teardown so
+    // nothing arriving during it can repopulate the cache.
+    _clearPodCache();
+    debugPrint('[FORGET] in-memory pod cache cleared');
   }
 
   Future<void> dispose() async {
@@ -2342,6 +2395,7 @@ class AlignEyeDeviceService {
     activeProfileName.dispose();
     signalStrength.dispose();
     isWeakSignal.dispose();
+    isResetting.dispose();
   }
 
   Future<void> _ensureBluetoothOn() async {
@@ -3217,7 +3271,7 @@ class AlignEyeDeviceService {
               final syncReading = PostureReading.fromJson({
                 'mode': prev?.mode ?? _lastKnownMode,
                 'battery': _lastKnownBattery,
-                if (syncAngle != null) 'angle': syncAngle,
+                'angle': ?syncAngle,
               }, current: prev);
               _emitReading(syncReading, throttle: false);
 
@@ -3672,21 +3726,50 @@ class AlignEyeDeviceService {
     } else {
       // Device left therapy mode — clear the cache so the next session
       // starts from a clean slate.
-      latestTherapyPatternSequence = const [];
-      latestTherapyCurrentPatternIndex = -1;
-      latestTherapyTotalPatterns = 0;
-      latestTherapyPatternName = '';
-      latestTherapyNextPatternName = '';
-      latestTherapyPatternId = -1;
-      latestTherapyTotalDurationSeconds = 0;
-      latestTherapyPatternDurationSeconds = 0;
-      _therapyRemainingAnchorSec = -1;
-      _therapyElapsedAnchorSec = 0;
-      _therapyAnchorAt = null;
-      _currentPatternStartElapsedSec = 0;
-      _patternElapsedAnchorSec = 0;
-      _patternRemainingAnchorSec = -1;
-      _lastTherapyPlanRequestedAt = null;
+      _clearTherapyCache();
     }
+  }
+
+  void _clearTherapyCache() {
+    latestTherapyPatternSequence = const [];
+    latestTherapyCurrentPatternIndex = -1;
+    latestTherapyTotalPatterns = 0;
+    latestTherapyPatternName = '';
+    latestTherapyNextPatternName = '';
+    latestTherapyPatternId = -1;
+    latestTherapyTotalDurationSeconds = 0;
+    latestTherapyPatternDurationSeconds = 0;
+    _therapyRemainingAnchorSec = -1;
+    _therapyElapsedAnchorSec = 0;
+    _therapyAnchorAt = null;
+    _currentPatternStartElapsedSec = 0;
+    _patternElapsedAnchorSec = 0;
+    _patternRemainingAnchorSec = -1;
+    _lastTherapyPlanRequestedAt = null;
+  }
+
+  /// Wipes everything remembered from the previous pod — partial JSON
+  /// buffer, last-known mode/battery/profile (used to fill gaps in the
+  /// first frames of a *new* pod), profile list, therapy cache and the
+  /// public notifiers. Called by [forgetDevice] so the next pod starts clean.
+  void _clearPodCache() {
+    _buffer = '';
+    _lastUiFrame = null;
+    _lastDataReceivedAt = null;
+    _lastKnownMode = 'IDLE';
+    _lastKnownSubMode = 'INSTANT';
+    _lastKnownProfile = '';
+    _lastKnownBattery = -1;
+    _lastKnownProfiles = [];
+    _connectionRetryCount = 0;
+    _bondFailedAddress = null;
+    _clearTherapyCache();
+    currentReading.value = null;
+    deviceInfo.value = null;
+    activeProfileName.value = '';
+    signalStrength.value = -1;
+    isWeakSignal.value = false;
+    connectingLabel.value = 'Connecting…';
+    if (!_profileListController.isClosed) _profileListController.add(const []);
   }
 }

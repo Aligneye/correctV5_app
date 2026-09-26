@@ -81,7 +81,7 @@ class _SplashScreenState extends State<SplashScreen>
         ? destination
         : DisclaimerGatePage(nextScreen: destination);
     Navigator.of(context).pushReplacement(
-      PageRouteBuilder<void>(pageBuilder: (_, __, ___) => target),
+      PageRouteBuilder<void>(pageBuilder: (_, _, _) => target),
     );
   }
 

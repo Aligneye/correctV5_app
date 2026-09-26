@@ -1395,7 +1395,7 @@ class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard>
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: _selectedWindow == i
-                          ? _kAngleChartPurple.withOpacity(0.15)
+                          ? _kAngleChartPurple.withValues(alpha: 0.15)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(6),
                     ),
@@ -2369,7 +2369,7 @@ class _AnalyticsLivePillState extends State<_AnalyticsLivePill>
         children: [
           AnimatedBuilder(
             animation: _ctrl,
-            builder: (_, __) => Container(
+            builder: (_, _) => Container(
               width: 6,
               height: 6,
               decoration: BoxDecoration(
@@ -2949,8 +2949,9 @@ class _PostureStripePainter extends CustomPainter {
     if (old.events.length != events.length) return true;
     for (int i = 0; i < events.length; i++) {
       if (old.events[i].slouchSec != events[i].slouchSec ||
-          old.events[i].correctionSec != events[i].correctionSec)
+          old.events[i].correctionSec != events[i].correctionSec) {
         return true;
+      }
     }
     return false;
   }

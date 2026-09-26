@@ -661,7 +661,7 @@ class _HomeLivePillState extends State<_HomeLivePill>
         children: [
           AnimatedBuilder(
             animation: _ctrl,
-            builder: (_, __) => Container(
+            builder: (_, _) => Container(
               width: 6,
               height: 6,
               decoration: BoxDecoration(

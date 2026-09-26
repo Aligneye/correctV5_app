@@ -824,7 +824,7 @@ class _StartingOverlay extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final dots = '.' * dotCount;
     return Container(
-      color: scheme.surface.withOpacity(0.97),
+      color: scheme.surface.withValues(alpha: 0.97),
       child: SafeArea(
         child: Center(
           child: Column(
@@ -849,7 +849,7 @@ class _StartingOverlay extends StatelessWidget {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFEF4444).withOpacity(0.25),
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.25),
                         blurRadius: 24,
                         spreadRadius: 4,
                       ),

@@ -487,7 +487,7 @@ class SessionDatabase {
         remoteRow['planned_pattern_sequence'],
       ),
       'sync_status': syncStatus,
-      if (remoteId != null) 'remote_id': remoteId,
+      'remote_id': ?remoteId,
     };
   }
 
