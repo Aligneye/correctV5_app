@@ -1876,14 +1876,11 @@ class AlignEyeDeviceService {
       {
         connectingLabel.value = 'Connecting…';
 
-        // Clear stale GATT cache before every connect on Android. Without this,
-        // reconnects after a user disconnect reuse stale service handles and
-        // immediately drop. "Forget + reconnect" works because forgetting clears
-        // the bond + cache; this replicates that cache-clear without forgetting.
-        if (Platform.isAndroid) {
-          try { await _device!.clearGattCache(); } catch (_) {}
-          await Future.delayed(const Duration(milliseconds: 300));
-        }
+        // GATT cache is no longer cleared before every connect — it's an extra
+        // OEM-sensitive step on the most fragile part of the flow. It's now a
+        // recovery step only: the 133 retry below, _recoverConnection() (dead
+        // link during discovery/MTU/notify), and the "characteristic not
+        // found" retry all clear it before trying again. Forget also clears it.
 
         // Attempt GATT connect with one retry on android-code 133.
         // Error 133 means the previous GATT stack hasn't fully torn down yet —
@@ -2018,6 +2015,12 @@ class AlignEyeDeviceService {
           debugPrint(
             'Retrying service discovery (attempt $_connectionRetryCount/$_maxRetries)...',
           );
+          // Characteristic missing usually means stale cached service handles
+          // — clear the cache so the rediscovery reads fresh ones from the pod.
+          if (Platform.isAndroid) {
+            debugPrint('Characteristic not found — clearing GATT cache before rediscovery');
+            try { await _device!.clearGattCache(); } catch (_) {}
+          }
           await Future.delayed(Duration(seconds: _connectionRetryCount));
           services = await _discoverServicesWithRetry();
           _notifyCharacteristic = _findNotifyCharacteristic(services);
@@ -2554,7 +2557,24 @@ class AlignEyeDeviceService {
 
   /// A stale phone-side bond entry can block re-pairing. Clears it and
   /// retries pairing once before giving up.
+  /// Android's live bond state for [device]; null off-Android or if the
+  /// state can't be read.
+  Future<BluetoothBondState?> _bondStateOf(BluetoothDevice device) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      return await device.bondState.first.timeout(const Duration(seconds: 2));
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> _reBond(BluetoothDevice device) async {
+    // Never remove a bond Android is still creating — that interrupts a
+    // valid pairing. Wait for it instead.
+    if (await _bondStateOf(device) == BluetoothBondState.bonding) {
+      debugPrint('Pairing still in progress — not removing bond, waiting for it');
+      return _requestPairing(device);
+    }
     debugPrint('Pairing failed — removing stale bond and retrying once');
     try {
       await _unpairDevice(device);
@@ -2592,6 +2612,25 @@ class AlignEyeDeviceService {
       // native receiver reports an explicit BOND_NONE-while-bonding failure
       // instead of blindly polling for the full 10s.
       for (int attempt = 0; attempt < 10; attempt++) {
+        await Future.delayed(const Duration(seconds: 1));
+        if (await _isDevicePaired(device)) {
+          return true;
+        }
+        if (_bondFailedAddress == address) {
+          debugPrint('Bond explicitly failed for $address — stopping early');
+          return false;
+        }
+      }
+
+      // Slower phones can still be mid-pairing at 10s. Giving up now sends us
+      // to _reBond(), which removes the bond and kills a pairing that was
+      // about to succeed — so keep waiting (up to 10s more) while Android
+      // still reports BONDING.
+      for (int extra = 0; extra < 10; extra++) {
+        if (await _bondStateOf(device) != BluetoothBondState.bonding) break;
+        if (extra == 0) {
+          debugPrint('Pairing still in progress after 10s — waiting longer');
+        }
         await Future.delayed(const Duration(seconds: 1));
         if (await _isDevicePaired(device)) {
           return true;
