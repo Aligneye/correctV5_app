@@ -334,6 +334,11 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     if (raw.contains('not enabled')) {
       return 'Please enable Bluetooth and try again.';
     }
+    if (raw.contains('MTU')) {
+      // Pod is already paired at this point, so a second tap connects on
+      // the bonded path, which has always worked.
+      return 'Your pod is paired but setup didn\'t finish. Tap Connect again.';
+    }
     return 'Could not connect. Please try again.';
   }
 
@@ -816,9 +821,16 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          'Pairing with your Align Pod…',
-          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+        // Live step from the service: Pairing… / Connecting… /
+        // Discovering… / Finishing setup… (fresh-bond recovery).
+        ValueListenableBuilder<String>(
+          valueListenable: _btManager.deviceService.connectingLabel,
+          builder: (_, label, _) => Text(
+            label == 'Finishing setup…'
+                ? 'Finishing setup — this can take a few seconds…'
+                : 'Pairing with your Align Pod…',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+          ),
         ),
         const SizedBox(height: 24),
         GestureDetector(

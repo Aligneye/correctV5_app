@@ -723,6 +723,14 @@ void _bleConsoleLog(String message) {
   debugPrint(message);
 }
 
+/// Connection diagnostics. Filter the console with `BLE-DIAG` — matches these
+/// lines and the native ones from MainActivity (bond / ACL events). The
+/// wall-clock time lets you line the two up.
+void bleDiag(String message) {
+  final time = DateTime.now().toIso8601String().substring(11, 23);
+  debugPrint('[BLE-DIAG] $time $message');
+}
+
 class AlignEyeDeviceService {
   AlignEyeDeviceService({String deviceNamePrefix = _kDefaultDeviceNamePrefix})
       : _deviceNamePrefix = deviceNamePrefix {
@@ -788,6 +796,11 @@ class AlignEyeDeviceService {
   /// cache, bond, in-memory state). UI keeps Connect/Scan disabled until
   /// it's false so a new pod never starts on half-cleared state.
   final isResetting = ValueNotifier<bool>(false);
+  // Diagnostics only: step timing of the current connect attempt, when the
+  // last forget finished, and whether the pod's first frame was seen yet.
+  final Stopwatch _diagWatch = Stopwatch();
+  DateTime? _lastForgetDoneAt;
+  bool _diagFirstFrameSeen = true;
   String _lastKnownMode = 'IDLE';
   String _lastKnownSubMode = 'INSTANT';
   String _lastKnownProfile = '';
@@ -1672,6 +1685,14 @@ class AlignEyeDeviceService {
     }
 
     _isConnecting = true;
+    _diagWatch
+      ..reset()
+      ..start();
+    _diagFirstFrameSeen = false;
+    final sinceForget = _lastForgetDoneAt == null
+        ? 'n/a'
+        : '${DateTime.now().difference(_lastForgetDoneAt!).inMilliseconds}ms';
+    _diag('CONNECT start target=${remoteId ?? "auto"} sinceLastForget=$sinceForget');
     // This attempt's identity. Checked at each major checkpoint below so a
     // stale attempt (superseded by a newer connect()/disconnect()/
     // forgetDevice() call, or by its own timeout firing) quietly stops
@@ -1781,6 +1802,10 @@ class AlignEyeDeviceService {
       // Check if device is paired/bonded
       var isPaired = await _isDevicePaired(_device!);
       debugPrint('Device is paired: $isPaired');
+      _diag('POD ${_device!.remoteId} alreadyBonded=$isPaired');
+      // Set when this attempt created a fresh bond — enables the extra
+      // fresh-bond recovery below (fw 1.3.x drops the first link after pairing).
+      var justPaired = false;
 
       // For first-time devices, ask Android to create a bond before connection.
       if (!isPaired) {
@@ -1793,7 +1818,9 @@ class AlignEyeDeviceService {
 
         if (pairingCompleted) {
           isPaired = true;
+          justPaired = true;
           debugPrint('Pairing completed successfully before connect');
+          _diag('BOND done (fresh pairing)');
           // The encrypted link right after a fresh bond isn't always fully
           // settled — GATT ops issued immediately (discoverServices, MTU)
           // can trigger an instant disconnect. Give it a moment, especially
@@ -1915,6 +1942,7 @@ class AlignEyeDeviceService {
                 .timeout(const Duration(seconds: 10));
 
             debugPrint('Device connected successfully on attempt ${attempt + 1}');
+            _diag('GATT connected (attempt ${attempt + 1})');
             connected = true;
             break;
           } catch (e) {
@@ -2005,11 +2033,14 @@ class AlignEyeDeviceService {
       debugPrint(
         'Found characteristic: ${_notifyCharacteristic!.uuid} in service: ${_notifyCharacteristic!.serviceUuid}',
       );
+      _diag('SERVICES found');
 
       // Request MTU 247 after service discovery per spec §5.1.
       // iOS negotiates MTU automatically (185+), so we only call this on Android.
       if (Platform.isAndroid) {
         debugPrint('Requesting MTU 247 (post-discovery)...');
+        _diag('MTU request 247');
+        final mtuAskedAt = _diagWatch.elapsedMilliseconds;
         var mtu = 23;
         try {
           // Generous timeout: FBP abandons its OWN Dart-side wait when this
@@ -2023,8 +2054,10 @@ class AlignEyeDeviceService {
           // is the real fix, not a short race-and-abandon.
           mtu = await _device!.requestMtu(247, timeout: 8);
           debugPrint('MTU negotiated: $mtu');
+          _diag('MTU result=$mtu tookMs=${_diagWatch.elapsedMilliseconds - mtuAskedAt}');
         } catch (e) {
           debugPrint('MTU request failed: $e');
+          _diag('MTU error tookMs=${_diagWatch.elapsedMilliseconds - mtuAskedAt}: $e');
           mtu = 23; // fall through to the retry-then-recover logic below
         }
 
@@ -2044,17 +2077,56 @@ class AlignEyeDeviceService {
             await Future.delayed(const Duration(milliseconds: 1000));
             mtu = await _device!.requestMtu(247, timeout: 8);
             debugPrint('MTU negotiated (retry): $mtu');
+            _diag('MTU retry result=$mtu');
           } catch (retryError) {
             if (_looksLikeDeadLink(retryError)) {
               debugPrint('MTU retry failed ($retryError) — link is actually dead, recovering');
+              _diag('MTU retry: link dead ${_diagReason()} — recovering');
+              connectingLabel.value = 'Finishing setup…';
               await _recoverConnection(); // throws if recovery itself fails
-              mtu = await _device!.requestMtu(247, timeout: 8);
+              try {
+                mtu = await _device!.requestMtu(247, timeout: 8);
+              } catch (e) {
+                // Let the fresh-bond retry below get a chance instead of
+                // failing the whole attempt here.
+                debugPrint('MTU after recovery failed: $e');
+                mtu = 23;
+              }
               debugPrint('MTU negotiated (after recovery): $mtu');
+              _diag('MTU after-recovery result=$mtu');
             } else {
               debugPrint('MTU retry failed with a non-link error: $retryError');
               mtu = 23;
             }
           }
+        }
+
+        // Pod firmware 1.3.x: right after a fresh bond the pod can fail the
+        // phone's connection-parameter update and go silent (HCI 0x08
+        // timeout), sometimes on the recovery link too. A bonded link after a
+        // short pause has always worked, so give it exactly one more calm try
+        // before failing. Kept to one retry with a pause — rapid back-to-back
+        // reconnects have crashed Android's Bluetooth process before.
+        // ponytail: fixed 3s pause; drop this block once firmware is fixed.
+        if (mtu < 140 && justPaired) {
+          connectingLabel.value = 'Finishing setup…';
+          _diag('FRESH-BOND RETRY: pause 3s, then one bonded reconnect');
+          try {
+            await _device!.disconnect();
+          } catch (_) {}
+          await Future.delayed(const Duration(seconds: 3));
+          if (_isStaleGeneration(myGeneration)) {
+            debugPrint('Connect attempt $myGeneration superseded — aborting fresh-bond retry');
+            return;
+          }
+          try {
+            await _recoverConnection();
+            mtu = await _device!.requestMtu(247, timeout: 8);
+          } catch (e) {
+            debugPrint('Fresh-bond retry failed: $e');
+            mtu = 23;
+          }
+          _diag('FRESH-BOND RETRY result=$mtu');
         }
 
         if (mtu < 140) {
@@ -2180,8 +2252,10 @@ class AlignEyeDeviceService {
       debugPrint('Saved connection state: hasEverConnected=true');
 
       debugPrint('Connection established successfully');
+      _diag('CONNECTED ${_device?.remoteId}');
     } catch (e) {
       debugPrint('Connection error: $e');
+      _diag('CONNECT FAILED ${_diagReason()}: $e');
       _connectionTimeoutTimer?.cancel();
       if (_isStaleGeneration(myGeneration)) {
         // A newer connect()/disconnect()/forgetDevice() already superseded
@@ -2283,7 +2357,9 @@ class AlignEyeDeviceService {
       // (disconnect + GATT cache + unbond + in-memory cache) is done.
       _isConnecting = false;
       isResetting.value = false;
+      _lastForgetDoneAt = DateTime.now();
       debugPrint('[FORGET] ✔ done — ready for a fresh pod');
+      bleDiag('FORGET done');
     }
   }
 
@@ -2913,6 +2989,10 @@ class AlignEyeDeviceService {
 
   void _handleNotifyData(List<int> data) {
     if (data.isEmpty) return;
+    if (!_diagFirstFrameSeen) {
+      _diagFirstFrameSeen = true;
+      _diag('FIRST DATA from pod (${data.length} bytes)');
+    }
     final rawData = utf8.decode(data, allowMalformed: true);
     // debugPrint("BLE RAW: $rawData");
     if (rawData.contains('"t":"C"') || rawData.contains('"t":"c"')) {
@@ -2995,6 +3075,10 @@ class AlignEyeDeviceService {
                     'fw=${info.firmwareVersion}, '
                     'build=${info.firmwareBuildDate}, '
                     'serial=${info.serial}',
+              );
+              bleDiag(
+                'POD INFO ${_device?.remoteId} fw=${info.firmwareVersion} '
+                'build=${info.firmwareBuildDate} serial=${info.serial}',
               );
               deviceInfo.value = info;
               break;
@@ -3299,6 +3383,10 @@ class AlignEyeDeviceService {
 
   void _handleConnectionUpdate(BluetoothConnectionState state) {
     debugPrint('Connection state changed: $state');
+    _diag(
+      'LINK $state connecting=$_isConnecting'
+      '${state == BluetoothConnectionState.disconnected ? ' ${_diagReason()}' : ''}',
+    );
 
     if (state == BluetoothConnectionState.connected) {
       _connectionRetryCount = 0;
@@ -3746,6 +3834,17 @@ class AlignEyeDeviceService {
     _patternElapsedAnchorSec = 0;
     _patternRemainingAnchorSec = -1;
     _lastTherapyPlanRequestedAt = null;
+  }
+
+  /// [bleDiag] with the time since the current connect() started.
+  void _diag(String message) {
+    bleDiag('+${_diagWatch.elapsedMilliseconds}ms $message');
+  }
+
+  /// Disconnect reason FlutterBluePlus got from Android for the current pod.
+  String _diagReason() {
+    final r = _device?.disconnectReason;
+    return r == null ? 'reason=n/a' : 'reason=${r.code} (${r.description})';
   }
 
   /// Wipes everything remembered from the previous pod — partial JSON

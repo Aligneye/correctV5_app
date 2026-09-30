@@ -145,6 +145,13 @@ class DeviceManager {
 
   void _onStatusChanged() {
     final status = _btManager.deviceService.connectionStatus.value;
+    if (status == DeviceConnectionStatus.connecting) {
+      // Should be 0 — a running sync here is still talking to an old pod.
+      bleDiag(
+        'NEW CONNECT: syncs still running=${BleSessionSync.runningCount} '
+        '${BleSessionSync.runningDevices}',
+      );
+    }
     final isConnected = status == DeviceConnectionStatus.connected;
     final wasConnected = _lastConnected;
     _lastConnected = isConnected;
