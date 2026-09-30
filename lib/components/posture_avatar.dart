@@ -2,15 +2,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// Upright-style posture avatar, fully hand-drawn with CustomPainter,
-/// traced directly from the reference icon: a floating head (gap, no
-/// neck connector) above a torso silhouette with a diagonal crossed-arm
-/// band ending in a rounded hand, both with a subtle back-to-front
-/// gradient. Body faces left (flipped from the reference). The torso
-/// stays planted; the head rounds forward from the shoulder/apex pivot
-/// as [liveAngle] rises — matching how people actually slouch. Fill
-/// color eases from good to bad-posture color as it crosses
-/// [thresholdAngle].
+/// Flat cartoon side-view figure (boy facing right: quiff hair, t-shirt,
+/// shorts, sneakers), hand-drawn with CustomPainter. Legs and shoes stay
+/// planted; the upper back and head round forward from the shoulders as
+/// [liveAngle] rises. The t-shirt carries the posture status colour: good
+/// until [thresholdAngle], bad past it, grey when not calibrated.
 ///
 /// [liveAngle] is expected to already be an animated/smoothed value (e.g.
 /// the frame value from the caller's own TweenAnimationBuilder driving the
@@ -77,186 +73,202 @@ class _PostureFigurePainter extends CustomPainter {
     required this.isCalibrated,
   });
 
-  // --- Traced silhouette data ---------------------------------------
-  // Points are fractions (fx, fy) of the torso's own bounding box, traced
-  // from the reference icon: fx 0→1 spans back-edge to front-edge, fy 0→1
-  // spans the torso's top apex to its bottom hem.
+  // Figure is drawn in a fixed 68x124 design box and scaled to the widget.
+  static const double _designW = 68, _designH = 124;
+  static const Offset _shoulderPivot = Offset(34, 58);
+  static const Offset _shoulder = Offset(34.5, 50);
 
-  // Plain body: rounded shoulder dome, straight parallel sides, flat
-  // bottom — no chest/waist curve, no bulge. _front mirrors _back (fx ->
-  // 1 - fx) so both sides stay perfectly symmetric.
-  static const List<Offset> _back = [
-    Offset(0.4300, 0.0000),
-    Offset(0.2600, 0.0150),
-    Offset(0.1200, 0.0600),
-    Offset(0.0400, 0.1300),
-    Offset(0.0100, 0.2100),
-    Offset(0.0000, 0.3000),
-    Offset(0.0000, 0.6000),
-    Offset(0.0000, 0.9000),
-    Offset(0.0000, 1.0000),
-  ];
+  static const _skin = Color(0xFFF5C27A);
+  static const _skinShade = Color(0xFFE0A860);
+  static const _hair = Color(0xFF26262A);
+  static const _shorts = Color(0xFF1E5BB8);
+  static const _shoe = Color(0xFF1A1A1A);
 
-  static const List<Offset> _front = [
-    Offset(0.5700, 0.0000),
-    Offset(0.7400, 0.0150),
-    Offset(0.8800, 0.0600),
-    Offset(0.9600, 0.1300),
-    Offset(0.9900, 0.2100),
-    Offset(1.0000, 0.3000),
-    Offset(1.0000, 0.6000),
-    Offset(1.0000, 0.9000),
-    Offset(1.0000, 1.0000),
-  ];
-
-  // Aspect ratio of the traced torso bounding box (width/height) and head
-  // geometry — relative to the torso box.
-  static const double _torsoAspect = 0.50;
-  static const double _headRFrac = 0.1874; // of torsoH
-  static const double _apexFx = 0.379, _apexFy = 0.0;
-  static const double _headFx = 0.4294, _headFy = -0.2644;
-
-  Offset _local(Offset frac, double torsoW, double torsoH) {
-    final lx = (frac.dx - 0.5) * torsoW;
-    final ly = -(1 - frac.dy) * torsoH;
-    return Offset(lx, ly);
-  }
-
-  // Applies a natural waist bend instead of rotating the entire portrait.
-  // The lower body stays planted while the upper body, shoulders and head
-  // bend together around the waist.
-  Offset _waistBend(
-      Offset point,
-      double torsoH,
-      double bendRad,
-      ) {
-    final waistY = -torsoH * 0.43;
-    final topY = -torsoH * 1.08;
-
-    // Points below the waist remain fixed. Points above the waist gradually
-    // receive the bend, creating a softer and more human-looking transition.
-    final rawT = ((waistY - point.dy) / (waistY - topY)).clamp(0.0, 1.0);
-    final t = rawT * rawT * (3.0 - 2.0 * rawT); // smoothstep
-    final localAngle = bendRad * t;
-
-    if (localAngle.abs() < 0.0001) return point;
-
-    final c = math.cos(localAngle);
-    final si = math.sin(localAngle);
-    final relative = point - Offset(0, waistY);
-
-    final rotated = Offset(
-      relative.dx * c - relative.dy * si,
-      relative.dx * si + relative.dy * c,
-    );
-
-    return rotated + Offset(0, waistY);
-  }
-
-  // Smooth polyline through a set of points: each point is a Bezier
-  // control, curving to the midpoint of it and the next — rounds the
-  // shoulder dome instead of leaving faceted straight-line corners.
-  void _smoothLineTo(Path path, List<Offset> pts) {
-    for (var i = 0; i < pts.length; i++) {
-      final ctrl = pts[i];
-      final end =
-          i == pts.length - 1 ? ctrl : Offset.lerp(ctrl, pts[i + 1], 0.5)!;
-      path.quadraticBezierTo(ctrl.dx, ctrl.dy, end.dx, end.dy);
-    }
-  }
-
-  Path _makeBodyPath(
-      List<Offset> points,
-      double torsoW,
-      double torsoH,
-      double bendRad,
-      ) {
-    final first = _waistBend(_local(points.first, torsoW, torsoH), torsoH, bendRad);
-    final path = Path()..moveTo(first.dx, first.dy);
-
-    for (final f in points.skip(1)) {
-      final point = _waistBend(_local(f, torsoW, torsoH), torsoH, bendRad);
-      path.lineTo(point.dx, point.dy);
-    }
-
-    path.close();
-    return path;
-  }
+  Paint _fill(Color c) => Paint()..color = c;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final pivot = Offset(size.width / 2, size.height * 0.86);
-    final torsoH = size.height * 0.60;
-    final torsoW = torsoH * _torsoAspect;
-    final headR = torsoH * _headRFrac;
+    canvas.save();
+    canvas.scale(size.width / _designW, size.height / _designH);
 
-    final lighter = Color.lerp(color, Colors.white, 0.20)!;
-    final darker = Color.lerp(color, Colors.black, 0.22)!;
+    final shirtLight = Color.lerp(color, Colors.white, 0.18)!;
+    final shirtDark = Color.lerp(color, Colors.black, 0.20)!;
 
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.13)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    // Ground shadow.
     canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(pivot.dx, pivot.dy + 4),
-        width: torsoW * 0.55,
-        height: 8,
-      ),
-      shadowPaint,
+      Rect.fromCenter(center: const Offset(34, 120), width: 30, height: 6),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.13)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
     );
 
-    // Only the upper body bends around the waist. The pelvis/lower body
-    // remains stable, like a person bending from the middle of the back.
-    final bendRad = tiltRad * 0.85;
+    // --- Planted lower body -------------------------------------------
+    // Back leg (shaded) then front leg.
+    canvas.drawRRect(
+      RRect.fromLTRBR(28, 86, 34, 114, const Radius.circular(2.5)),
+      _fill(_skinShade),
+    );
+    canvas.drawRRect(
+      RRect.fromLTRBR(31, 86, 37, 114, const Radius.circular(2.5)),
+      _fill(_skin),
+    );
+
+    // Sneakers pointing right, with two white stripes.
+    canvas.drawRRect(
+      RRect.fromLTRBAndCorners(
+        25, 111, 44, 118,
+        topLeft: const Radius.circular(3),
+        topRight: const Radius.circular(6),
+        bottomLeft: const Radius.circular(1.5),
+        bottomRight: const Radius.circular(2.5),
+      ),
+      _fill(_shoe),
+    );
+    final stripe = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 1.2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(31, 116), const Offset(33, 113), stripe);
+    canvas.drawLine(const Offset(34, 116), const Offset(36, 113), stripe);
+
+    // Shorts.
+    canvas.drawRRect(
+      RRect.fromLTRBAndCorners(
+        25, 72, 43, 92,
+        bottomLeft: const Radius.circular(2),
+        bottomRight: const Radius.circular(2),
+      ),
+      _fill(_shorts),
+    );
+
+    // --- Upper body: rounds forward from the shoulders ---------------
+    // The shirt is one outline whose points bend progressively (none at
+    // the hem, full at the shoulders), so the back curves smoothly instead
+    // of splitting at a joint. Head and neck ride the full bend.
+    final bend = tiltRad * 0.85;
+    void rotateFull() {
+      canvas.translate(_shoulderPivot.dx, _shoulderPivot.dy);
+      canvas.rotate(bend);
+      canvas.translate(-_shoulderPivot.dx, -_shoulderPivot.dy);
+    }
+
+    // Neck (behind the shirt collar).
+    canvas.save();
+    rotateFull();
+    canvas.drawRect(const Rect.fromLTRB(31, 37, 37, 47), _fill(_skinShade));
+    canvas.restore();
+
+    final shirt = _bent(
+      Path()
+        ..addRRect(RRect.fromLTRBAndCorners(
+          24, 44, 44, 80,
+          topLeft: const Radius.circular(9),
+          topRight: const Radius.circular(8),
+          bottomLeft: const Radius.circular(3),
+          bottomRight: const Radius.circular(3),
+        )),
+      bend,
+    );
+    canvas.drawPath(shirt, _fill(color));
+    canvas.save();
+    canvas.clipPath(shirt);
+    canvas.drawPath(
+      _bent(Path()..addRect(const Rect.fromLTRB(20, 40, 28, 84)), bend),
+      _fill(shirtDark),
+    );
+    canvas.restore();
 
     canvas.save();
-    canvas.translate(pivot.dx, pivot.dy);
+    rotateFull();
 
-    final body = Path();
-    final back = _back
-        .map((f) => _waistBend(_local(f, torsoW, torsoH), torsoH, bendRad))
-        .toList(growable: false);
-    final front = _front
-        .map((f) => _waistBend(_local(f, torsoW, torsoH), torsoH, bendRad))
-        .toList(growable: false);
-
-    body.moveTo(back.first.dx, back.first.dy);
-    _smoothLineTo(body, [...back.skip(1), ...front.reversed]);
-    body.close();
-
-    canvas.drawPath(body, Paint()..color = color);
-    canvas.drawPath(
-      body,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = darker.withValues(alpha: 0.4),
-    );
-
-    // Head follows the upper torso's bend, rather than rotating the whole
-    // portrait around the base.
-    final headLocal = _local(const Offset(_headFx, _headFy), torsoW, torsoH);
-    final bentHead = _waistBend(headLocal, torsoH, bendRad);
-
-    canvas.drawCircle(bentHead, headR, Paint()..color = lighter);
-    canvas.drawCircle(
-      bentHead,
-      headR,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = darker.withValues(alpha: 0.3),
-    );
+    // Head and ear.
+    canvas.drawOval(const Rect.fromLTRB(25, 18, 45, 41), _fill(_skin));
     canvas.drawOval(
-      Rect.fromCenter(
-        center: bentHead + Offset(headR * 0.3, -headR * 0.35),
-        width: headR * 0.5,
-        height: headR * 0.32,
-      ),
-      Paint()..color = Colors.white.withValues(alpha: 0.3),
+      Rect.fromCenter(center: const Offset(31.5, 30), width: 5, height: 7),
+      _fill(_skinShade),
+    );
+
+    // Hair: quiff sweeping up and forward, covering top and back of head.
+    final hair = Path()
+      ..moveTo(26, 35)
+      ..quadraticBezierTo(21, 22, 27, 13)
+      ..quadraticBezierTo(34, 4, 43, 9)
+      ..quadraticBezierTo(47, 13, 44, 19)
+      ..lineTo(37, 20)
+      ..quadraticBezierTo(31, 21, 30, 27)
+      ..lineTo(29, 35)
+      ..close();
+    canvas.drawPath(hair, _fill(_hair));
+
+    // Face: brow, eye, smile.
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1
+      ..strokeCap = StrokeCap.round
+      ..color = _hair;
+    canvas.drawPath(
+      Path()
+        ..moveTo(38.8, 23.6)
+        ..quadraticBezierTo(41, 22.6, 43.2, 23.6),
+      line,
+    );
+    canvas.drawCircle(const Offset(41, 27), 2.2, _fill(Colors.white));
+    canvas.drawCircle(const Offset(41.7, 27), 1.3, _fill(_hair));
+    canvas.drawPath(
+      Path()
+        ..moveTo(39.5, 33.5)
+        ..quadraticBezierTo(41.8, 35.6, 43.8, 33),
+      line..color = const Color(0xFF8A4B2A),
     );
 
     canvas.restore();
+
+    // Arm hangs straight down from wherever the shoulder moved to.
+    final moved = _bendPoint(_shoulder, bend);
+    canvas.save();
+    canvas.translate(moved.dx - _shoulder.dx, moved.dy - _shoulder.dy);
+    canvas.drawRRect(
+      RRect.fromLTRBR(30, 46, 39, 61, const Radius.circular(4)),
+      _fill(shirtLight),
+    );
+    canvas.drawRRect(
+      RRect.fromLTRBR(32, 58, 37, 80, const Radius.circular(2.5)),
+      _fill(_skin),
+    );
+    canvas.drawCircle(const Offset(34.8, 80.5), 3, _fill(_skin));
+    canvas.restore();
+
+    canvas.restore();
+  }
+
+  // Upper-body points bend around [_shoulderPivot]: not at all below
+  // [_bendStartY], fully above [_bendEndY], smoothstepped in between.
+  static const double _bendStartY = 70, _bendEndY = 48;
+
+  Offset _bendPoint(Offset p, double bend) {
+    final raw =
+        ((_bendStartY - p.dy) / (_bendStartY - _bendEndY)).clamp(0.0, 1.0);
+    final a = bend * raw * raw * (3 - 2 * raw);
+    if (a == 0) return p;
+    final r = p - _shoulderPivot;
+    return _shoulderPivot +
+        Offset(
+          r.dx * math.cos(a) - r.dy * math.sin(a),
+          r.dx * math.sin(a) + r.dy * math.cos(a),
+        );
+  }
+
+  // Resamples [src] every design unit and bends each point.
+  Path _bent(Path src, double bend) {
+    final out = Path();
+    for (final m in src.computeMetrics()) {
+      for (double d = 0; d < m.length; d += 1) {
+        final p = _bendPoint(m.getTangentForOffset(d)!.position, bend);
+        d == 0 ? out.moveTo(p.dx, p.dy) : out.lineTo(p.dx, p.dy);
+      }
+      out.close();
+    }
+    return out;
   }
 
   @override
