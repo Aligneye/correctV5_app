@@ -812,20 +812,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   Widget _buildSummaryGrid() {
     final today = _todayStats;
-    final goodHours = today != null
-        ? today.todayPostureDurationSec / 3600.0
-        : 6.8;
-    final poorHours = today != null
-        ? (today.todayTrackedSec - today.todayPostureDurationSec)
-              .clamp(0, double.maxFinite) /
-          3600.0
-        : 1.2;
+    final goodValue = today != null ? _formatSec(today.todayGoodSec) : '—';
+    final poorValue = today != null ? _formatSec(today.todayWrongDurSec) : '—';
 
     return Row(
       children: [
         Expanded(
           child: _StatCard(
-            value: _formatHours(goodHours),
+            value: goodValue,
             label: 'Good Posture',
             icon: Icons.trending_up_rounded,
             iconColor: _kGreen,
@@ -835,7 +829,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         const SizedBox(width: 16),
         Expanded(
           child: _StatCard(
-            value: _formatHours(poorHours),
+            value: poorValue,
             label: 'Poor Posture',
             icon: Icons.access_time_rounded,
             iconColor: _kRed,
@@ -1015,6 +1009,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   String _formatHours(double value) => '${value.toStringAsFixed(1)}h';
+
+  String _formatSec(int sec) =>
+      sec >= 3600 ? _formatHours(sec / 3600.0) : '${sec ~/ 60}m';
 
   // ── Section label ───────────────────────────────────────────────────────────
 

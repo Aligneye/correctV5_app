@@ -1025,6 +1025,12 @@ class AlignEyeDeviceService {
   /// [delayMs] is clamped to the firmware-accepted range 500-30000; it's
   /// only meaningful when subMode == 'DELAYED' but is always sent (firmware
   /// ignores it otherwise).
+  /// Alert delay last sent with TRAINING_START. Telemetry doesn't echo it,
+  /// so the session recorder reads it from here to know when a DELAYED
+  /// alert actually fired.
+  // ponytail: in-memory only, resets to 5s on app restart mid-session; drop once firmware reports alerts.
+  int trainingDelayMs = 5000;
+
   Future<bool> sendTrainingStart({
     required String subMode,
     required int difficultyAngle,
@@ -1060,6 +1066,7 @@ class AlignEyeDeviceService {
       return false;
     }
 
+    trainingDelayMs = clampedDelayMs;
     return true;
   }
 
