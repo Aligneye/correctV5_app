@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:correctv1/bluetooth/aligneye_device_service.dart';
-import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
+import 'package:correctv1/analytics/analytics_cards.dart';
+import 'package:correctv1/analytics/analytics_insights.dart';
+import 'package:correctv1/home/daily_progress_page.dart';
 import 'package:correctv1/services/device_manager.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 import 'package:correctv1/sessions/sessions_history_page.dart';
-import 'package:correctv1/services/angle_history_service.dart';
 import 'package:correctv1/theme/app_theme.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─── Data Models ─────────────────────────────────────────────────────────────
 
@@ -124,60 +123,17 @@ class SessionData {
   });
 }
 
-const List<String> _kDays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const List<int> _kHeatmap = [
-  0,
-  1,
-  2,
-  3,
-  4,
-  2,
-  1,
-  2,
-  3,
-  4,
-  3,
-  2,
-  1,
-  0,
-  1,
-  2,
-  3,
-  4,
-  3,
-  2,
-  1,
-  2,
-  3,
-  2,
-  3,
-  4,
-  3,
-  2,
-];
-
-// ─── Palette ─────────────────────────────────────────────────────────────────
+// ─── Palette (used by session detail below) ──────────────────────────────────
 
 const _kBlue = AppTheme.brandPrimary; // #2563EB
-const _kBlueLight = Color(0xFFEFF6FF);
 const _kGreen = AppTheme.successText; // #16A34A
 const _kGreenLight = AppTheme.successBg; // #F0FDF4
 const _kRed = AppTheme.destructive; // #EF4444
-const _kBg = Color(0xFFF7F8FC);
-const _kCard = Colors.white;
-const _kBorder = Color(0xFFEEEEF0);
-const _kText = Color(0xFF1A1A2E);
-const _kTextMuted = Color(0xFF9A9AAA);
-const _kTextHint = Color(0xFFBBBBCC);
 
 const _kCardShadow = [
   BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2)),
   BoxShadow(color: Color(0x05000000), blurRadius: 2, offset: Offset(0, 1)),
 ];
-
-const _kAngleChartPurple = Color(0xFF8A56FF);
-const _kAngleInsightBg = Color(0xFFF8F5FF);
-const _kAngleInsightText = Color(0xFF4A5568);
 
 BoxDecoration _cardDecoration(ColorScheme scheme, {double radius = 16}) =>
     BoxDecoration(
@@ -198,41 +154,20 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  static const int _recentSessionPreviewCount = 5;
-
-  int _period = 0;
-  StreakStats? _streakStats;
-  bool _isLoadingStreak = true;
-
-  List<int>? _heatmapData;
-  bool _isLoadingHeatmap = true;
-
-  static const _periodLabels = ['Weekly', 'Monthly'];
-  static const _periodKeys = ['week', 'month'];
+  static const _periodLabels = ['7D', '30D'];
+  static const _periodDays = [7, 30];
+  static const _previousLabels = ['last week', 'last month'];
 
   final SessionRepository _repo = SessionRepository();
   final DeviceManager _deviceManager = DeviceManager();
-  final BluetoothServiceManager _btManager = BluetoothServiceManager();
 
-  List<SessionData>? _sessions;
-  Map<String, dynamic>? _weeklyStats;
-  TodayStats? _todayStats;
-  List<double>? _dailyScores;
-  bool _isLoadingSessions = true;
-  bool _isLoadingStats = true;
-  bool _isLoadingToday = true;
-  bool _isLoadingDaily = true;
+  int _period = 0;
+  int _target = kDefaultDailyScoreTarget;
+  List<DailyProgress>? _current;
+  List<DailyProgress>? _previous;
+  SlouchInsights? _insights;
   int _lastSyncTick = 0;
-  bool _isReloading = false;
-  bool _showAllRecentSessions = false;
-
-  bool get _isDeviceDisconnected =>
-      _btManager.deviceService.connectionStatus.value ==
-      DeviceConnectionStatus.disconnected;
-
-  bool get _isDeviceConnecting =>
-      _btManager.deviceService.connectionStatus.value ==
-      DeviceConnectionStatus.connecting;
+  int _loadSeq = 0;
 
   @override
   void initState() {
@@ -240,19 +175,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _lastSyncTick = _deviceManager.syncCompletedTick.value;
     _deviceManager.syncCompletedTick.addListener(_onSyncFinished);
     _deviceManager.isSyncing.addListener(_onSyncingChanged);
-    _deviceManager.activeSessionId.addListener(_onActiveSessionChanged);
-    _btManager.deviceService.connectionStatus.addListener(_onConnectionChanged);
-    _reloadAll();
+    _load();
   }
 
   @override
   void dispose() {
     _deviceManager.syncCompletedTick.removeListener(_onSyncFinished);
     _deviceManager.isSyncing.removeListener(_onSyncingChanged);
-    _deviceManager.activeSessionId.removeListener(_onActiveSessionChanged);
-    _btManager.deviceService.connectionStatus.removeListener(
-      _onConnectionChanged,
-    );
     super.dispose();
   }
 
@@ -260,172 +189,94 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final tick = _deviceManager.syncCompletedTick.value;
     if (tick == _lastSyncTick) return;
     _lastSyncTick = tick;
-    Future<void>.delayed(const Duration(milliseconds: 400), _reloadAll);
-  }
-
-  void _onActiveSessionChanged() {
-    if (!mounted) return;
-    _loadSessionsOnly();
+    Future<void>.delayed(const Duration(milliseconds: 400), _load);
   }
 
   void _onSyncingChanged() {
-    if (!mounted) return;
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
-  void _onConnectionChanged() {
+  Future<void> _load() async {
     if (!mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _reloadAll() async {
-    if (!mounted || _isReloading) return;
-    _isReloading = true;
-    setState(() {
-      _isLoadingSessions = true;
-      _isLoadingStats = true;
-      _isLoadingToday = true;
-      _isLoadingDaily = true;
-      _isLoadingStreak = true;
-      _isLoadingHeatmap = true;
-      _showAllRecentSessions = false;
-    });
-    final results = await Future.wait([
-      _repo
-          .fetchByPeriod(
-            _periodKeys[_period],
-            liveSessionId: _deviceManager.activeSessionId.value,
-          )
-          .catchError((_) => <SessionData>[]),
-
-      _repo.fetchWeeklyStats().catchError((_) => null),
-
-      _repo.fetchDailyScores(7).catchError((_) => null),
-
-      _repo.fetchStreakStats().catchError((_) => null),
-
-      _repo.fetchHeatmapData().catchError((_) => null),
-
-      _repo.fetchTodayStats().catchError((_) => null),
-    ]);
-
-    if (!mounted) return;
-    setState(() {
-      _sessions = results[0] as List<SessionData>? ?? [];
-      _weeklyStats = results[1] as Map<String, dynamic>?;
-      _dailyScores = results[2] as List<double>?;
-      _streakStats = results[3] as StreakStats?;
-      _heatmapData = results[4] as List<int>?;
-      _todayStats = results[5] as TodayStats?;
-      _isLoadingHeatmap = false;
-
-      _isLoadingStreak = false;
-      _isLoadingSessions = false;
-      _isLoadingStats = false;
-      _isLoadingToday = false;
-      _isLoadingDaily = false;
-    });
-    _isReloading = false;
-  }
-
-  // Reloads only period-dependent data (sessions + weekly chart).
-  // Never touches _todayStats so the top score card stays stable.
-  Future<void> _reloadPeriodData() async {
-    if (!mounted) return;
-    setState(() {
-      _isLoadingSessions = true;
-      _isLoadingStats = true;
-    });
-    final results = await Future.wait([
-      _repo
-          .fetchByPeriod(
-            _periodKeys[_period],
-            liveSessionId: _deviceManager.activeSessionId.value,
-          )
-          .catchError((_) => <SessionData>[]),
-      _repo.fetchWeeklyStats().catchError((_) => null),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _sessions = results[0] as List<SessionData>? ?? [];
-      _weeklyStats = results[1] as Map<String, dynamic>?;
-      _isLoadingSessions = false;
-      _isLoadingStats = false;
-    });
-  }
-
-  Future<void> _loadSessionsOnly() async {
-    if (!mounted) return;
-    setState(() => _isLoadingSessions = true);
+    final seq = ++_loadSeq;
+    final n = _periodDays[_period];
+    final now = DateTime.now();
     try {
-      final rows = await _repo.fetchByPeriod(
-        _periodKeys[_period],
-        liveSessionId: _deviceManager.activeSessionId.value,
-      );
-      if (!mounted) return;
+      final results = await Future.wait([
+        _repo.fetchDailyProgress(n * 2),
+        _repo.fetchSessionsBetween(
+          DateTime(now.year, now.month, now.day - (n - 1)),
+          DateTime(now.year, now.month, now.day + 1),
+        ),
+        loadDailyScoreTarget(),
+      ]);
+      // Ignore results from a period the user already switched away from.
+      if (!mounted || seq != _loadSeq) return;
+      final days = results[0] as List<DailyProgress>;
       setState(() {
-        _sessions = rows;
-        _isLoadingSessions = false;
-        if (rows.length <= _recentSessionPreviewCount) {
-          _showAllRecentSessions = false;
-        }
+        _previous = days.sublist(0, n);
+        _current = days.sublist(n);
+        _insights = SlouchInsights.of(results[1] as List<SessionData>);
+        _target = results[2] as int;
       });
     } catch (e) {
-      if (!mounted) return;
+      debugPrint('Analytics load failed: $e');
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
-        _sessions = [];
-        _isLoadingSessions = false;
+        _previous = const [];
+        _current = const [];
+        _insights = SlouchInsights.of(const []);
       });
     }
   }
 
+  void _selectPeriod(int i) {
+    if (i == _period) return;
+    setState(() => _period = i);
+    _load();
+  }
+
+  void _openDay(DateTime day) => showDaySessionsSheet(context, day);
+
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final sessions = _sessions ?? const <SessionData>[];
-    final visibleSessions = _showAllRecentSessions
-        ? sessions
-        : sessions.take(_recentSessionPreviewCount).toList(growable: false);
-    final hiddenSessionCount = sessions.length - visibleSessions.length;
-    final isSyncing = _deviceManager.isSyncing.value;
+    final current = _current;
+    final previous = _previous;
+    final insights = _insights;
+    final loaded = current != null && previous != null && insights != null;
+    final summary = loaded ? PeriodSummary.of(current, _target) : null;
 
     return Scaffold(
-      backgroundColor: null,
       body: SafeArea(
-        bottom: true,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (isSyncing) _buildSyncingBanner(),
+            if (_deviceManager.isSyncing.value) _buildSyncingBanner(),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
                   children: [
                     _buildHeader(),
-                    _buildSummaryGrid(),
-                    const SizedBox(height: 22),
-                    _buildPeriodSelector(),
-                    const SizedBox(height: 20),
-                    RepaintBoundary(
-                      child: _DailyScoreTrendCard(
-                        goodData: _dailyScores,
-                        loading: _isLoadingDaily,
+                    const SizedBox(height: 16),
+                    if (!loaded)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 80),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        switchInCurve: Curves.easeOutCubic,
+                        child: KeyedSubtree(
+                          key: ValueKey(_period),
+                          child: summary!.hasData
+                              ? _buildContent(current, previous, insights, summary)
+                              : _buildEmptyState(),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    const RepaintBoundary(child: _AngleDeviationDayCard()),
-                    _sectionLabel('Weekly streak'),
-                    RepaintBoundary(child: _buildWeeklyStreak()),
-                    _sectionLabel('4-week habit'),
-                    RepaintBoundary(
-                      child: _HeatmapCard(
-                        heatmapData: _heatmapData ?? _kHeatmap,
-                      ),
-                    ),
                     const SizedBox(height: 8),
-                    _buildRecentSessionsSection(sessions),
+                    _buildAllSessionsLink(),
                   ],
                 ),
               ),
@@ -436,48 +287,137 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  Widget _buildRecentSessionsToggle(int hiddenSessionCount) {
+  Widget _buildHeader() {
     final scheme = Theme.of(context).colorScheme;
-    final label = _showAllRecentSessions
-        ? 'Show less'
-        : 'View all $hiddenSessionCount more';
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: SizedBox(
-        width: double.infinity,
-        child: OutlinedButton(
+    return Row(
+      children: [
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.arrow_back_rounded, color: scheme.onSurfaceVariant),
           onPressed: () {
-            setState(() => _showAllRecentSessions = !_showAllRecentSessions);
+            if (widget.onBack != null) {
+              widget.onBack!();
+            } else {
+              Navigator.of(context).pop();
+            }
           },
-          style: OutlinedButton.styleFrom(
-            foregroundColor: _kBlue,
-            side: BorderSide(color: _kBlue.withValues(alpha: 0.22)),
-            backgroundColor: scheme.surface,
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label),
-              const SizedBox(width: 6),
-              Icon(
-                _showAllRecentSessions
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 18,
-              ),
-            ],
+        ),
+        const SizedBox(width: 4),
+        const Expanded(
+          child: Text(
+            'Your posture',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
           ),
         ),
+        PeriodChips(
+          labels: _periodLabels,
+          selected: _period,
+          onChanged: _selectPeriod,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContent(
+    List<DailyProgress> current,
+    List<DailyProgress> previous,
+    SlouchInsights insights,
+    PeriodSummary summary,
+  ) {
+    return Column(
+      children: [
+        AnalyticsHeroCard(
+          current: summary,
+          previous: PeriodSummary.of(previous, _target),
+          previousLabel: _previousLabels[_period],
+        ),
+        const SizedBox(height: 16),
+        AnalyticsSection(
+          title: 'Score trend',
+          subtitle: 'Tap a day to see its sessions',
+          child: ScoreTrendChart(
+            days: current,
+            target: _target,
+            onDayTap: _openDay,
+          ),
+        ),
+        const SizedBox(height: 16),
+        AnalyticsSection(
+          title: 'When do you slouch?',
+          subtitle: insights.total == 0
+              ? 'No slouches recorded in this period 🎉'
+              : '${insights.total} slouches by time of day',
+          child: insights.total == 0
+              ? const SizedBox.shrink()
+              : SlouchHoursChart(insights: insights),
+        ),
+        const SizedBox(height: 16),
+        AnalyticsSection(
+          title: 'Highlights',
+          child: HighlightsList(
+            days: current,
+            summary: summary,
+            insights: insights,
+            onDayTap: _openDay,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    final muted = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
+    return AnalyticsSection(
+      title: 'No data yet',
+      child: Column(
+        children: [
+          const Text('📈', style: TextStyle(fontSize: 48)),
+          const SizedBox(height: 8),
+          Text(
+            'Wear your pod for a posture session and your insights will show up here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, height: 1.4),
+          ),
+          if (widget.onBack != null) ...[
+            const SizedBox(height: 16),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [kAnalyticsPurple, kAnalyticsPink],
+                ),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+              ),
+              child: TextButton(
+                onPressed: widget.onBack,
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+                child: const Text(
+                  'Start a session',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAllSessionsLink() {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: const Icon(Icons.history_rounded),
+      title: const Text(
+        'All sessions',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(builder: (_) => const SessionsHistoryPage()),
       ),
     );
   }
@@ -485,16 +425,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget _buildSyncingBanner() {
     return Container(
       width: double.infinity,
-      color: _kBlueLight,
+      color: kAnalyticsPurple.withValues(alpha: 0.1),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-      child: Row(
-        children: const [
+      child: const Row(
+        children: [
           SizedBox(
             width: 12,
             height: 12,
             child: CircularProgressIndicator(
               strokeWidth: 1.8,
-              valueColor: AlwaysStoppedAnimation<Color>(_kBlue),
+              valueColor: AlwaysStoppedAnimation<Color>(kAnalyticsPurple),
             ),
           ),
           SizedBox(width: 10),
@@ -503,1467 +443,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: _kBlue,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: _kBlue.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const Icon(Icons.history_rounded, size: 18, color: _kBlue),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'No sessions yet',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Start a posture or therapy session and it shows up here.',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: scheme.onSurfaceVariant,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Recent Sessions Section ──────────────────────────────────────────────────
-
-  Widget _buildRecentSessionsSection(List<SessionData> sessions) {
-    final scheme = Theme.of(context).colorScheme;
-    final liveSessions = sessions.where((s) => s.isLive).toList();
-    final finishedSessions = sessions.where((s) => !s.isLive).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Recent Sessions',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                color: scheme.onSurface,
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => const SessionsHistoryPage(),
-                ),
-              ),
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                minimumSize: const Size(0, 0),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                foregroundColor: _kBlue,
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              child: const Row(
-                children: [
-                  Text('View All'),
-                  SizedBox(width: 4),
-                  Icon(Icons.chevron_right, size: 16),
-                ],
-              ),
-            ),
-          ],
-        ),
-
-        if (_isDeviceDisconnected) ...[
-          const SizedBox(height: 12),
-          _AnalyticsDisconnectedBanner(
-            isReconnecting: _isDeviceConnecting,
-            onSyncNow: () {
-              final device = _btManager.deviceService.device;
-              if (device != null) {
-                _deviceManager.isSyncing.value = true;
-              }
-            },
-          ),
-        ],
-
-        const SizedBox(height: 12),
-
-        if (_isLoadingSessions && sessions.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
-            child: LinearProgressIndicator(minHeight: 3),
-          )
-        else if (sessions.isEmpty)
-          _buildEmptyState()
-        else ...[
-          for (final live in liveSessions) ...[
-            RepaintBoundary(
-              child: _AnalyticsLiveSessionRow(
-                session: live,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SessionDetailScreen(session: live),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          for (
-            var i = 0;
-            i < finishedSessions.length && (liveSessions.length + i) < 5;
-            i++
-          ) ...[
-            RepaintBoundary(
-              child: _AnalyticsSessionItem(
-                session: finishedSessions[i],
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        SessionDetailScreen(session: finishedSessions[i]),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ],
-      ],
-    );
-  }
-
-  // ── Header ──────────────────────────────────────────────────────────────────
-
-  Widget _buildHeader() {
-    final scheme = Theme.of(context).colorScheme;
-    final score = _todayScoreText();
-    final delta = _todayDeltaText();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              if (widget.onBack != null) {
-                widget.onBack!();
-              } else {
-                Navigator.of(context).pop();
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: Icon(
-                Icons.arrow_back_rounded,
-                size: 24,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const Text(
-            'Analytics & Insights',
-            style: TextStyle(
-              fontSize: 25,
-              fontWeight: FontWeight.w400,
-              color: _kBlue,
-              letterSpacing: -0.7,
-              height: 1.08,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Track your posture progress',
-            style: TextStyle(
-              fontSize: 14,
-              color: scheme.onSurfaceVariant,
-              height: 1.2,
-            ),
-          ),
-          const SizedBox(height: 30),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(21, 24, 21, 22),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF2F7BFF), Color(0xFF08B4CB)],
-              ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x2A0EA5E9),
-                  blurRadius: 18,
-                  offset: Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Today’s Posture Score',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w400,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        score,
-                        style: const TextStyle(
-                          fontSize: 42,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w300,
-                          height: 0.95,
-                          letterSpacing: -1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.trending_up_rounded,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 7),
-                          Text(
-                            delta,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w400,
-                              height: 1,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.workspace_premium_outlined,
-                    size: 31,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Summary grid ────────────────────────────────────────────────────────────
-
-  Widget _buildSummaryGrid() {
-    final today = _todayStats;
-    final goodValue = today != null ? _formatSec(today.todayGoodSec) : '—';
-    final poorValue = today != null ? _formatSec(today.todayWrongDurSec) : '—';
-
-    return Row(
-      children: [
-        Expanded(
-          child: _StatCard(
-            value: goodValue,
-            label: 'Good Posture',
-            icon: Icons.trending_up_rounded,
-            iconColor: _kGreen,
-            iconBg: const Color(0xFFD8F8E3),
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _StatCard(
-            value: poorValue,
-            label: 'Poor Posture',
-            icon: Icons.access_time_rounded,
-            iconColor: _kRed,
-            iconBg: const Color(0xFFFFD9DC),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPeriodSelector() {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      children: List.generate(_periodLabels.length, (i) {
-        final active = _period == i;
-        return Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(right: i == 0 ? 10 : 0),
-            child: GestureDetector(
-              onTap: () {
-                if (_period == i) return;
-                setState(() => _period = i);
-                _reloadPeriodData();
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
-                height: 37,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: active ? const Color(0xFF2F7BFF) : scheme.surface,
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(
-                    color: active ? const Color(0xFF2F7BFF) : scheme.outline,
-                    width: 1,
-                  ),
-                  boxShadow: active
-                      ? const [
-                          BoxShadow(
-                            color: Color(0x262F7BFF),
-                            blurRadius: 10,
-                            offset: Offset(0, 5),
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Text(
-                  _periodLabels[i],
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: active ? Colors.white : scheme.onSurface,
-                    height: 1,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      }),
-    );
-  }
-
-  Widget _buildWeeklyStreak() {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 15),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Color(0x08000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(_kDays.length, (i) {
-              final streak = _streakStats?.currentStreak ?? 0;
-              final todayIndex = DateTime.now().weekday - 1; // Mon=0, Sun=6
-              final isComplete = i <= todayIndex && i > todayIndex - streak;
-
-              return _StreakDayBadge(day: _kDays[i], isComplete: isComplete);
-            }),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: _kDays
-                .map(
-                  (day) => SizedBox(
-                    width: 32,
-                    child: Text(
-                      day,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF9AA0AA),
-                        fontWeight: FontWeight.w500,
-                        height: 1,
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            '${_streakStats?.currentStreak ?? 0} consecutive days — keep it up!',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF9AA0AA),
-              fontWeight: FontWeight.w400,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Today-specific helpers — never change when toggling Weekly/Monthly.
-  String _todayScoreText() {
-    if (_isLoadingToday || _todayStats == null) return '—';
-    return _todayStats!.todayPct.toString();
-  }
-
-  String _todayDeltaText() {
-    if (_isLoadingToday || _todayStats == null) return '';
-    final today = _todayStats!;
-    if (!today.yesterdayHasPostureData) return 'No data from yesterday';
-    final delta = today.todayPct - today.yesterdayPct;
-    if (delta == 0) return 'No change from yesterday';
-    final sign = delta > 0 ? '+' : '';
-    return '$sign$delta% from yesterday';
-  }
-
-  String _scoreText(Map<String, dynamic>? stats) {
-    if (_isLoadingStats || stats == null) return '87';
-    return _scoreNumber(stats, fallback: 87).round().toString();
-  }
-
-  double _scoreNumber(Map<String, dynamic>? stats, {required double fallback}) {
-    if (_isLoadingStats || stats == null) return fallback;
-    final value = stats['goodPosturePct'];
-    if (value is num) return value.toDouble().clamp(0, 100).toDouble();
-    return (double.tryParse(value?.toString() ?? '') ?? fallback)
-        .clamp(0, 100)
-        .toDouble();
-  }
-
-  String _deltaText(Map<String, dynamic>? stats) {
-    if (_isLoadingStats || stats == null) return '+5% from yesterday';
-    final deltas = (stats['deltaVsLastWeek'] as Map?) ?? const {};
-    final raw = deltas['goodPosturePct'];
-    final delta = raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0;
-    if (delta == 0) return 'No change from yesterday';
-    final sign = delta > 0 ? '+' : '-';
-    return '$sign${delta.abs().round()}% from yesterday';
-  }
-
-  double _hoursValue(Object? value, {required double fallback}) {
-    if (_isLoadingStats || value == null) return fallback;
-    if (value is num) return value.toDouble();
-    return double.tryParse(value.toString().replaceAll('h', '')) ?? fallback;
-  }
-
-  String _formatHours(double value) => '${value.toStringAsFixed(1)}h';
-
-  String _formatSec(int sec) =>
-      sec >= 3600 ? _formatHours(sec / 3600.0) : '${sec ~/ 60}m';
-
-  // ── Section label ───────────────────────────────────────────────────────────
-
-  Widget _sectionLabel(String text) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 10, left: 2),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: scheme.onSurfaceVariant,
-          letterSpacing: 1.0,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Stat Card ───────────────────────────────────────────────────────────────
-
-class _StatCard extends StatelessWidget {
-  final String value, label;
-  final IconData icon;
-  final Color iconColor, iconBg;
-
-  const _StatCard({
-    required this.value,
-    required this.label,
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      height: 136,
-      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Color(0x08000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconBg,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: iconColor),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w400,
-                  color: scheme.onSurface,
-                  height: 1.05,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: scheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w400,
-                  height: 1.1,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StreakDayBadge extends StatelessWidget {
-  final String day;
-  final bool isComplete;
-
-  const _StreakDayBadge({required this.day, required this.isComplete});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: 32,
-      height: 32,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: isComplete ? const Color(0xFF5046C7) : scheme.surface,
-        shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFF5046C7), width: 1.1),
-      ),
-      child: isComplete
-          ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
-          : Text(
-              day,
-              style: const TextStyle(
-                fontSize: 11,
-                color: Color(0xFF5046C7),
-                fontWeight: FontWeight.w600,
-                height: 1,
-              ),
-            ),
-    );
-  }
-}
-
-// ─── Daily Score Trend Card ───────────────────────────────────────────────────
-
-class _DailyScoreTrendCard extends StatefulWidget {
-  const _DailyScoreTrendCard({this.goodData, this.loading = false});
-
-  /// Seven values (Mon..Sun) of good-posture %, 0..100.
-  final List<double>? goodData;
-  final bool loading;
-
-  @override
-  State<_DailyScoreTrendCard> createState() => _DailyScoreTrendCardState();
-}
-
-class _DailyScoreTrendCardState extends State<_DailyScoreTrendCard>
-    with SingleTickerProviderStateMixin {
-  static const _fallback = [88.0, 94.0, 96.0, 74.0, 98.0, 92.0, 72.0];
-
-  late final AnimationController _ctrl;
-  late final Animation<double> _anim;
-
-  List<double> get _values {
-    if (widget.loading) return _fallback;
-    final values = List<double>.filled(7, 0);
-    if (widget.goodData != null) {
-      for (var i = 0; i < 7 && i < widget.goodData!.length; i++) {
-        values[i] = widget.goodData![i].clamp(0, 100).toDouble();
-      }
-    }
-    return values.any((v) => v > 0) ? values : _fallback;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _ctrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(22, 24, 22, 26),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Color(0x08000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Daily Score Trend',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurface,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 20),
-          AnimatedBuilder(
-            animation: _anim,
-            builder: (context, _) {
-              return SizedBox(
-                height: 154,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(
-                      width: 30,
-                      height: 126,
-                      child: _ScoreAxisLabels(),
-                    ),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            height: 126,
-                            child: CustomPaint(
-                              size: Size.infinite,
-                              painter: _ScoreTrendPainter(
-                                _values,
-                                progress: _anim.value,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: const [
-                              _ScoreDayLabel('Mon'),
-                              _ScoreDayLabel('Tue'),
-                              _ScoreDayLabel('Wed'),
-                              _ScoreDayLabel('Thu'),
-                              _ScoreDayLabel('Fri'),
-                              _ScoreDayLabel('Sat'),
-                              _ScoreDayLabel('Sun'),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Angle deviation throughout day (demo series) ────────────────────────────
-
-class _AngleDeviationDayCard extends StatefulWidget {
-  const _AngleDeviationDayCard();
-
-  @override
-  State<_AngleDeviationDayCard> createState() => _AngleDeviationDayCardState();
-}
-
-class _AngleDeviationDayCardState extends State<_AngleDeviationDayCard>
-    with SingleTickerProviderStateMixin {
-  static const _fallback = [75.0, 82.0, 78.0, 85.0, 93.0, 88.0, 80.0];
-  static const _plotHeight = 132.0;
-  static const _windows = [1, 6, 24];
-  static const _windowLabels = ['1h', '6h', '24h'];
-
-  final _angleService = AngleHistoryService();
-  List<double> _values = _fallback;
-  List<String> _xLabels = ['', '', '', '', '', '', ''];
-  double _avgDeviation = 0;
-  double _maxDeviation = 0;
-  bool _hasRealData = false;
-  int _selectedWindow = 1; // index into _windows
-
-  late final AnimationController _ctrl;
-  late final Animation<double> _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _refresh();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _refresh() {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId != null) _angleService.syncToSupabase(userId);
-    final hours = _windows[_selectedWindow];
-    final hasReal = _angleService.hasDataForLastHours(hours);
-    setState(() {
-      _values = hasReal ? _angleService.deviationsForLastHours(hours) : _fallback;
-      _xLabels = _angleService.labelsForLastHours(hours);
-      _hasRealData = hasReal;
-      _avgDeviation = _angleService.averageDeviationForLastHours(hours);
-      _maxDeviation = _angleService.maxDeviationForLastHours(hours);
-    });
-    _ctrl..reset()..forward();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-          BoxShadow(
-            color: Color(0x08000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Angle Deviation',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: scheme.onSurface,
-                    height: 1,
-                  ),
-                ),
-              ),
-              for (var i = 0; i < _windowLabels.length; i++) ...[
-                GestureDetector(
-                  onTap: () {
-                    if (_selectedWindow == i) return;
-                    setState(() => _selectedWindow = i);
-                    _refresh();
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _selectedWindow == i
-                          ? _kAngleChartPurple.withValues(alpha: 0.15)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      _windowLabels[i],
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: _selectedWindow == i
-                            ? _kAngleChartPurple
-                            : const Color(0xFF98A2B3),
-                      ),
-                    ),
-                  ),
-                ),
-                if (i < _windowLabels.length - 1) const SizedBox(width: 2),
-              ],
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 36,
-                height: _plotHeight,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(top: 0, right: 4, child: _angleYLabel('100')),
-                    Positioned(
-                      top: _plotHeight * 0.5 - 7,
-                      right: 4,
-                      child: _angleYLabel('80'),
-                    ),
-                    Positioned(
-                      top: _plotHeight * 0.75 - 7,
-                      right: 4,
-                      child: _angleYLabel('70'),
-                    ),
-                    Positioned(
-                      top: _plotHeight - 14,
-                      right: 4,
-                      child: _angleYLabel('60'),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    AnimatedBuilder(
-                      animation: _anim,
-                      builder: (context, _) {
-                        return SizedBox(
-                          height: _plotHeight,
-                          child: CustomPaint(
-                            painter: _AngleDeviationDayPainter(
-                              values: _values,
-                              lineColor: _kAngleChartPurple,
-                              progress: _anim.value,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        for (var i = 0; i < _xLabels.length; i++)
-                          Expanded(
-                            child: Text(
-                              _xLabels[i],
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: _xLabels[i].isEmpty
-                                    ? Colors.transparent
-                                    : const Color(0xFF98A2B3),
-                                height: 1,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-            decoration: BoxDecoration(
-              color: _kAngleInsightBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.lightbulb_rounded,
-                  size: 22,
-                  color: Colors.amber.shade600,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _hasRealData
-                        ? 'Avg deviation today: ${_avgDeviation.toStringAsFixed(1)}°  •  Max: ${_maxDeviation.toStringAsFixed(1)}°  •  Ref angle: ${_angleService.referenceAngle.toStringAsFixed(1)}°'
-                        : 'Your posture tends to worsen in the afternoon. Consider setting more frequent reminders during 2-6 PM.',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: _kAngleInsightText,
-                      height: 1.45,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static Widget _angleYLabel(String text) => Text(
-    text,
-    style: const TextStyle(
-      fontSize: 12,
-      color: Color(0xFF98A2B3),
-      height: 1,
-      fontWeight: FontWeight.w500,
-    ),
-  );
-}
-
-class _AngleDeviationDayPainter extends CustomPainter {
-  _AngleDeviationDayPainter({
-    required this.values,
-    required this.lineColor,
-    this.progress = 1.0,
-  });
-
-  final List<double> values;
-  final Color lineColor;
-  final double progress;
-
-  static const _yMin = 60.0;
-  static const _yMax = 100.0;
-
-  static final _gridPaint = Paint()
-    ..color = const Color(0xFFE3EAF3)
-    ..strokeWidth = 1
-    ..style = PaintingStyle.stroke;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final h = size.height;
-    final w = size.width;
-
-    // Solid grid lines — no dashes
-    for (final v in [60.0, 70.0, 80.0, 100.0]) {
-      final y = _yForValue(v, h);
-      canvas.drawLine(Offset(0, y), Offset(w, y), _gridPaint);
-    }
-    for (var i = 0; i < values.length; i++) {
-      final x = w * (i / (values.length - 1));
-      canvas.drawLine(Offset(x, 0), Offset(x, h), _gridPaint);
-    }
-
-    final pts = List<Offset>.generate(values.length, (i) {
-      final x = w * (i / (values.length - 1));
-      final clamped = values[i].clamp(_yMin, _yMax);
-      final y = _yForValue(clamped.toDouble(), h);
-      return Offset(x, y);
-    });
-
-    final clipWidth = w * progress;
-    canvas.save();
-    canvas.clipRect(Rect.fromLTWH(0, 0, clipWidth, h));
-
-    final linePath = _smoothPath(pts);
-    final linePaint = Paint()
-      ..color = lineColor
-      ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-    canvas.drawPath(linePath, linePaint);
-
-    // Dots — only draw points that fall within the clipped region
-    final fill = Paint()..color = lineColor;
-    final ring = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-    for (final p in pts) {
-      if (p.dx <= clipWidth) {
-        canvas.drawCircle(p, 5, fill);
-        canvas.drawCircle(p, 5, ring);
-      }
-    }
-
-    canvas.restore();
-  }
-
-  double _yForValue(double v, double h) {
-    final t = (v - _yMin) / (_yMax - _yMin);
-    return h * (1 - t);
-  }
-
-  Path _smoothPath(List<Offset> points) {
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (var i = 0; i < points.length - 1; i++) {
-      final current = points[i];
-      final next = points[i + 1];
-      final midX = (current.dx + next.dx) / 2;
-      path.cubicTo(midX, current.dy, midX, next.dy, next.dx, next.dy);
-    }
-    return path;
-  }
-
-  @override
-  bool shouldRepaint(covariant _AngleDeviationDayPainter oldDelegate) {
-    if (oldDelegate.progress != progress) return true;
-    if (oldDelegate.lineColor != lineColor) return true;
-    if (oldDelegate.values.length != values.length) return true;
-    for (int i = 0; i < values.length; i++) {
-      if (oldDelegate.values[i] != values[i]) return true;
-    }
-    return false;
-  }
-}
-
-class _ScoreAxisLabels extends StatelessWidget {
-  const _ScoreAxisLabels();
-
-  @override
-  Widget build(BuildContext context) => const Stack(
-    children: [
-      Positioned(top: 0, right: 6, child: _AxisLabel('100')),
-      Positioned(top: 56, right: 6, child: _AxisLabel('50')),
-      Positioned(top: 86, right: 6, child: _AxisLabel('25')),
-      Positioned(bottom: 0, right: 6, child: _AxisLabel('0')),
-    ],
-  );
-}
-
-class _AxisLabel extends StatelessWidget {
-  final String label;
-
-  const _AxisLabel(this.label);
-
-  @override
-  Widget build(BuildContext context) => Text(
-    label,
-    style: const TextStyle(fontSize: 13, color: Color(0xFF98A2B3), height: 1),
-  );
-}
-
-class _ScoreDayLabel extends StatelessWidget {
-  final String label;
-
-  const _ScoreDayLabel(this.label);
-
-  @override
-  Widget build(BuildContext context) => Text(
-    label,
-    style: const TextStyle(fontSize: 14, color: Color(0xFF98A2B3), height: 1),
-  );
-}
-
-class _ScoreTrendPainter extends CustomPainter {
-  final List<double> values;
-  final double progress;
-
-  _ScoreTrendPainter(this.values, {this.progress = 1.0});
-
-  static final _gridPaint = Paint()
-    ..color = const Color(0xFFE3EAF3)
-    ..strokeWidth = 1
-    ..style = PaintingStyle.stroke;
-
-  static final _linePaint = Paint()
-    ..color = const Color(0xFF3B82F6)
-    ..strokeWidth = 2.4
-    ..strokeCap = StrokeCap.round
-    ..strokeJoin = StrokeJoin.round
-    ..style = PaintingStyle.stroke;
-
-  static final _areaPaint = Paint()
-    ..color = const Color(0x333B82F6)
-    ..style = PaintingStyle.fill;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Grid lines — simple solid, no dashes
-    for (final pct in [0.0, 0.25, 0.5, 0.75, 1.0]) {
-      final y = size.height * pct;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), _gridPaint);
-    }
-    for (var i = 0; i < 7; i++) {
-      final x = size.width * (i / 6);
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), _gridPaint);
-    }
-
-    if (values.isEmpty) return;
-
-    final points = List<Offset>.generate(values.length, (i) {
-      final x = size.width * (i / (values.length - 1));
-      final y = size.height * (1 - values[i].clamp(0, 100) / 100);
-      return Offset(x, y);
-    });
-
-    final clipWidth = size.width * progress;
-    canvas.save();
-    canvas.clipRect(Rect.fromLTWH(0, 0, clipWidth, size.height));
-
-    final linePath = _smoothPath(points);
-    final areaPath = Path.from(linePath)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-
-    canvas.drawPath(areaPath, _areaPaint);
-    canvas.drawPath(linePath, _linePaint);
-
-    canvas.restore();
-  }
-
-  Path _smoothPath(List<Offset> points) {
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (var i = 0; i < points.length - 1; i++) {
-      final current = points[i];
-      final next = points[i + 1];
-      final midX = (current.dx + next.dx) / 2;
-      path.cubicTo(midX, current.dy, midX, next.dy, next.dx, next.dy);
-    }
-    return path;
-  }
-
-  @override
-  bool shouldRepaint(covariant _ScoreTrendPainter oldDelegate) {
-    if (oldDelegate.progress != progress) return true;
-    if (oldDelegate.values.length != values.length) return true;
-    for (int i = 0; i < values.length; i++) {
-      if (oldDelegate.values[i] != values[i]) return true;
-    }
-    return false;
-  }
-}
-
-// ─── Heatmap Card ─────────────────────────────────────────────────────────────
-
-class _HeatmapCard extends StatelessWidget {
-  final List<int> heatmapData;
-
-  const _HeatmapCard({required this.heatmapData});
-
-  static const _heatColors = [
-    Color(0xFFF3F4F6), // 0 – none
-    Color(0xFFBFDBFE), // 1 – low
-    Color(0xFF60A5FA), // 2 – medium
-    Color(0xFF2563EB), // 3 – high
-    Color(0xFF1D4ED8), // 4 – max
-  ];
-
-  Color _cell(int v) => _heatColors[v.clamp(0, 4)];
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-      margin: const EdgeInsets.only(bottom: 2),
-      decoration: _cardDecoration(scheme),
-      child: Column(
-        children: [
-          // Day-of-week header
-          Row(
-            children: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-                .map(
-                  (d) => Expanded(
-                    child: Center(
-                      child: Text(
-                        d,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: scheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 6),
-          // Grid — aspect ratio 1 keeps cells square
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final cellSize = (constraints.maxWidth - 6 * 4) / 7;
-              return Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: List.generate(
-                  heatmapData.length,
-                  (i) => SizedBox(
-                    width: cellSize,
-                    height: cellSize,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: _cell(heatmapData[i]),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 10),
-          // Legend
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text(
-                'less',
-                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(width: 5),
-              ...[
-                Color(0xFFF3F4F6),
-                Color(0xFFBFDBFE),
-                Color(0xFF2563EB),
-                Color(0xFF1D4ED8),
-              ].map(
-                (c) => Padding(
-                  padding: const EdgeInsets.only(left: 3),
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: c,
-                      borderRadius: BorderRadius.circular(3),
-                      border: c == const Color(0xFFF3F4F6)
-                          ? Border.all(color: scheme.outline, width: 0.5)
-                          : null,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text(
-                'more',
-                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Analytics Disconnected Banner ─────────────────────────────────────────
-
-class _AnalyticsDisconnectedBanner extends StatelessWidget {
-  final bool isReconnecting;
-  final VoidCallback onSyncNow;
-
-  const _AnalyticsDisconnectedBanner({
-    required this.isReconnecting,
-    required this.onSyncNow,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7E6),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFE2A8)),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.bluetooth_disabled_rounded,
-            size: 18,
-            color: Color(0xFFB45309),
-          ),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Device disconnected',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: Color(0xFF92400E),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                SizedBox(height: 1),
-                Text(
-                  'Sessions are still being saved on the pod. '
-                  'Sync to pull them in.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFFB45309),
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: isReconnecting ? null : onSyncNow,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: isReconnecting
-                    ? const Color(0xFFFFE2A8)
-                    : const Color(0xFFB45309),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isReconnecting) ...[
-                    const SizedBox(
-                      width: 11,
-                      height: 11,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.6,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          Color(0xFFB45309),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                  ] else ...[
-                    const Icon(
-                      Icons.sync_rounded,
-                      size: 13,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(width: 5),
-                  ],
-                  Text(
-                    isReconnecting ? 'Syncing' : 'Sync now',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: isReconnecting
-                          ? const Color(0xFFB45309)
-                          : Colors.white,
-                    ),
-                  ),
-                ],
-              ),
+              color: kAnalyticsPurple,
             ),
           ),
         ],
@@ -1972,424 +452,6 @@ class _AnalyticsDisconnectedBanner extends StatelessWidget {
   }
 }
 
-// ─── Analytics Live Session Row ─────────────────────────────────────────
-
-class _AnalyticsLiveSessionRow extends StatelessWidget {
-  final SessionData session;
-  final VoidCallback onTap;
-
-  const _AnalyticsLiveSessionRow({required this.session, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isPosture = session.type == SessionType.posture;
-    final modeGradient = isPosture
-        ? AppTheme.goodPostureGradient
-        : AppTheme.vibrationTherapyGradient;
-    final accent = isPosture
-        ? AppTheme.goodPostureStart
-        : const Color(0xFF60A5FA);
-    final patternName = session.pattern == null
-        ? null
-        : therapyPatternName(session.pattern!);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(13),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                accent.withValues(alpha: 0.10),
-                accent.withValues(alpha: 0.03),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(color: accent.withValues(alpha: 0.30)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: modeGradient.colors,
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  isPosture
-                      ? Icons.accessibility_new_rounded
-                      : Icons.graphic_eq,
-                  size: 19,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            session.name,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onSurface,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const _AnalyticsLivePill(),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      session.duration == '0s'
-                          ? 'Just started · live now'
-                          : 'In progress · ${session.duration}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (isPosture && session.score != null)
-                Text(
-                  '${session.score}%',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: accent,
-                    letterSpacing: -0.4,
-                  ),
-                )
-              else if (!isPosture && patternName != null)
-                Text(
-                  patternName,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: accent,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Analytics Session Item ───────────────────────────────────────────────
-
-class _AnalyticsSessionItem extends StatelessWidget {
-  final SessionData session;
-  final VoidCallback onTap;
-
-  const _AnalyticsSessionItem({required this.session, required this.onTap});
-
-  static const _kItemBlue = AppTheme.brandPrimary;
-
-  @override
-  Widget build(BuildContext context) {
-    final isPosture = session.type == SessionType.posture;
-    final postureEventCount = session.postureEvents?.length ?? session.alerts;
-    final correctionCount = session.postureEvents
-        ?.where((event) => event.wasCorrected)
-        .length;
-    final playedTherapyEvents = session.therapyPatternEvents
-        ?.where((event) => event.durationSec > 0)
-        .toList(growable: false);
-    final therapyPatternCount =
-        playedTherapyEvents?.length ??
-        session.therapyPatterns?.length ??
-        (session.pattern == null ? null : 1);
-    final lastPatternIndex =
-        playedTherapyEvents?.lastOrNull?.patternIndex ??
-        session.therapyPatternEvents?.lastOrNull?.patternIndex ??
-        session.therapyPatterns?.lastOrNull ??
-        session.pattern;
-    final lastPatternName = lastPatternIndex == null
-        ? null
-        : therapyPatternName(lastPatternIndex);
-
-    final scheme = Theme.of(context).colorScheme;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(13, 13, 10, 13),
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: scheme.outline, width: 0.5),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 18,
-              offset: Offset(0, 8),
-            ),
-            BoxShadow(
-              color: Color(0x08000000),
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isPosture
-                      ? AppTheme.goodPostureGradient.colors
-                      : AppTheme.vibrationTherapyGradient.colors,
-                ),
-                borderRadius: BorderRadius.circular(13),
-              ),
-              child: Icon(
-                isPosture ? Icons.accessibility_new_rounded : Icons.graphic_eq,
-                color: Colors.white,
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          session.name,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurface,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (session.isLive) ...[
-                        const SizedBox(width: 6),
-                        const _AnalyticsLivePill(),
-                      ],
-                      if (!session.cloudSynced && !session.isLive)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 6),
-                          child: Icon(
-                            Icons.cloud_off_rounded,
-                            size: 13,
-                            color: Color(0xFF94A3B8),
-                          ),
-                        ),
-                      const SizedBox(width: 8),
-                      Text(
-                        session.time,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 7),
-                  Wrap(
-                    spacing: 14,
-                    runSpacing: 6,
-                    children: [
-                      _AnalyticsMiniStat(
-                        value: session.duration,
-                        label: 'Duration',
-                      ),
-                      if (isPosture && postureEventCount != null)
-                        _AnalyticsMiniStat(
-                          value: '$postureEventCount',
-                          label: 'Slouches',
-                        ),
-                      if (isPosture && correctionCount != null)
-                        _AnalyticsMiniStat(
-                          value: '$correctionCount',
-                          label: 'Corrected',
-                        ),
-                      if (isPosture && (session.wrongDurSec ?? 0) > 0)
-                        _AnalyticsMiniStat(
-                          value: _formatCompactDuration(session.wrongDurSec!),
-                          label: 'Bad time',
-                        ),
-                      if (!isPosture && therapyPatternCount != null)
-                        _AnalyticsMiniStat(
-                          value: '$therapyPatternCount',
-                          label: 'Patterns',
-                        ),
-                      if (!isPosture && lastPatternName != null)
-                        _AnalyticsMiniStat(
-                          value: lastPatternName,
-                          label: 'Last pattern',
-                        ),
-                    ],
-                  ),
-                  if (session.score != null) ...[
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: session.score! / 100,
-                        backgroundColor: const Color(0xFFEEEEF8),
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          _kItemBlue,
-                        ),
-                        minHeight: 3.5,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 4),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: Color(0xFFCCCCDD),
-              size: 20,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static String _formatCompactDuration(int seconds) {
-    if (seconds < 60) return '${seconds}s';
-    final minutes = seconds ~/ 60;
-    final rem = seconds % 60;
-    return rem == 0 ? '${minutes}m' : '${minutes}m ${rem}s';
-  }
-}
-
-// ─── Analytics Mini Stat ─────────────────────────────────────────────────────
-
-class _AnalyticsMiniStat extends StatelessWidget {
-  final String value, label;
-
-  const _AnalyticsMiniStat({required this.value, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurface,
-            height: 1.2,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            color: scheme.onSurfaceVariant,
-            height: 1.3,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Analytics Live Pill ─────────────────────────────────────────────────────
-
-class _AnalyticsLivePill extends StatefulWidget {
-  const _AnalyticsLivePill();
-
-  @override
-  State<_AnalyticsLivePill> createState() => _AnalyticsLivePillState();
-}
-
-class _AnalyticsLivePillState extends State<_AnalyticsLivePill>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: _kRed.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _kRed.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedBuilder(
-            animation: _ctrl,
-            builder: (_, _) => Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: _kRed.withValues(alpha: 0.55 + 0.45 * _ctrl.value),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          const SizedBox(width: 5),
-          const Text(
-            'LIVE',
-            style: TextStyle(
-              color: _kRed,
-              fontSize: 9.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─── Session Detail Screen ────────────────────────────────────────────────────
 

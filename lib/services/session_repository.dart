@@ -115,21 +115,39 @@ class SessionRepository {
   /// midnight-based like [fetchTodayStats].
   Future<List<DailyProgress>> fetchDailyProgress(int days) async {
     final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
-    final result = <DailyProgress>[];
-    for (var i = days - 1; i >= 0; i--) {
-      final start = DateTime(todayStart.year, todayStart.month, todayStart.day - i);
-      final end = DateTime(start.year, start.month, start.day + 1);
-      final day = _summarizeDay(await _fetchRowsBetween(start, end));
-      result.add(DailyProgress(
-        date: start,
-        score: day.posturePct,
-        slouchCount: day.slouchCount,
-        postureSec: day.postureDurationSec,
-      ));
+    final first = DateTime(now.year, now.month, now.day - (days - 1));
+    final end = DateTime(now.year, now.month, now.day + 1);
+    // One query for the whole range, then bucket rows by local day.
+    final byDay = <int, List<Map<String, dynamic>>>{};
+    for (final row in await _fetchRowsBetween(first, end)) {
+      final ts = _parseTs(row['start_ts'])?.toLocal();
+      if (ts == null) continue;
+      final key = DateTime(ts.year, ts.month, ts.day)
+          .difference(first)
+          .inDays;
+      (byDay[key] ??= []).add(row);
     }
-    return result;
+    return [
+      for (var i = 0; i < days; i++)
+        () {
+          final day = _summarizeDay(byDay[i] ?? const []);
+          return DailyProgress(
+            date: DateTime(first.year, first.month, first.day + i),
+            score: day.posturePct,
+            slouchCount: day.slouchCount,
+            postureSec: day.postureDurationSec,
+            wrongDurSec: day.wrongDurSec,
+          );
+        }(),
+    ];
   }
+
+  /// Sessions that started in [start, endExclusive), newest first.
+  Future<List<SessionData>> fetchSessionsBetween(
+    DateTime start,
+    DateTime endExclusive,
+  ) async =>
+      _mapRows(await _fetchRowsBetween(start, endExclusive));
 
   _DaySummary _summarizeDay(List<Map<String, dynamic>> rows) {
     int postureDur = 0;
@@ -1144,11 +1162,13 @@ class DailyProgress {
     required this.score,
     required this.slouchCount,
     required this.postureSec,
+    this.wrongDurSec = 0,
   });
   final DateTime date;
   final int score;
   final int slouchCount;
   final int postureSec;
+  final int wrongDurSec;
 
   bool get hasData => postureSec > 0;
 }

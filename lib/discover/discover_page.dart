@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:correctv1/discover/buy_alignpod_sheet.dart';
+import 'package:correctv1/discover/exercise_videos_page.dart';
 
 class DiscoverPage extends StatelessWidget {
   const DiscoverPage({super.key});
@@ -39,7 +40,28 @@ class DiscoverPage extends StatelessWidget {
               const SizedBox(height: 24),
               const _PostureCheckHeroCard(),
               const SizedBox(height: 16),
-              const _BuyAlignPodCard(),
+              _DiscoverLinkCard(
+                icon: Icons.play_circle_fill_rounded,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
+                ),
+                title: 'Exercise Videos',
+                subtitle: 'Guided stretches — stream or save for offline',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ExerciseVideosPage(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _DiscoverLinkCard(
+                icon: Icons.shopping_bag_rounded,
+                gradient: AppTheme.ridingGradient,
+                title: 'Buy AlignPod',
+                subtitle: 'Place a pre-order — team contacts you within 24h',
+                onTap: () => showBuyAlignPodSheet(context),
+              ),
             ],
           ),
         ),
@@ -271,29 +293,41 @@ class _RadarRings extends StatelessWidget {
   }
 }
 
-class _BuyAlignPodCard extends StatelessWidget {
-  const _BuyAlignPodCard();
+class _DiscoverLinkCard extends StatelessWidget {
+  final IconData icon;
+  final LinearGradient gradient;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _DiscoverLinkCard({
+    required this.icon,
+    required this.gradient,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final scheme = Theme.of(context).colorScheme;
+    final borderColor = gradient.colors.first;
+    final glowColor = gradient.colors.last;
 
     return GestureDetector(
-      onTap: () => showBuyAlignPodSheet(context),
+      onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           color: isDark ? const Color(0xFF0D1117) : Colors.white,
           border: Border.all(
-            color: isDark
-                ? const Color(0xFFFBBF24).withValues(alpha: 0.15)
-                : const Color(0xFFFBBF24).withValues(alpha: 0.3),
+            color: borderColor.withValues(alpha: isDark ? 0.15 : 0.3),
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFFF97316).withValues(
+              color: glowColor.withValues(
                 alpha: isDark ? 0.18 : 0.1,
               ),
               blurRadius: 28,
@@ -308,21 +342,17 @@ class _BuyAlignPodCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                gradient: AppTheme.ridingGradient,
+                gradient: gradient,
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFFF97316).withValues(alpha: 0.35),
+                    color: glowColor.withValues(alpha: 0.35),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
                 ],
               ),
-              child: const Icon(
-                Icons.shopping_bag_rounded,
-                color: Colors.white,
-                size: 26,
-              ),
+              child: Icon(icon, color: Colors.white, size: 26),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -330,7 +360,7 @@ class _BuyAlignPodCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Buy AlignPod',
+                    title,
                     style: TextStyle(
                       color: scheme.onSurface,
                       fontSize: 17,
@@ -340,7 +370,7 @@ class _BuyAlignPodCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Place a pre-order — team contacts you within 24h',
+                    subtitle,
                     style: TextStyle(
                       color: scheme.onSurfaceVariant,
                       fontSize: 12.5,

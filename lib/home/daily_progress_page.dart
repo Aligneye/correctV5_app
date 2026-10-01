@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:correctv1/analytics/analytics_insights.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:correctv1/home/widgets/surface_card.dart';
 import 'package:correctv1/services/session_repository.dart';
@@ -92,7 +93,7 @@ class _DailyProgressPageState extends State<DailyProgressPage> {
                   _compareRow(context, 'Posture score',
                       s?.hasTodayPostureData == true ? '${s!.todayPct}%' : '—',
                       s?.yesterdayHasPostureData == true ? '${s!.yesterdayPct}%' : '—'),
-                  _compareRow(context, 'Slouches',
+                  _compareRow(context, 'Slouches / day',
                       s?.hasTodayPostureData == true ? '${s!.todaySlouchCount}' : '—',
                       s?.yesterdayHasPostureData == true ? '${s!.yesterdaySlouchCount}' : '—'),
                   _compareRow(context, 'Slouches / hour',
@@ -141,6 +142,20 @@ class _DailyProgressPageState extends State<DailyProgressPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Last 7 days', style: theme.textTheme.titleMedium),
+                  if (_days != null)
+                    if (PeriodSummary.of(_days!, _target) case final p
+                        when p.hasData)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Avg ${p.slouchPerDay!.round()} slouches / day'
+                          '  ·  ${p.slouchPerHour!.toStringAsFixed(1)} / hour',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
                   const SizedBox(height: 8),
                   if (_days == null)
                     const Padding(
