@@ -3,6 +3,15 @@ package com.alignpod.app
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.util.Log
+import androidx.core.content.ContextCompat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.google.android.play.core.integrity.IntegrityManagerFactory
 import com.google.android.play.core.integrity.IntegrityTokenRequest
 import io.flutter.embedding.android.FlutterActivity
@@ -12,6 +21,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.correctv1.bluetooth/unpair"
     private val INTEGRITY_CHANNEL = "com.alignpod.app/integrity"
+    private var bondChannel: MethodChannel? = null
+    private var bondStateReceiver: BroadcastReceiver? = null
+    // Tracks per-device bond state so we can tell "was BONDING, now BOND_NONE"
+    // (a real failure) apart from "was already BOND_NONE" (irrelevant).
+    private val lastBondState = mutableMapOf<String, Int>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -45,7 +59,8 @@ class MainActivity : FlutterActivity() {
             }
 
         // Bluetooth unpair channel
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        channel.setMethodCallHandler { call, result ->
             if (call.method == "removeBond") {
                 val address = call.argument<String>("address")
                 if (address != null) {
@@ -66,6 +81,101 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+        bondChannel = channel
+        registerBondStateReceiver()
+    }
+
+    /**
+     * Listens for BOND_STATE_CHANGED so a real pairing failure (was BONDING,
+     * now BOND_NONE — auth/SMP rejected) reaches Dart the instant it happens,
+     * instead of Dart finding out only after a blind poll timeout.
+     */
+    private fun registerBondStateReceiver() {
+        if (bondStateReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    ?: return
+                val address = device.address
+
+                // Diagnostics: when the OS-level link to the pod comes up / goes
+                // down, independent of the app's GATT client. Compare with the
+                // Dart [BLE-DIAG] lines by timestamp.
+                if (intent.action == BluetoothDevice.ACTION_ACL_CONNECTED ||
+                    intent.action == BluetoothDevice.ACTION_ACL_DISCONNECTED
+                ) {
+                    val what = if (intent.action == BluetoothDevice.ACTION_ACL_CONNECTED) {
+                        "ACL CONNECTED"
+                    } else {
+                        "ACL DISCONNECTED reason=${intent.getIntExtra("android.bluetooth.device.extra.REASON", -1)}"
+                    }
+                    Log.i("BLE-DIAG", "${diagTime()} $what addr=$address")
+                    return
+                }
+
+                if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+                val newState = intent.getIntExtra(
+                    BluetoothDevice.EXTRA_BOND_STATE,
+                    BluetoothDevice.BOND_NONE
+                )
+                val previousState = lastBondState[address]
+                lastBondState[address] = newState
+                Log.i(
+                    "BLE-DIAG",
+                    "${diagTime()} BOND ${bondName(previousState)} -> ${bondName(newState)} " +
+                        "addr=$address reason=${intent.getIntExtra("android.bluetooth.device.extra.REASON", -1)}"
+                )
+
+                if (previousState == BluetoothDevice.BOND_BONDING &&
+                    newState == BluetoothDevice.BOND_NONE
+                ) {
+                    val reason = intent.getIntExtra("android.bluetooth.device.extra.REASON", -1)
+                    bondChannel?.invokeMethod(
+                        "onBondFailed",
+                        mapOf("address" to address, "reason" to reason)
+                    )
+                }
+            }
+        }
+        // Must be EXPORTED: these broadcasts come from com.android.bluetooth
+        // (uid 1002), not the core system uid, so a NOT_EXPORTED receiver is
+        // blocked ("Permission Denial ... DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        // on Samsung). Safe — bond/ACL actions are protected broadcasts that
+        // no other app can send.
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        }
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            filter,
+            ContextCompat.RECEIVER_EXPORTED
+        )
+        bondStateReceiver = receiver
+    }
+
+    private fun diagTime(): String =
+        SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+
+    private fun bondName(state: Int?): String = when (state) {
+        BluetoothDevice.BOND_NONE -> "NONE"
+        BluetoothDevice.BOND_BONDING -> "BONDING"
+        BluetoothDevice.BOND_BONDED -> "BONDED"
+        else -> "?"
+    }
+
+    override fun onDestroy() {
+        bondStateReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: IllegalArgumentException) {
+                // Already unregistered — safe to ignore.
+            }
+        }
+        bondStateReceiver = null
+        super.onDestroy()
     }
 
     @SuppressLint("MissingPermission")

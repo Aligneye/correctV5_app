@@ -105,12 +105,54 @@ class SessionRepository {
       yesterdaySessionCount: yesterday.sessionCount,
       yesterdayTrackedSec: yesterday.trackedSec,
       yesterdayHasTrackedData: yesterday.trackedSec > 0,
+      todaySlouchCount: today.slouchCount,
+      yesterdaySlouchCount: yesterday.slouchCount,
+      todayWrongDurSec: today.wrongDurSec,
     );
   }
+
+  /// Per-day score + slouch count for the last [days] days (oldest first),
+  /// midnight-based like [fetchTodayStats].
+  Future<List<DailyProgress>> fetchDailyProgress(int days) async {
+    final now = DateTime.now();
+    final first = DateTime(now.year, now.month, now.day - (days - 1));
+    final end = DateTime(now.year, now.month, now.day + 1);
+    // One query for the whole range, then bucket rows by local day.
+    final byDay = <int, List<Map<String, dynamic>>>{};
+    for (final row in await _fetchRowsBetween(first, end)) {
+      final ts = _parseTs(row['start_ts'])?.toLocal();
+      if (ts == null) continue;
+      final key = DateTime(ts.year, ts.month, ts.day)
+          .difference(first)
+          .inDays;
+      (byDay[key] ??= []).add(row);
+    }
+    return [
+      for (var i = 0; i < days; i++)
+        () {
+          final day = _summarizeDay(byDay[i] ?? const []);
+          return DailyProgress(
+            date: DateTime(first.year, first.month, first.day + i),
+            score: day.posturePct,
+            slouchCount: day.slouchCount,
+            postureSec: day.postureDurationSec,
+            wrongDurSec: day.wrongDurSec,
+          );
+        }(),
+    ];
+  }
+
+  /// Sessions that started in [start, endExclusive), newest first.
+  Future<List<SessionData>> fetchSessionsBetween(
+    DateTime start,
+    DateTime endExclusive,
+  ) async =>
+      _mapRows(await _fetchRowsBetween(start, endExclusive));
 
   _DaySummary _summarizeDay(List<Map<String, dynamic>> rows) {
     int postureDur = 0;
     int postureWrong = 0;
+    int slouchCount = 0;
     int therapyDur = 0;
     int trackedSec = 0;
     int sessionCount = 0;
@@ -123,6 +165,7 @@ class SessionRepository {
       if (type == 'posture') {
         postureDur += dur;
         postureWrong += _asInt(row['wrong_dur_sec']);
+        slouchCount += _asInt(row['wrong_count']);
       } else if (type == 'therapy') {
         therapyDur += dur;
       }
@@ -136,6 +179,8 @@ class SessionRepository {
       therapyDurationSec: therapyDur,
       trackedSec: trackedSec,
       sessionCount: sessionCount,
+      slouchCount: slouchCount,
+      wrongDurSec: postureWrong,
     );
   }
 
@@ -1026,6 +1071,9 @@ class TodayStats {
     required this.yesterdaySessionCount,
     required this.yesterdayTrackedSec,
     required this.yesterdayHasTrackedData,
+    this.todaySlouchCount = 0,
+    this.yesterdaySlouchCount = 0,
+    this.todayWrongDurSec = 0,
   });
 
   final int todayPct;
@@ -1040,6 +1088,38 @@ class TodayStats {
   final int yesterdaySessionCount;
   final int yesterdayTrackedSec;
   final bool yesterdayHasTrackedData;
+  final int todaySlouchCount;
+  final int yesterdaySlouchCount;
+  final int todayWrongDurSec;
+
+  /// Good-posture time today = posture time minus slouch time.
+  int get todayGoodSec =>
+      (todayPostureDurationSec - todayWrongDurSec).clamp(0, todayPostureDurationSec);
+
+  double get todaySlouchPerHour =>
+      _perHour(todaySlouchCount, todayPostureDurationSec);
+  double get yesterdaySlouchPerHour =>
+      _perHour(yesterdaySlouchCount, yesterdayPostureDurationSec);
+
+  /// % change in slouches/hour vs yesterday (negative = fewer = better).
+  /// Null when there's nothing fair to compare against.
+  double? get slouchChangePct {
+    if (!hasTodayPostureData || !yesterdayHasPostureData) return null;
+    final y = yesterdaySlouchPerHour;
+    if (y == 0) return null;
+    return (todaySlouchPerHour - y) / y * 100;
+  }
+
+  /// Relative % change in posture score vs yesterday (positive = better).
+  double? get scoreChangePct {
+    if (!hasTodayPostureData || !yesterdayHasPostureData || yesterdayPct == 0) {
+      return null;
+    }
+    return (todayPct - yesterdayPct) / yesterdayPct * 100;
+  }
+
+  static double _perHour(int count, int sec) =>
+      sec > 0 ? count / (sec / 3600) : 0;
 
   bool get hasTodayPostureData => todayPostureDurationSec > 0;
   bool get hasTodayTherapyData => todayTherapyDurationSec > 0;
@@ -1064,12 +1144,33 @@ class _DaySummary {
     required this.therapyDurationSec,
     required this.trackedSec,
     required this.sessionCount,
+    required this.slouchCount,
+    required this.wrongDurSec,
   });
   final int posturePct;
   final int postureDurationSec;
   final int therapyDurationSec;
   final int trackedSec;
   final int sessionCount;
+  final int slouchCount;
+  final int wrongDurSec;
+}
+
+class DailyProgress {
+  const DailyProgress({
+    required this.date,
+    required this.score,
+    required this.slouchCount,
+    required this.postureSec,
+    this.wrongDurSec = 0,
+  });
+  final DateTime date;
+  final int score;
+  final int slouchCount;
+  final int postureSec;
+  final int wrongDurSec;
+
+  bool get hasData => postureSec > 0;
 }
 
 class _Aggregate {

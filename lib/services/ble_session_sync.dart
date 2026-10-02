@@ -84,6 +84,19 @@ class BleSessionSync {
   bool _complete = false;
   bool _running = false;
 
+  /// Diagnostics: how many syncs (any pod) are currently running. Should be 0
+  /// when a new connect starts — anything else is a leftover from an old pod.
+  static int runningCount = 0;
+  static final Set<String> runningDevices = {};
+
+  void _setRunning(bool value) {
+    if (value == _running) return;
+    _running = value;
+    runningCount += value ? 1 : -1;
+    final id = _device.remoteId.toString();
+    value ? runningDevices.add(id) : runningDevices.remove(id);
+  }
+
   // Raw buffer for JSON framing (same framing as AlignEyeDeviceService).
   String _buf = '';
 
@@ -98,7 +111,7 @@ class BleSessionSync {
       debugPrint('BleSessionSync: startSync() called while already running');
       return;
     }
-    _running = true;
+    _setRunning(true);
     _complete = false;
     _sentCount = 0;
     _buf = '';
@@ -132,6 +145,9 @@ class BleSessionSync {
   }
 
   Future<void> dispose() async {
+    // First, so the retry loop woken by the completer below finds the sync
+    // already stopped and _send() refuses to write to the old pod.
+    _setRunning(false);
     _waitCompleter?.complete(<String, dynamic>{});
     _waitCompleter = null;
     await _rawSub?.cancel();
@@ -139,7 +155,6 @@ class BleSessionSync {
     if (!_progressController.isClosed) {
       await _progressController.close();
     }
-    _running = false;
   }
 
   // ── characteristic lookup ─────────────────────────────────────────────────
@@ -215,6 +230,15 @@ class BleSessionSync {
   }
 
   void _dispatch(Map<String, dynamic> msg) {
+    // Diagnostic: every packet seen during a sync, to find out what the pod
+    // actually sends for session data (app expects t=SESS_DATA).
+    if (_running) {
+      final raw = msg.toString();
+      debugPrint(
+        '[SESSION] RX t=${msg['t']} '
+        '${raw.length > 200 ? '${raw.substring(0, 200)}…' : raw}',
+      );
+    }
     final completer = _waitCompleter;
     final matcher = _waitMatcher;
     if (completer != null && !completer.isCompleted) {
@@ -253,6 +277,9 @@ class BleSessionSync {
   // ── command write ─────────────────────────────────────────────────────────
 
   Future<bool> _send(Map<String, dynamic> cmd) async {
+    // Stopped by dispose() (disconnect/forget) — don't keep writing to the
+    // old pod from the retry loop.
+    if (!_running) return false;
     final char = _char;
     if (char == null) return false;
     try {
@@ -300,7 +327,9 @@ class BleSessionSync {
       }
 
       final n = (hdr['n'] as num?)?.toInt() ?? 0;
-      final xfer = (hdr['xfer'] as num?)?.toInt();
+      // Firmware 1.3.x sends the transfer id as "x"
+      // ({t: SESS_HDR, x: 666397, n: 17, total: 17}); docs say "xfer".
+      final xfer = ((hdr['xfer'] ?? hdr['x']) as num?)?.toInt();
       debugPrint('[SESSION] SESS_HDR n=$n xfer=$xfer');
 
       if (xfer == null) {
@@ -348,7 +377,13 @@ class BleSessionSync {
       }
 
       if (missing.isNotEmpty) {
-        debugPrint('[SESSION] Still missing ${missing.length} packets after $nackRounds rounds — skipping');
+        // Never ACK ok with data missing — the pod deletes its sessions on
+        // ACK, so they'd be lost. Leave them on the pod for the next sync.
+        debugPrint(
+          '[SESSION] Still missing ${missing.length} packets after $nackRounds rounds — '
+          'not ACKing, sessions stay on pod',
+        );
+        return;
       }
 
       // Persist all received sessions.
@@ -421,7 +456,8 @@ class BleSessionSync {
       final msg = await _waitFor(
             (m) {
           final t = m['t']?.toString().toUpperCase();
-          return t == 'SESS_DATA' || t == 'SESS_END';
+          // Firmware 1.3.x sends data packets as t=SESS (docs: SESS_DATA).
+          return t == 'SESS_DATA' || t == 'SESS' || t == 'SESS_END';
         },
         timeout: const Duration(seconds: 10),
       );
@@ -456,8 +492,10 @@ class BleSessionSync {
       final d = (msg['d'] as num?)?.toInt() ?? 0;
       final wc = (msg['wc'] as num?)?.toInt() ?? 0;
       final wd = (msg['wd'] as num?)?.toInt() ?? 0;
-      final tsSynced = msg['tss'] == true || msg['tss'] == 1;
-      final therapyPatt = (msg['tp'] as num?)?.toInt();
+      // Firmware 1.3.x short keys: sy = time synced, pat = therapy pattern.
+      final syncedRaw = msg['tss'] ?? msg['sy'];
+      final tsSynced = syncedRaw == true || syncedRaw == 1;
+      final therapyPatt = ((msg['tp'] ?? msg['pat']) as num?)?.toInt();
 
       debugPrint(
         '[SESSION] SESS_DATA q=$q ty=$type ts=$ts d=${d}s wc=$wc wd=$wd',
@@ -538,7 +576,7 @@ class BleSessionSync {
   void _emitComplete() {
     if (_complete) return;
     _complete = true;
-    _running = false;
+    _setRunning(false);
     debugPrint('[SESSION] ── Sync complete ── total_saved=$_sentCount');
     if (_progressController.isClosed) return;
     _progressController.add(

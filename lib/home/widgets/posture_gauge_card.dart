@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:correctv1/components/posture_avatar.dart';
 import 'package:correctv1/home/widgets/staggered_fade_slide.dart';
 import 'package:correctv1/home/widgets/surface_card.dart';
 import 'package:correctv1/theme/app_theme.dart';
@@ -91,13 +92,27 @@ class _PostureGaugeCardState extends State<PostureGaugeCard> {
                 tween: Tween<double>(end: targetAngle),
                 builder: (context, value, child) {
                   _displayedAngle = value;
-                  return CustomPaint(
-                    painter: PostureGaugePainter(
-                      angle: value,
-                      accentColor: accentColor,
-                      difficultyDeg: widget.difficultyDeg,
-                      isConnected: isConnected,
-                    ),
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CustomPaint(
+                        size: const Size(220, 220),
+                        painter: PostureGaugePainter(
+                          angle: value,
+                          accentColor: accentColor,
+                          difficultyDeg: widget.difficultyDeg,
+                          isConnected: isConnected,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 18),
+                        child: AlignPodPostureAvatar(
+                          liveAngle: value.abs(),
+                          thresholdAngle: widget.difficultyDeg.toDouble(),
+                          isCalibrated: isConnected,
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
@@ -241,8 +256,10 @@ class PostureGaugePainter extends CustomPainter {
     // Clamp angle to -90 to 90 range
     final clampedAngle = angle.clamp(-90.0, 90.0);
 
-    // Map -90..90 → -π..π (full half-circle sweep each side)
-    final angleRad = clampedAngle * math.pi / 90.0;
+    // Map -90..90 → -π/2..π/2 (quarter-circle sweep each side), so a 90°
+    // reading lands the needle exactly on the right/left tick marker
+    // instead of overshooting to the bottom of the ring.
+    final angleRad = clampedAngle * math.pi / 180.0;
 
     // Start angle is at the top (-π/2 in canvas coordinates)
     const startAngle = -math.pi / 2;
@@ -309,7 +326,7 @@ class PostureGaugePainter extends CustomPainter {
     );
     // Draw red threshold marker at the difficulty angle (bad-posture cutoff)
     if (isConnected) {
-      final thresholdRad = difficultyDeg.abs() * math.pi / 90.0;
+      final thresholdRad = difficultyDeg.abs() * math.pi / 180.0;
       final thresholdAngle = startAngle + thresholdRad;
       final innerRadius = radius - strokeWidth / 2 - 10;
       final thresholdPoint = Offset(
@@ -342,45 +359,21 @@ class PostureGaugePainter extends CustomPainter {
       );
     }
 
-    // Draw angle value in center (or "—" when disconnected)
+    // Draw angle value below the avatar (avatar rendered on top via widget)
     final valuePainter = TextPainter(
       text: TextSpan(
         text: isConnected ? "${clampedAngle.round()}°" : "—",
         style: TextStyle(
-          fontSize: 34,
+          fontSize: 20,
           fontWeight: FontWeight.w600,
           color: accentColor,
         ),
       ),
       textDirection: TextDirection.ltr,
-    );
-    valuePainter.layout();
-
-    final labelPainter = TextPainter(
-      text: const TextSpan(
-        text: 'Angle',
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: Color(0xFF94A3B8),
-        ),
-      ),
-      textDirection: TextDirection.ltr,
     )..layout();
-
-    final totalHeight = valuePainter.height + 6 + labelPainter.height;
-    final startY = center.dy - totalHeight / 2;
-
     valuePainter.paint(
       canvas,
-      Offset(center.dx - valuePainter.width / 2, startY),
-    );
-    labelPainter.paint(
-      canvas,
-      Offset(
-        center.dx - labelPainter.width / 2,
-        startY + valuePainter.height + 6,
-      ),
+      Offset(center.dx - valuePainter.width / 2, center.dy + 60),
     );
   }
 

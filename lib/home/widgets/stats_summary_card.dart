@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:correctv1/home/widgets/surface_card.dart';
 import 'package:correctv1/home/widgets/celebration_confetti.dart';
-import 'package:correctv1/home/widgets/xp_level_tile.dart';
 import 'package:correctv1/services/session_repository.dart';
 import 'package:correctv1/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -40,6 +39,8 @@ class StatItemData {
 
 class StatsSummaryCard extends StatelessWidget {
   final List<StatItemData> items;
+  /// Optional custom tile shown right after the streak tile.
+  final Widget? leadingTile;
   final int streakDays;
   final bool streakTodayActive;
   final Key? streakTileKey;
@@ -52,6 +53,7 @@ class StatsSummaryCard extends StatelessWidget {
   const StatsSummaryCard({
     super.key,
     required this.items,
+    this.leadingTile,
     this.streakDays = 0,
     this.streakTodayActive = false,
     this.streakTileKey,
@@ -65,7 +67,9 @@ class StatsSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // index 0 = streak tile, index 1+ = stat items (xp tile disabled)
-    final totalCount = items.length + 1;
+    final lead = leadingTile;
+    final offset = lead == null ? 1 : 2;
+    final totalCount = items.length + offset;
     return SizedBox(
       height: 156,
       child: ListView.separated(
@@ -74,7 +78,7 @@ class StatsSummaryCard extends StatelessWidget {
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.only(right: 24),
         itemCount: totalCount,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           if (index == 0) {
             return SizedBox(
@@ -95,9 +99,12 @@ class StatsSummaryCard extends StatelessWidget {
           //     child: XpLevelTile(xpStats: xpStats, onTap: onXpTap),
           //   );
           // }
+          if (lead != null && index == 1) {
+            return SizedBox(width: 132, child: lead);
+          }
           return SizedBox(
             width: 132,
-            child: _SummaryMetricTile(item: items[index - 1]),
+            child: _SummaryMetricTile(item: items[index - offset]),
           );
         },
       ),

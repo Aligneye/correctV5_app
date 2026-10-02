@@ -34,6 +34,8 @@ import 'package:correctv1/home/widgets/connected_device_sheet.dart';
 import 'package:correctv1/home/widgets/mode_control_card.dart';
 import 'package:correctv1/home/widgets/quick_modes_section.dart';
 import 'package:correctv1/home/widgets/stats_summary_card.dart';
+import 'package:correctv1/home/widgets/daily_progress_card.dart';
+import 'package:correctv1/home/daily_progress_page.dart';
 import 'package:correctv1/home/widgets/surface_card.dart';
 import 'package:correctv1/home/widgets/streak_calendar_widget.dart';
 import 'package:correctv1/home/widgets/streak_detail_sheet.dart';
@@ -121,7 +123,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       service.startService();
     } else if (state == AppLifecycleState.resumed) {
       service.invoke('stopService');
-      BluetoothServiceManager.instance.tryAutoReconnectOnResume();
       SessionSyncService.instance.triggerSync();
     }
   }
@@ -143,9 +144,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) =>
+        pageBuilder: (_, animation, _) =>
             FadeTransition(opacity: animation, child: const TherapyPage()),
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -167,13 +168,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) => FadeTransition(
+        pageBuilder: (_, animation, _) => FadeTransition(
           opacity: animation,
           child: TrainingPage(
             deviceService: BluetoothServiceManager().deviceService,
           ),
         ),
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -195,9 +196,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, animation, __) =>
+        pageBuilder: (_, animation, _) =>
             FadeTransition(opacity: animation, child: const MeditationPage()),
-        transitionsBuilder: (_, animation, __, child) {
+        transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
             curve: Curves.easeOutCubic,
@@ -296,6 +297,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   DateTime? _lastSessionLoadTime;
   List<SessionData> _offlineSessions = const <SessionData>[];
   TodayStats? _todayStats;
+  int _dailyScoreTarget = kDefaultDailyScoreTarget;
   StreakStats? _streakStats;
   bool _streakPopupCheckedThisSession = false;
   final GlobalKey _streakTileKey = GlobalKey();
@@ -904,62 +906,18 @@ class _HomeDashboardState extends State<HomeDashboard>
     unawaited(_loadOfflineSessions());
   }
 
-  static StatItemData _goodPostureStatItem(TodayStats? stats, {VoidCallback? onTap}) {
-    const gradient = AppTheme.alignWalkGradient;
-    const icon = Icons.auto_awesome_rounded;
-    const label = 'Good posture';
-
-    if (stats == null) {
-      return StatItemData(
-        value: '-',
-        label: label,
-        trendText: 'Loading…',
-        icon: icon,
-        gradient: gradient,
-        trendNeutral: true,
-        onTap: onTap,
-      );
-    }
-
-    if (!stats.hasTodayPostureData) {
-      return StatItemData(
-        value: '—',
-        label: label,
-        trendText: 'Do a training',
-        icon: icon,
-        gradient: gradient,
-        trendNeutral: true,
-        onTap: onTap,
-      );
-    }
-
-    final String trendText;
-    final bool positive;
-    if (!stats.yesterdayHasPostureData) {
-      trendText = 'First today';
-      positive = true;
-    } else if (stats.postureDeltaVsYesterday == 0) {
-      trendText = 'Same';
-      positive = true;
-    } else {
-      final delta = stats.postureDeltaVsYesterday;
-      final direction = delta > 0 ? 'more' : 'less';
-      trendText = '${delta.abs()}% $direction';
-      positive = delta > 0;
-    }
-
-    return StatItemData(
-      value: '${stats.todayPct}',
-      unit: '%',
-      label: label,
-      trendText: trendText,
-      icon: icon,
-      gradient: gradient,
-      positiveTrend: positive,
-      trendNeutral:
-          !stats.yesterdayHasPostureData || stats.postureDeltaVsYesterday == 0,
-      onTap: onTap,
+  Future<void> _openDailyProgress() async {
+    final target = await Navigator.of(context).push<int>(
+      MaterialPageRoute<int>(
+        builder: (_) => DailyProgressPage(
+          stats: _todayStats,
+          target: _dailyScoreTarget,
+        ),
+      ),
     );
+    if (target == null || !mounted) return;
+    setState(() => _dailyScoreTarget = target);
+    await maybeCelebrateDailyTarget(context, _todayStats, target);
   }
 
   static StatItemData _trackedTimeStatItem(TodayStats? stats) {
@@ -1309,12 +1267,14 @@ class _HomeDashboardState extends State<HomeDashboard>
         _sessionRepository.fetchTodayStats(),
         _sessionRepository.fetchStreakStats(),
         _sessionRepository.fetchXpStats(),
+        loadDailyScoreTarget(),
       ]);
 
       final List<SessionData> sessions = results[0] as List<SessionData>;
       final TodayStats? todayStats = results[1] as TodayStats?;
       final StreakStats? streakStats = results[2] as StreakStats?;
       final XpStats? xpStats = results[3] as XpStats?;
+      final int dailyScoreTarget = results[4] as int;
 
       if (!mounted) return;
 
@@ -1323,17 +1283,23 @@ class _HomeDashboardState extends State<HomeDashboard>
         _todayStats = todayStats;
         _streakStats = streakStats;
         _xpStats = xpStats;
+        _dailyScoreTarget = dailyScoreTarget;
         _isLoadingOfflineSessions = false;
       });
 
+      var streakPopupShown = false;
       if (streakStats != null) {
         unawaited(
           NotificationService.instance.updateStreakReminderForToday(
             streakStats.todayActive,
           ),
         );
-        await _maybeShowStreakPopup(streakStats);
+        streakPopupShown = await _maybeShowStreakPopup(streakStats);
         unawaited(_persistStreakCache(streakStats));
+      }
+      // Don't stack on the streak popup; next refresh will show it.
+      if (!streakPopupShown && mounted) {
+        unawaited(maybeCelebrateDailyTarget(context, todayStats, dailyScoreTarget));
       }
       if (todayStats != null) {
         unawaited(NotificationService.instance.maybeSendDailySummary(
@@ -1553,8 +1519,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     return '${date.year}-W${weekNumber.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _maybeShowStreakPopup(StreakStats stats) async {
-    if (_streakPopupCheckedThisSession) return;
+  Future<bool> _maybeShowStreakPopup(StreakStats stats) async {
+    if (_streakPopupCheckedThisSession) return false;
     _streakPopupCheckedThisSession = true;
 
     final prefs = await SharedPreferences.getInstance();
@@ -1563,7 +1529,7 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     final todayKey = _streakDayKey(stats.todayStreakDay);
     if (lastDayStr == todayKey) {
-      return; // already shown this streak day
+      return false; // already shown this streak day
     }
 
     final kind = _classifyStreakEvent(
@@ -1574,7 +1540,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     await prefs.setString(_kStreakPrefsLastDay, todayKey);
     await prefs.setInt(_kStreakPrefsLastValue, stats.currentStreak);
 
-    if (kind == null || !mounted) return;
+    if (kind == null || !mounted) return false;
 
     // Defer to post-frame so we don't fight the initial build animations.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1590,6 +1556,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         ),
       );
     });
+    return true;
   }
 
   Rect? _resolveStreakTileRect() {
@@ -1666,6 +1633,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   Future<void> _handleDeviceStatusTap() async {
+    if (_deviceService.isResetting.value) {
+      _showBleSnackBar('Clearing old pod data — please wait a moment.');
+      return;
+    }
     final status = _deviceService.connectionStatus.value;
 
     if (status == DeviceConnectionStatus.connected) {
@@ -2347,8 +2318,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                     onXpTap: _xpStats != null
                         ? () => _showXpDetailSheet()
                         : null,
+                    leadingTile: DailyProgressTile(
+                      stats: _todayStats,
+                      target: _dailyScoreTarget,
+                      onTap: _openDailyProgress,
+                    ),
                     items: [
-                      _goodPostureStatItem(_todayStats, onTap: () => widget.onNavigateToPage(2)),
                       _sessionsStatItem(_todayStats, onTap: () => Navigator.of(context).push<void>(
                         MaterialPageRoute<void>(
                           builder: (_) => const SessionsHistoryPage(),
@@ -2925,7 +2900,7 @@ class _TherapyTimeTile extends StatelessWidget {
   final StatItemData item;
   final VoidCallback? onTap;
 
-  const _TherapyTimeTile({required this.item, this.onTap});
+  const _TherapyTimeTile({required this.item}) : onTap = null;
 
   @override
   Widget build(BuildContext context) {

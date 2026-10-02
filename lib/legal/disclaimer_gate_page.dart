@@ -15,7 +15,7 @@ class DisclaimerGatePage extends StatelessWidget {
     if (!context.mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder<void>(
-        pageBuilder: (_, __, ___) => nextScreen,
+        pageBuilder: (_, _, _) => nextScreen,
       ),
     );
   }

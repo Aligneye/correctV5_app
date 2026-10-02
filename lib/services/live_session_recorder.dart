@@ -29,6 +29,10 @@ class LiveSessionRecorder {
   _LiveSession? _active;
   bool _lastBadPosture = false;
   DateTime? _badPostureStartedAt;
+  // Whether the current bad-posture stretch has been counted as a slouch.
+  bool _slouchCounted = false;
+  // Latest angle seen while posture was bad; negative = leaning back.
+  double _lastBadAngle = 0;
   DateTime? _lastUpdateAt;
   bool _writeInFlight = false;
   bool _dirtyWhileWriting = false;
@@ -294,6 +298,9 @@ class LiveSessionRecorder {
       _activeSessionId.value = id;
       _lastBadPosture = type == 'posture' && reading.isBadPosture;
       _badPostureStartedAt = _lastBadPosture ? now : null;
+      // Already-bad at start is covered by the device's seeded count.
+      _slouchCounted = _lastBadPosture && reading.angle >= 0;
+      _lastBadAngle = reading.angle;
       if (_lastBadPosture) {
         _active!.pendingSlouchOffsetSec = 0;
       }
@@ -315,7 +322,9 @@ class LiveSessionRecorder {
     if (active == null) return;
 
     if (active.type == 'posture' && _badPostureStartedAt != null) {
-      active.wrongDurationSec += DateTime.now()
+      final now = DateTime.now();
+      _countSlouchIfAlerted(active, _deviceService.currentSubMode, now);
+      active.wrongDurationSec += now
           .difference(_badPostureStartedAt!)
           .inSeconds
           .clamp(0, 1 << 30)
@@ -323,10 +332,10 @@ class LiveSessionRecorder {
       _badPostureStartedAt = null;
 
       final slouchOffset = active.pendingSlouchOffsetSec;
-      if (slouchOffset != null) {
+      if (slouchOffset != null && _slouchCounted) {
         active.postureEvents.add({'s': slouchOffset, 'c': 0xFFFF});
-        active.pendingSlouchOffsetSec = null;
       }
+      active.pendingSlouchOffsetSec = null;
     }
 
     final durationSec = _currentDurationSec(active, DateTime.now());
@@ -342,6 +351,7 @@ class LiveSessionRecorder {
     _activeSessionId.value = null;
     _lastBadPosture = false;
     _badPostureStartedAt = null;
+    _slouchCounted = false;
     _onSessionChanged?.call();
   }
 
@@ -404,13 +414,17 @@ class LiveSessionRecorder {
     ).clamp(0, 0xFFFE).toInt();
     active.durationSec = elapsedSec;
 
+    if (reading.isBadPosture) _lastBadAngle = reading.angle;
     if (reading.isBadPosture && !_lastBadPosture) {
-      active.wrongCount++;
       _badPostureStartedAt = now;
+      _slouchCounted = false;
       active.pendingSlouchOffsetSec = elapsedSec;
-    } else if (!reading.isBadPosture &&
-        _lastBadPosture &&
-        _badPostureStartedAt != null) {
+      _countSlouchIfAlerted(active, reading.subMode, now);
+    } else if (reading.isBadPosture) {
+      _countSlouchIfAlerted(active, reading.subMode, now);
+    } else if (_lastBadPosture && _badPostureStartedAt != null) {
+      // Alert may have fired between readings.
+      _countSlouchIfAlerted(active, reading.subMode, now);
       active.wrongDurationSec += now
           .difference(_badPostureStartedAt!)
           .inSeconds
@@ -419,13 +433,42 @@ class LiveSessionRecorder {
       _badPostureStartedAt = null;
 
       final slouchOffset = active.pendingSlouchOffsetSec;
-      if (slouchOffset != null) {
+      if (slouchOffset != null && _slouchCounted) {
         active.postureEvents.add({'s': slouchOffset, 'c': elapsedSec});
-        active.pendingSlouchOffsetSec = null;
       }
+      active.pendingSlouchOffsetSec = null;
     }
     _lastBadPosture = reading.isBadPosture;
   }
+
+  void _countSlouchIfAlerted(_LiveSession active, String subMode, DateTime now) {
+    final start = _badPostureStartedAt;
+    if (_slouchCounted || start == null) return;
+    if (!slouchCounts(
+      angle: _lastBadAngle,
+      subMode: subMode,
+      badFor: now.difference(start),
+      alertDelay: Duration(milliseconds: _deviceService.trainingDelayMs),
+    )) {
+      return;
+    }
+    active.wrongCount++;
+    _slouchCounted = true;
+  }
+
+  /// A slouch counts only once the device alert would have fired:
+  /// INSTANT immediately, DELAYED after [alertDelay] of continuous bad
+  /// posture, NO_ALERTS on crossing the user's angle (no alert ever fires).
+  /// Leaning back (negative angle) never counts.
+  @visibleForTesting
+  static bool slouchCounts({
+    required double angle,
+    required String subMode,
+    required Duration badFor,
+    required Duration alertDelay,
+  }) =>
+      angle >= 0 &&
+      (subMode.trim().toUpperCase() != 'DELAYED' || badFor >= alertDelay);
 
   bool _shouldPersistUpdate() {
     final last = _lastUpdateAt;

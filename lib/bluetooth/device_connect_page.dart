@@ -41,6 +41,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   late final Animation<double> _ring3;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
+  Timer? _settleTimer;
 
   List<ScanResult> _found = [];
   bool _scanning = false;
@@ -59,6 +60,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     _ring3 = _interval(0.44, 1.00);
 
     _btManager.deviceService.connectionStatus.addListener(_onStatusChange);
+    _btManager.deviceService.isResetting.addListener(_onResettingChange);
 
     // If a connection attempt (auto or manual) is already in flight, just
     // reflect that state — don't kick off a scan. The pod is already being
@@ -127,8 +129,41 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     }
   }
 
+  bool get _resetting => _btManager.deviceService.isResetting.value;
+
+  void _onResettingChange() {
+    if (mounted) setState(() {});
+  }
+
+  /// Forget clears the old pod (disconnect, GATT cache, bond, cached state)
+  /// in the background; nothing new may start until that's fully done.
+  Future<void> _waitForReset() async {
+    final resetting = _btManager.deviceService.isResetting;
+    if (!resetting.value) return;
+    final done = Completer<void>();
+    void listener() {
+      if (!resetting.value && !done.isCompleted) done.complete();
+    }
+
+    resetting.addListener(listener);
+    try {
+      await done.future;
+    } finally {
+      resetting.removeListener(listener);
+    }
+  }
+
   Future<void> _startScan() async {
-    if (_scanning) return;
+    await _waitForReset();
+    if (!mounted || _scanning) return;
+
+    // If a previous DeviceConnectPage instance was just popped, its
+    // dispose() fired a fire-and-forget stopScan() that may still be
+    // in-flight. If it resolves after our startScan() below, it kills
+    // this fresh scan within milliseconds (seen as instant "No pods
+    // detected" on back-then-reopen). Awaiting a stop here first drains
+    // that stale request before we start our own.
+    await FlutterBluePlus.stopScan();
 
     final readiness = await _btManager.deviceService.checkReadiness();
     if (!mounted) return;
@@ -166,13 +201,19 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       _scanDone = false;
       _found = [];
     });
+    _settleTimer?.cancel();
+    _settleTimer = null;
 
     // Hard deadline — UI will always exit scanning state after this,
     // regardless of what the BLE stack does (fixes MIUI/ColorOS freeze)
     final scanDeadline = Timer(const Duration(seconds: 13), () {
       if (!mounted || !_scanning) return;
+      _settleTimer?.cancel();
       FlutterBluePlus.stopScan().ignore();
-      setState(() { _scanning = false; _scanDone = true; });
+      setState(() {
+        _scanning = false;
+        _scanDone = true;
+      });
     });
 
     try {
@@ -183,11 +224,19 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           final pods = results.where(_isAlignPod).toList()
             ..sort((a, b) => b.rssi.compareTo(a.rssi));
           setState(() => _found = pods);
-          // Pod found — stop scan immediately so UI becomes tappable
-          if (pods.isNotEmpty && _scanning) {
-            FlutterBluePlus.stopScan().ignore();
-            scanDeadline.cancel();
-            if (mounted) setState(() { _scanning = false; _scanDone = true; });
+          // Give a short settle window after the first match instead of
+          // stopping instantly — a user with more than one pod needs time
+          // for the others to also show up in the results list.
+          if (pods.isNotEmpty && _scanning && _settleTimer == null) {
+            _settleTimer = Timer(const Duration(seconds: 2), () {
+              if (!mounted || !_scanning) return;
+              FlutterBluePlus.stopScan().ignore();
+              scanDeadline.cancel();
+              setState(() {
+                _scanning = false;
+                _scanDone = true;
+              });
+            });
           }
         },
         onError: (Object error, StackTrace stackTrace) {
@@ -199,7 +248,12 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     } catch (error) {
       debugPrint('BLE scan failed: $error');
       scanDeadline.cancel();
-      if (mounted) setState(() { _scanning = false; _scanDone = true; });
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _scanDone = true;
+        });
+      }
     }
   }
 
@@ -236,7 +290,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   }
 
   Future<void> _connect({String? remoteId}) async {
-    if (_connecting) return;
+    await _waitForReset();
+    if (!mounted || _connecting) return;
     setState(() => _connecting = true);
     await FlutterBluePlus.stopScan();
     _scanSub?.cancel();
@@ -256,8 +311,9 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           content: Text(_friendlyError(e.toString())),
           backgroundColor: AppTheme.destructive,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           margin: const EdgeInsets.all(16),
         ),
       );
@@ -278,6 +334,11 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     if (raw.contains('not enabled')) {
       return 'Please enable Bluetooth and try again.';
     }
+    if (raw.contains('MTU')) {
+      // Pod is already paired at this point, so a second tap connects on
+      // the bonded path, which has always worked.
+      return 'Your pod is paired but setup didn\'t finish. Tap Connect again.';
+    }
     return 'Could not connect. Please try again.';
   }
 
@@ -292,7 +353,9 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   void dispose() {
     _pulseCtrl.dispose();
     _scanSub?.cancel();
+    _settleTimer?.cancel();
     _btManager.deviceService.connectionStatus.removeListener(_onStatusChange);
+    _btManager.deviceService.isResetting.removeListener(_onResettingChange);
     FlutterBluePlus.stopScan().ignore();
     super.dispose();
   }
@@ -335,16 +398,10 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           child: Column(
             children: [
               _buildAppBar(),
-              Expanded(
-                flex: 5,
-                child: _buildHeroArea(),
-              ),
+              Expanded(flex: 5, child: _buildHeroArea()),
               _buildStatusLabel(),
               const SizedBox(height: 24),
-              Expanded(
-                flex: 6,
-                child: _buildBottomPanel(),
-              ),
+              Expanded(flex: 6, child: _buildBottomPanel()),
             ],
           ),
         ),
@@ -412,7 +469,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           // Pulse rings
           AnimatedBuilder(
             animation: _pulseCtrl,
-            builder: (_, __) => Stack(
+            builder: (_, _) => Stack(
               alignment: Alignment.center,
               children: [
                 _PulseRing(progress: _ring1.value, maxRadius: 140),
@@ -452,10 +509,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
                         fit: BoxFit.contain,
                         repeat: true,
                       )
-                    : Image.asset(
-                        'assets/product.png',
-                        fit: BoxFit.contain,
-                      ),
+                    : Image.asset('assets/product.png', fit: BoxFit.contain),
               ),
             ),
           ),
@@ -465,7 +519,10 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
               bottom: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   gradient: AppTheme.brandGradient,
                   borderRadius: BorderRadius.circular(20),
@@ -485,8 +542,9 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
                       height: 10,
                       child: CircularProgressIndicator(
                         strokeWidth: 1.5,
-                        valueColor:
-                            const AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.white,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -511,21 +569,25 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
 
   Widget _buildStatusLabel() {
     final scheme = Theme.of(context).colorScheme;
-    final title = _connecting
+    final title = _resetting
+        ? 'Clearing old pod data'
+        : _connecting
         ? 'Connecting to Align Pod'
         : _found.isNotEmpty
-            ? '${_found.length} Pod${_found.length > 1 ? 's' : ''} Found Nearby'
-            : _scanning
-                ? 'Scanning for Align Pods'
-                : 'No pods detected';
+        ? '${_found.length} Pod${_found.length > 1 ? 's' : ''} Found Nearby'
+        : _scanning
+        ? 'Scanning for Align Pods'
+        : 'No pods detected';
 
-    final sub = _connecting
+    final sub = _resetting
+        ? 'Please wait — Connect will be available in a moment'
+        : _connecting
         ? 'Establishing a secure connection…'
         : _found.isNotEmpty
-            ? 'Tap Connect to pair your Align Pod'
-            : _scanning
-                ? 'Keep your pod powered on'
-                : 'Make sure your pod is powered on and in range';
+        ? 'Tap Connect to pair your Align Pod'
+        : _scanning
+        ? 'Keep your pod powered on'
+        : 'Make sure your pod is powered on and in range';
 
     return Column(
       children: [
@@ -542,10 +604,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         Text(
           sub,
           textAlign: TextAlign.center,
-          style: TextStyle(
-            color: scheme.onSurfaceVariant,
-            fontSize: 13,
-          ),
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
         ),
       ],
     );
@@ -562,8 +621,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       child: _connecting
           ? _buildConnectingBody()
           : _found.isEmpty
-              ? _buildEmptyBody()
-              : _buildDeviceListBody(),
+          ? _buildEmptyBody()
+          : _buildDeviceListBody(),
     );
   }
 
@@ -601,7 +660,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         Expanded(
           child: ListView.separated(
             itemCount: _found.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
             itemBuilder: (_, i) {
               final r = _found[i];
               final name = r.device.platformName.isEmpty
@@ -610,7 +669,9 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
               return _DeviceCard(
                 name: name,
                 bars: _rssiToBars(r.rssi),
-                onConnect: () => _connect(remoteId: r.device.remoteId.toString()),
+                onConnect: _resetting
+                    ? null
+                    : () => _connect(remoteId: r.device.remoteId.toString()),
               );
             },
           ),
@@ -618,7 +679,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         const SizedBox(height: 12),
         Center(
           child: GestureDetector(
-            onTap: _pairDifferentPod,
+            onTap: _resetting ? null : _pairDifferentPod,
             child: Text(
               'Pair a different pod',
               style: TextStyle(
@@ -636,6 +697,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   }
 
   Future<void> _pairDifferentPod() async {
+    if (_resetting) return;
     await BluetoothServiceManager().forgetDevice();
     if (!mounted) return;
     setState(() {
@@ -686,26 +748,33 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         if (!_scanning && _scanDone) ...[
           const SizedBox(height: 24),
           GestureDetector(
-            onTap: _startScan,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
-              decoration: BoxDecoration(
-                gradient: AppTheme.brandGradient,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.brandPrimary.withValues(alpha: 0.25),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
+            onTap: _resetting ? null : _startScan,
+            child: AnimatedOpacity(
+              opacity: _resetting ? 0.4 : 1,
+              duration: const Duration(milliseconds: 180),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 13,
+                ),
+                decoration: BoxDecoration(
+                  gradient: AppTheme.brandGradient,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.brandPrimary.withValues(alpha: 0.25),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Text(
+                  'Scan Again',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
                   ),
-                ],
-              ),
-              child: const Text(
-                'Scan Again',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
                 ),
               ),
             ),
@@ -752,9 +821,16 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          'Pairing with your Align Pod…',
-          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+        // Live step from the service: Pairing… / Connecting… /
+        // Discovering… / Finishing setup… (fresh-bond recovery).
+        ValueListenableBuilder<String>(
+          valueListenable: _btManager.deviceService.connectingLabel,
+          builder: (_, label, _) => Text(
+            label == 'Finishing setup…'
+                ? 'Finishing setup — this can take a few seconds…'
+                : 'Pairing with your Align Pod…',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+          ),
         ),
         const SizedBox(height: 24),
         GestureDetector(
@@ -807,7 +883,9 @@ class _PulseRing extends StatelessWidget {
 class _DeviceCard extends StatelessWidget {
   final String name;
   final int bars;
-  final VoidCallback onConnect;
+
+  /// Null while the old pod is still being cleared — button shows disabled.
+  final VoidCallback? onConnect;
 
   const _DeviceCard({
     required this.name,
@@ -879,8 +957,8 @@ class _DeviceCard extends StatelessWidget {
                       bars >= 3
                           ? 'Strong signal'
                           : bars == 2
-                              ? 'Good signal'
-                              : 'Weak signal',
+                          ? 'Good signal'
+                          : 'Weak signal',
                       style: TextStyle(
                         color: scheme.onSurfaceVariant,
                         fontSize: 11,
@@ -894,26 +972,32 @@ class _DeviceCard extends StatelessWidget {
           // Connect button
           GestureDetector(
             onTap: onConnect,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              decoration: BoxDecoration(
-                gradient: AppTheme.brandGradient,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.brandPrimary.withValues(alpha: 0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
+            child: AnimatedOpacity(
+              opacity: onConnect == null ? 0.4 : 1,
+              duration: const Duration(milliseconds: 180),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  gradient: AppTheme.brandGradient,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.brandPrimary.withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: const Text(
+                  'Connect',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
-                ],
-              ),
-              child: const Text(
-                'Connect',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
