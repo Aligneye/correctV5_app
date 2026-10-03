@@ -7,8 +7,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Bundle
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,6 +28,12 @@ class MainActivity : FlutterActivity() {
     // Tracks per-device bond state so we can tell "was BONDING, now BOND_NONE"
     // (a real failure) apart from "was already BOND_NONE" (irrelevant).
     private val lastBondState = mutableMapOf<String, Int>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // Native edge-to-edge opt-in (Play Console, Android 15+); Dart side handles insets.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        super.onCreate(savedInstanceState)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
