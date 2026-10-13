@@ -89,6 +89,17 @@ class BleSessionSync {
   static int runningCount = 0;
   static final Set<String> runningDevices = {};
 
+  /// Waits (capped) for in-flight syncs to finish. Cutting the pod off mid
+  /// FETCH_SESSIONS leaves fw 1.3.x hung on the next MTU exchange.
+  static Future<void> waitForIdle({
+    Duration max = const Duration(seconds: 10),
+  }) async {
+    final deadline = DateTime.now().add(max);
+    while (runningCount > 0 && DateTime.now().isBefore(deadline)) {
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
   void _setRunning(bool value) {
     if (value == _running) return;
     _running = value;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:correctv1/bluetooth/aligneye_device_service.dart';
+import 'package:correctv1/services/ble_session_sync.dart';
 import 'package:flutter/foundation.dart';
 
 /// Singleton manager for maintaining Bluetooth connection across the app
@@ -45,9 +46,26 @@ class BluetoothServiceManager {
     await _deviceService.disconnect(userInitiated: false);
   }
 
-  /// Manually disconnect by user (user clicked Disconnect)
+  // ponytail: fixed settle for the pod to drop the link and restart
+  // advertising; tune after device testing.
+  static const _podSettleAfterDisconnect = Duration(seconds: 5);
+
+  /// Manually disconnect by user (user clicked Disconnect).
+  /// Holds the same [AlignEyeDeviceService.isResetting] gate as Forget, so
+  /// "Connect saved pod" stays blocked until the pod is really free. A
+  /// reconnect a few seconds after cutting the pod off mid FETCH_SESSIONS
+  /// hangs the pod on the MTU exchange (status 133, "setup didn't finish").
   Future<void> disconnectByUser() async {
-    await _deviceService.disconnect(userInitiated: true);
+    final resetting = _deviceService.isResetting;
+    if (resetting.value) return;
+    resetting.value = true;
+    try {
+      await BleSessionSync.waitForIdle();
+      await _deviceService.disconnect(userInitiated: true);
+      await Future.delayed(_podSettleAfterDisconnect);
+    } finally {
+      resetting.value = false;
+    }
   }
 
   /// Forget the device completely (user clicked Forget Device)
