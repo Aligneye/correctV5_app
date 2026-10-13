@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:correctv1/services/ble_session_sync.dart';
 import 'package:correctv1/services/therapy_pattern_names.dart';
 
 const _kServiceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
@@ -1782,7 +1783,10 @@ class AlignEyeDeviceService {
         preferredRemoteId: preferredDeviceId,
         preferPairedDevice: remoteId == null,
         prioritizePreferredDevice: preferredDeviceId != null,
-        requirePairedDevice: false,
+        // No pod chosen by the user → only reconnect an already-paired pod.
+        // Otherwise a pull-to-connect after Forget silently pairs whatever
+        // "align pod" is nearest (someone else's, at an event).
+        requirePairedDevice: remoteId == null,
         timeout: _defaultScanTimeout,
       );
       if (device == null) {
@@ -1810,9 +1814,6 @@ class AlignEyeDeviceService {
       var isPaired = await _isDevicePaired(_device!);
       debugPrint('Device is paired: $isPaired');
       _diag('POD ${_device!.remoteId} alreadyBonded=$isPaired');
-      // Set when this attempt created a fresh bond — enables the extra
-      // fresh-bond recovery below (fw 1.3.x drops the first link after pairing).
-      var justPaired = false;
 
       // For first-time devices, ask Android to create a bond before connection.
       if (!isPaired) {
@@ -1825,7 +1826,6 @@ class AlignEyeDeviceService {
 
         if (pairingCompleted) {
           isPaired = true;
-          justPaired = true;
           debugPrint('Pairing completed successfully before connect');
           _diag('BOND done (fresh pairing)');
           // The encrypted link right after a fresh bond isn't always fully
@@ -2111,32 +2111,32 @@ class AlignEyeDeviceService {
           }
         }
 
-        // Pod firmware 1.3.x: right after a fresh bond the pod can fail the
-        // phone's connection-parameter update and go silent (HCI 0x08
-        // timeout), sometimes on the recovery link too. A bonded link after a
-        // short pause has always worked, so give it exactly one more calm try
-        // before failing. Kept to one retry with a pause — rapid back-to-back
+        // Pod firmware 1.3.x can go silent on the MTU exchange (status 133
+        // after the 5s supervision timeout) — seen right after a fresh bond
+        // AND on a bonded reconnect shortly after a disconnect, sometimes on
+        // the recovery link too. Give it exactly one more calm try before
+        // failing. Kept to one retry with a pause — rapid back-to-back
         // reconnects have crashed Android's Bluetooth process before.
         // ponytail: fixed 3s pause; drop this block once firmware is fixed.
-        if (mtu < 140 && justPaired) {
+        if (mtu < 140) {
           connectingLabel.value = 'Finishing setup…';
-          _diag('FRESH-BOND RETRY: pause 3s, then one bonded reconnect');
+          _diag('CALM RETRY: pause 3s, then one bonded reconnect');
           try {
             await _device!.disconnect();
           } catch (_) {}
           await Future.delayed(const Duration(seconds: 3));
           if (_isStaleGeneration(myGeneration)) {
-            debugPrint('Connect attempt $myGeneration superseded — aborting fresh-bond retry');
+            debugPrint('Connect attempt $myGeneration superseded — aborting calm retry');
             return;
           }
           try {
             await _recoverConnection();
             mtu = await _device!.requestMtu(247, timeout: 8);
           } catch (e) {
-            debugPrint('Fresh-bond retry failed: $e');
+            debugPrint('Calm retry failed: $e');
             mtu = 23;
           }
-          _diag('FRESH-BOND RETRY result=$mtu');
+          _diag('CALM RETRY result=$mtu');
         }
 
         if (mtu < 140) {
@@ -2354,13 +2354,21 @@ class AlignEyeDeviceService {
   }
 
   Future<void> forgetDevice() async {
+    // A user Disconnect holds this same gate while the pod settles — wait it
+    // out instead of dropping the Forget. A second Forget then just re-runs
+    // the (idempotent) teardown.
     if (isResetting.value) {
-      debugPrint('[FORGET] already in progress — ignoring duplicate call');
-      return;
+      debugPrint('[FORGET] waiting for disconnect/forget in progress');
+    }
+    while (isResetting.value) {
+      await Future.delayed(const Duration(milliseconds: 250));
     }
     debugPrint('[FORGET] ▶ start — clearing everything for ${_device?.remoteId}');
     isResetting.value = true;
     try {
+      // Same as user Disconnect: don't cut the pod off mid session-sync, or
+      // re-pairing this same pod hangs on the MTU exchange.
+      await BleSessionSync.waitForIdle();
       await _forgetDeviceInner();
     } finally {
       // Unblock connect() and the UI only now that all teardown
@@ -3590,8 +3598,11 @@ class AlignEyeDeviceService {
       try { await _device!.clearGattCache(); } catch (_) {}
       if (attempt > 0) {
         try { await _device!.disconnect(); } catch (_) {}
-        await Future.delayed(Duration(milliseconds: attempt == 1 ? 2000 : 3000));
       }
+      // Even the first reconnect waits: the link usually died because the
+      // pod went silent (fw 1.3.x MTU hang), and reconnecting 1s later just
+      // hits the same hang. ponytail: fixed 3s, tune with device logs.
+      await Future.delayed(Duration(milliseconds: attempt == 1 ? 2000 : 3000));
       try {
         await _device!.connect(
           license: License.nonprofit,

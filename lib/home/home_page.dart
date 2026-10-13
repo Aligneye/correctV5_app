@@ -1634,7 +1634,7 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   Future<void> _handleDeviceStatusTap() async {
     if (_deviceService.isResetting.value) {
-      _showBleSnackBar('Clearing old pod data — please wait a moment.');
+      _showBleSnackBar('Disconnecting pod — please wait a moment.');
       return;
     }
     final status = _deviceService.connectionStatus.value;
@@ -1754,8 +1754,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         },
         onForget: () async {
           Navigator.of(ctx).pop();
-          await BluetoothServiceManager.instance.forgetDevice();
-          if (!mounted) return;
+          unawaited(BluetoothServiceManager.instance.forgetDevice());
           await Navigator.of(context).push<bool>(
             MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
           );
@@ -1781,10 +1780,35 @@ class _HomeDashboardState extends State<HomeDashboard>
         },
         onPairNew: () async {
           Navigator.of(ctx).pop();
-          await BluetoothServiceManager.instance.forgetDevice();
-          if (!mounted) return;
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (dCtx) => AlertDialog(
+              title: const Text('Remove saved pod?'),
+              content: const Text(
+                'Your current pod will be unpaired. To use it again '
+                'you\'ll need to pair it again.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dCtx, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(dCtx, true),
+                  child: const Text(
+                    'Remove',
+                    style: TextStyle(color: Color(0xFFEF4444)),
+                  ),
+                ),
+              ],
+            ),
+          );
+          if (confirm != true || !mounted) return;
           if (!await _ensureBleReady()) return;
           if (!mounted) return;
+          // Forget runs in the background; the connect page shows the
+          // isResetting wait state and only scans once it's done.
+          unawaited(BluetoothServiceManager.instance.forgetDevice());
           await Navigator.of(context).push<bool>(
             MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
           );
@@ -2589,6 +2613,10 @@ class _HomeDashboardState extends State<HomeDashboard>
   ///   sessions stored on the device land in the app/Supabase.
   Future<void> _handlePullToRefresh() async {
     if (!mounted) return;
+    if (_deviceService.isResetting.value) {
+      _showBleSnackBar('Disconnecting pod — please wait a moment.');
+      return;
+    }
 
     final wasAlreadyConnected =
         _deviceService.connectionStatus.value ==
@@ -2658,6 +2686,17 @@ class _HomeDashboardState extends State<HomeDashboard>
       await Future.delayed(const Duration(seconds: 2));
       if (!mounted) return;
       setState(() => _pullConnectPhase = PullConnectPhase.idle);
+      return;
+    }
+
+    // No paired pod (e.g. after Forget) — let the user pick one from the
+    // scan list instead of auto-pairing whichever pod is nearest.
+    if (!await _deviceService.hasBondedTargetDevice()) {
+      if (!mounted) return;
+      setState(() => _pullConnectPhase = PullConnectPhase.idle);
+      await Navigator.of(
+        context,
+      ).push<bool>(MaterialPageRoute(builder: (_) => const DeviceConnectPage()));
       return;
     }
 

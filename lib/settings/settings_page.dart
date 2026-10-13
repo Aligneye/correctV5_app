@@ -560,17 +560,24 @@ class _DeviceSection extends StatelessWidget {
 
     return _GroupCard(children: [
       // Pod connect / disconnect
-      ValueListenableBuilder<DeviceConnectionStatus>(
-        valueListenable: svc.connectionStatus,
-        builder: (context, status, _) {
-          final connected = status == DeviceConnectionStatus.connected;
+      ListenableBuilder(
+        listenable: Listenable.merge([svc.connectionStatus, svc.isResetting]),
+        builder: (context, _) {
+          // Disconnect holds the isResetting gate until the pod settles.
+          final resetting = svc.isResetting.value;
+          final connected =
+              svc.connectionStatus.value == DeviceConnectionStatus.connected;
           return _RowItem(
             gradient: AppTheme.brandGradient,
             icon: Icons.bluetooth_rounded,
             title: 'Align Pod',
-            subtitle: connected ? 'Connected' : 'Tap to connect',
-            trailing: _StatusDot(connected: connected),
-            onTap: () async {
+            subtitle: resetting
+                ? 'Disconnecting…'
+                : connected
+                    ? 'Connected'
+                    : 'Tap to connect',
+            trailing: _StatusDot(connected: connected && !resetting),
+            onTap: resetting ? null : () async {
               if (connected) {
                 final confirm = await showDialog<bool>(
                   context: context,

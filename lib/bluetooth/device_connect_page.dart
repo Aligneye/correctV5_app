@@ -66,7 +66,11 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
     // reflect that state — don't kick off a scan. The pod is already being
     // reached for; scanning on top would cause a duplicate pair prompt.
     final currentStatus = _btManager.deviceService.connectionStatus.value;
-    if (currentStatus == DeviceConnectionStatus.connecting) {
+    if (_resetting) {
+      // Forget/Disconnect still tearing down — status may read "connected"
+      // for a moment; wait it out instead of popping.
+      _bootstrapConnectFlow();
+    } else if (currentStatus == DeviceConnectionStatus.connecting) {
       _connecting = true;
     } else if (currentStatus == DeviceConnectionStatus.connected) {
       // Pop right away on the next frame — nothing to do here.
@@ -82,6 +86,10 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   /// nearby pods (first-time pairing) or to connect straight to the already
   /// bonded pod (no scan, no pair popup).
   Future<void> _bootstrapConnectFlow() async {
+    // A Forget may still be unbonding the old pod — checking bonds before it
+    // finishes would auto-connect straight back to the pod being removed.
+    await _waitForReset();
+    if (!mounted) return;
     final hasBonded = await _btManager.deviceService.hasBondedTargetDevice();
     if (!mounted) return;
     if (hasBonded) {
@@ -335,9 +343,10 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       return 'Please enable Bluetooth and try again.';
     }
     if (raw.contains('MTU')) {
-      // Pod is already paired at this point, so a second tap connects on
-      // the bonded path, which has always worked.
-      return 'Your pod is paired but setup didn\'t finish. Tap Connect again.';
+      // Pod went silent on the MTU exchange (fw 1.3.x). An instant re-tap
+      // usually hits the same hang, so ask for a short wait first.
+      return 'Pod setup didn\'t finish. Wait a few seconds, keep the pod '
+          'close to your phone, then tap Connect again.';
     }
     return 'Could not connect. Please try again.';
   }
@@ -570,7 +579,7 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   Widget _buildStatusLabel() {
     final scheme = Theme.of(context).colorScheme;
     final title = _resetting
-        ? 'Clearing old pod data'
+        ? 'Please wait…'
         : _connecting
         ? 'Connecting to Align Pod'
         : _found.isNotEmpty
