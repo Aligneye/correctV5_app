@@ -11,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:correctv1/home/meditation_page.dart';
 import 'package:correctv1/discover/discover_page.dart';
 import 'package:correctv1/home/ongoing_therapy_page.dart';
-import 'package:correctv1/home/therapy_page.dart';
+import 'package:correctv1/home/therapy_area_page.dart';
 import 'package:correctv1/home/training_page.dart';
 import 'package:correctv1/analytics/analytics_screen.dart';
 import 'package:correctv1/sessions/sessions_history_page.dart'
@@ -145,7 +145,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (_, animation, _) =>
-            FadeTransition(opacity: animation, child: const TherapyPage()),
+            FadeTransition(opacity: animation, child: const TherapyAreaPage()),
         transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,

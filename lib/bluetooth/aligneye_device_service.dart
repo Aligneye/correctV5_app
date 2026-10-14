@@ -1896,34 +1896,13 @@ class AlignEyeDeviceService {
         for (int attempt = 0; attempt < 3; attempt++) {
           if (attempt > 0) {
             // GATT 133: device is busy or held by another client.
-            // Clear cache + disconnect, then on the last attempt fall back to
-            // scanning for any available pod (the bonded one may be in use).
+            // Clear cache + disconnect, then retry the SAME pod. Never fall
+            // back to some other nearby pod — that could grab someone else's.
             debugPrint('GATT 133 — clearing cache before retry ${attempt + 1}/3...');
             try { await _device!.clearGattCache(); } catch (_) {}
             try { await _device!.disconnect(); } catch (_) {}
             final waitMs = attempt == 1 ? 2000 : 3000;
             await Future.delayed(Duration(milliseconds: waitMs));
-
-            // Last attempt: scan for any available pod instead of forcing the
-            // bonded one (which may be connected to another phone/client).
-            if (attempt == 2) {
-              debugPrint('GATT 133 persists — scanning for any available pod...');
-              connectingLabel.value = 'Scanning…';
-              final stuckDeviceId = _device!.remoteId.toString();
-              final fallback = await _scanForDevice(
-                preferPairedDevice: false,
-                prioritizePreferredDevice: false,
-                requirePairedDevice: false,
-                timeout: _defaultScanTimeout,
-                excludeDeviceId: stuckDeviceId,
-              );
-              if (fallback != null && fallback.remoteId != _device!.remoteId) {
-                debugPrint('Found alternate pod via scan: ${fallback.platformName}');
-                _device = fallback;
-                isPaired = await _isDevicePaired(_device!);
-              }
-              connectingLabel.value = 'Connecting…';
-            }
           }
 
           debugPrint(
