@@ -316,7 +316,8 @@ class _TopHeaderBarState extends State<TopHeaderBar>
     required String statusLabel,
     required bool isConnected,
     required bool isPending,
-  }) {
+  })
+  {
     final scheme = Theme.of(context).colorScheme;
     final batteryIcon = widget.batteryLevel > 70
         ? Icons.battery_full_rounded

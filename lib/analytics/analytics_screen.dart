@@ -332,6 +332,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           previousLabel: _previousLabels[_period],
         ),
         const SizedBox(height: 16),
+        TodayPostureSplit(today: current.last),
+        const SizedBox(height: 16),
         AnalyticsSection(
           title: 'Score trend',
           subtitle: 'Tap a day to see its sessions',

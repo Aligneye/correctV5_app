@@ -340,6 +340,125 @@ class AnalyticsSection extends StatelessWidget {
   }
 }
 
+// ─── Today: good vs slouched time ────────────────────────────────────────────
+
+class TodayPostureSplit extends StatelessWidget {
+  const TodayPostureSplit({super.key, required this.today});
+
+  final DailyProgress today;
+
+  @override
+  Widget build(BuildContext context) {
+    final worn = today.postureSec;
+    final bad = today.wrongDurSec.clamp(0, worn);
+    final good = worn - bad;
+    final has = today.hasData;
+    final badPct = has ? (bad / worn * 100).round() : 0;
+    return Row(
+      children: [
+        Expanded(
+          child: _SplitTile(
+            icon: Icons.check_circle_rounded,
+            color: AppTheme.successText,
+            title: 'Good posture',
+            value: has ? formatWornTime(good) : '—',
+            caption: has
+                ? 'of ${formatWornTime(worn)} worn today'
+                : 'Not worn yet today',
+            fraction: has ? good / worn : 0,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _SplitTile(
+            icon: Icons.warning_rounded,
+            color: AppTheme.destructive,
+            title: 'Slouched',
+            value: has ? formatWornTime(bad) : '—',
+            caption: has ? '$badPct% of today' : 'Not worn yet today',
+            fraction: has ? bad / worn : 0,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SplitTile extends StatelessWidget {
+  const _SplitTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.value,
+    required this.caption,
+    required this.fraction,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String value;
+  final String caption;
+  final double fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    return HomeSurfaceCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: color,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            caption,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: _muted(context)),
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: fraction.clamp(0.0, 1.0)),
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeOutCubic,
+              builder: (_, v, _) => LinearProgressIndicator(
+                value: v,
+                minHeight: 6,
+                color: color,
+                backgroundColor: color.withValues(alpha: 0.15),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Score trend ─────────────────────────────────────────────────────────────
 
 class ScoreTrendChart extends StatelessWidget {

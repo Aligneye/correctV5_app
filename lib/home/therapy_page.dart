@@ -8,10 +8,13 @@ import 'package:correctv1/bluetooth/aligneye_device_service.dart';
 import 'package:correctv1/bluetooth/bluetooth_service_manager.dart';
 import 'package:correctv1/bluetooth/pod_disconnected_dialog.dart';
 import 'package:correctv1/home/ongoing_therapy_page.dart';
+import 'package:correctv1/home/therapy_area_page.dart';
 import 'package:correctv1/services/device_manager.dart';
 
 class TherapyPage extends StatefulWidget {
-  const TherapyPage({super.key});
+  final TherapyArea area;
+
+  const TherapyPage({super.key, required this.area});
 
   @override
   State<TherapyPage> createState() => _TherapyPageState();
@@ -32,6 +35,9 @@ class _TherapyPageState extends State<TherapyPage>
   int _durationMinutes = 10;
   bool _isRunning = false;
   String _selectedPointId = 'GV14';
+
+  // GV14/GV13 are upper-back points; other areas have no point picker yet.
+  bool get _showPoints => widget.area.id == 'upper_back';
 
   static const _points = <_TherapyPoint>[
     _TherapyPoint(
@@ -143,7 +149,7 @@ class _TherapyPageState extends State<TherapyPage>
     // about to tell the device, so the row Supabase receives reflects the
     // user's choices even if the device is slow to echo them back.
     DeviceManager().primeTherapyContext(
-      targetPoint: selectedPoint.id,
+      targetPoint: _showPoints ? selectedPoint.id : widget.area.id,
       intensityLevel: intensityLevel,
       plannedDurationMinutes: _durationMinutes,
     );
@@ -165,7 +171,8 @@ class _TherapyPageState extends State<TherapyPage>
               deviceService: _deviceService,
               durationMinutes: _durationMinutes,
               intensity: intensityLevel,
-              targetPointName: selectedPoint.name,
+              targetPointName:
+                  _showPoints ? selectedPoint.name : widget.area.label,
             ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
@@ -209,7 +216,31 @@ class _TherapyPageState extends State<TherapyPage>
               _StaggeredEntrance(
                 controller: _entryController,
                 delay: 0.10,
-                child: _GlassPanel(
+                child: !_showPoints
+                    ? _GlassPanel(
+                        padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.gps_fixed_rounded,
+                              color: Color(0xFFFF2B62),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Target area: ${widget.area.label}',
+                                style: const TextStyle(
+                                  color: Color(0xFF374151),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _GlassPanel(
                   padding: const EdgeInsets.fromLTRB(22, 25, 22, 22),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

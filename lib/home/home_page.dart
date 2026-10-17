@@ -11,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:correctv1/home/meditation_page.dart';
 import 'package:correctv1/discover/discover_page.dart';
 import 'package:correctv1/home/ongoing_therapy_page.dart';
-import 'package:correctv1/home/therapy_page.dart';
+import 'package:correctv1/home/therapy_area_page.dart';
 import 'package:correctv1/home/training_page.dart';
 import 'package:correctv1/analytics/analytics_screen.dart';
 import 'package:correctv1/sessions/sessions_history_page.dart'
@@ -145,7 +145,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (_, animation, _) =>
-            FadeTransition(opacity: animation, child: const TherapyPage()),
+            FadeTransition(opacity: animation, child: const TherapyAreaPage()),
         transitionsBuilder: (_, animation, _, child) {
           final curved = CurvedAnimation(
             parent: animation,
@@ -1067,7 +1067,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     List<SessionData> sessions,
     bool isLoading, {
     VoidCallback? onTap,
-  }) {
+  })
+  {
     const label = 'Last session';
 
     if (isLoading && sessions.isEmpty) {
@@ -1114,7 +1115,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   static StatItemData _trainingTimeStatItem(
     TodayStats? stats, {
     VoidCallback? onTap,
-  }) {
+  })
+  {
     return _durationStatItem(
       stats: stats,
       label: 'Training time',
@@ -1151,7 +1153,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     required int yesterdaySec,
     required bool yesterdayHasData,
     VoidCallback? onTap,
-  }) {
+  })
+  {
     if (stats == null) {
       return StatItemData(
         value: '—',
@@ -1590,7 +1593,8 @@ class _HomeDashboardState extends State<HomeDashboard>
   static StreakPopupKind? _classifyStreakEvent({
     required int previousStreak,
     required int currentStreak,
-  }) {
+  })
+  {
     if (currentStreak > previousStreak) return StreakPopupKind.increased;
     if (currentStreak < previousStreak) return StreakPopupKind.broken;
     return null; // unchanged — no popup
@@ -1633,35 +1637,38 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   Future<void> _handleDeviceStatusTap() async {
-    if (_deviceService.isResetting.value) {
-      _showBleSnackBar('Disconnecting pod — please wait a moment.');
-      return;
+    try {
+      if (_deviceService.isResetting.value) {
+        _showBleSnackBar('Disconnecting pod — please wait a moment.');
+        return;
+      }
+      final status = _deviceService.connectionStatus.value;
+
+      if (status == DeviceConnectionStatus.connected) {
+        await _showConnectedSheet();
+        return;
+      }
+
+      if (!mounted) return;
+
+      // If the user has previously paired a pod, show the disconnected sheet
+      // so they can choose to reconnect the saved pod or pair a new one.
+      final everConnected = await _deviceService.hasEverConnected;
+      if (!mounted) return;
+
+      if (everConnected) {
+        await _showDisconnectedSheet();
+        return;
+      }
+
+      // First-time user — go straight to the connect/scan page.
+      if (!await _ensureBleReady() || !mounted) return;
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => const DeviceConnectPage()),
+      );
+    } catch (e, st) {
+      debugPrint('Device status tap failed: $e\n$st');
     }
-    final status = _deviceService.connectionStatus.value;
-
-    if (status == DeviceConnectionStatus.connected) {
-      await _showConnectedSheet();
-      return;
-    }
-
-    if (!mounted) return;
-
-    // If the user has previously paired a pod, show the disconnected sheet
-    // so they can choose to reconnect the saved pod or pair a new one.
-    final everConnected = await _deviceService.hasEverConnected;
-    if (!mounted) return;
-
-    if (everConnected) {
-      await _showDisconnectedSheet();
-      return;
-    }
-
-    // First-time user — go straight to the connect/scan page.
-    if (!await _ensureBleReady()) return;
-    if (!mounted) return;
-    await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => const DeviceConnectPage()));
   }
 
   /// Ensures Bluetooth is on and permissions are granted before proceeding.
@@ -1991,7 +1998,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     required PostureTimingType postureTiming,
     required int therapyDurationMinutes,
     required int difficultyDegrees,
-  }) async {
+  }) async
+  {
     final modeLabel = switch (mode) {
       ModeControlType.track => 'IDLE',
       ModeControlType.posture => 'TRAINING',
@@ -2268,7 +2276,12 @@ class _HomeDashboardState extends State<HomeDashboard>
           // The default platform spinner is hidden — our own
           // [PullConnectBanner] (rendered as the first item below) shows
           // the connecting/connected/failed status instead.
-          color: Colors.transparent,
+          // Must NOT be fully transparent: RefreshIndicator arms itself once
+          // the spinner colour reaches full alpha, and alpha 0 counts as
+          // "full" on the very first drag frame — so a fast fling down the
+          // page from the top fired onRefresh. Alpha 1/255 keeps it invisible
+          // but arms only on a real pull.
+          color: const Color(0x01000000),
           backgroundColor: Colors.transparent,
           elevation: 0,
           child: SingleChildScrollView(
