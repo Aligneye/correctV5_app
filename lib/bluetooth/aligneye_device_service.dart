@@ -2324,6 +2324,17 @@ class AlignEyeDeviceService {
   Future<bool> hasUnpairedTargetDeviceNearby({
     Duration timeout = _defaultScanTimeout,
   }) async {
+    // Silent background probe: never scan without BLE permissions already
+    // granted. Otherwise flutter_blue_plus fires its own permission request;
+    // if that collides with another one, Android drops it ("Can request only
+    // one set of permissions at a time"), FBP never gets a result, and its
+    // global method lock stays held — every later FBP call (incl. the
+    // Tap-to-connect readiness check) hangs until the app is restarted.
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        (!await Permission.bluetoothScan.isGranted ||
+            !await Permission.bluetoothConnect.isGranted)) {
+      return false;
+    }
     final device = await _scanForDevice(
       preferPairedDevice: false,
       prioritizePreferredDevice: false,
