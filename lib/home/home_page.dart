@@ -2268,7 +2268,12 @@ class _HomeDashboardState extends State<HomeDashboard>
           // The default platform spinner is hidden — our own
           // [PullConnectBanner] (rendered as the first item below) shows
           // the connecting/connected/failed status instead.
-          color: Colors.transparent,
+          // Must NOT be fully transparent: RefreshIndicator arms itself once
+          // the spinner colour reaches full alpha, and alpha 0 counts as
+          // "full" on the very first drag frame — so a fast fling down the
+          // page from the top fired onRefresh. Alpha 1/255 keeps it invisible
+          // but arms only on a real pull.
+          color: const Color(0x01000000),
           backgroundColor: Colors.transparent,
           elevation: 0,
           child: SingleChildScrollView(

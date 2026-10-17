@@ -7,71 +7,93 @@ import 'package:correctv1/home/therapy_page.dart';
 class TherapyArea {
   final String id;
   final String label;
+  final String hint; // where the pod goes, in plain words
+  final String asset;
 
-  const TherapyArea(this.id, this.label);
+  const TherapyArea(this.id, this.label, this.hint, this.asset);
 }
 
+/// Ordered head to toe — the list reads like a body, top to bottom.
 const therapyAreas = <TherapyArea>[
-  TherapyArea('neck', 'Neck & shoulders'),
-  TherapyArea('upper_back', 'Upper back'),
-  TherapyArea('lower_back', 'Lower back'),
-  TherapyArea('left_hand', 'Left hand'),
-  TherapyArea('right_hand', 'Right hand'),
-  TherapyArea('left_leg', 'Left leg'),
-  TherapyArea('right_leg', 'Right leg'),
-  TherapyArea('left_foot', 'Left foot'),
-  TherapyArea('right_foot', 'Right foot'),
+  TherapyArea(
+    'neck',
+    'Neck Therapy',
+    'Back of the neck',
+    'assets/Neck Pain Relief  therapy.png',
+  ),
+  TherapyArea(
+    'shoulders',
+    'Shoulder Therapy',
+    'Top of either shoulder',
+    'assets/Shoulder Therapy Backside Icon.png',
+  ),
+  TherapyArea(
+    'upper_back',
+    'Upper Back Therapy',
+    'Between the shoulder blades',
+    'assets/Upper Back Muscle Therapy Icon.png',
+  ),
+  TherapyArea(
+    'lower_back',
+    'Lower Back Therapy',
+    'Just above the waist',
+    'assets/lower back therapy.png',
+  ),
+  TherapyArea(
+    'core',
+    'Core & Abdomen Therapy',
+    'Around the belly',
+    'assets/Glowing Core Therapy Icon.png',
+  ),
+  TherapyArea(
+    'biceps',
+    'Biceps Therapy',
+    'Front of the upper arm',
+    'assets/Bicep Therapy Icon.png',
+  ),
+  TherapyArea(
+    'triceps',
+    'Triceps Therapy',
+    'Back of the upper arm',
+    'assets/Triceps Therapy Muscle Activation Badge.png',
+  ),
+  TherapyArea(
+    'forearm',
+    'Forearm Therapy',
+    'Between elbow and wrist',
+    'assets/Forearm Therapy Muscle.png',
+  ),
+  TherapyArea(
+    'thigh',
+    'Thigh Therapy',
+    'Front of the thigh',
+    'assets/Thigh Muscle Therapy.png',
+  ),
+  TherapyArea(
+    'knee',
+    'Knee Therapy',
+    'Around the kneecap',
+    'assets/Knee Muscle Anatomy Illustration.png',
+  ),
+  TherapyArea(
+    'calf',
+    'Calf Therapy',
+    'Back of the lower leg',
+    'assets/Calf  Therapy.png',
+  ),
+  TherapyArea(
+    'ankle',
+    'Ankle Therapy',
+    'Around the ankle',
+    'assets/Angel therapy.png',
+  ),
 ];
-
-/// Region cards and the sub-options shown in the toggle below them.
-/// A region tap selects its first option (Back defaults to upper back,
-/// where the GV acupressure points are).
-const _regions =
-    <
-      ({
-        String label,
-        IconData icon,
-        String prompt,
-        List<(String id, String label)> options,
-      })
-    >[
-      (
-        label: 'Back',
-        icon: Icons.accessibility_new_rounded,
-        prompt: 'Which part?',
-        options: [
-          ('neck', 'Neck'),
-          ('upper_back', 'Upper'),
-          ('lower_back', 'Lower'),
-        ],
-      ),
-      (
-        label: 'Hand',
-        icon: Icons.back_hand_rounded,
-        prompt: 'Which side?',
-        options: [('left_hand', 'Left'), ('right_hand', 'Right')],
-      ),
-      (
-        label: 'Leg',
-        icon: Icons.directions_walk_rounded,
-        prompt: 'Which side?',
-        options: [('left_leg', 'Left'), ('right_leg', 'Right')],
-      ),
-      (
-        label: 'Foot',
-        icon: Icons.ice_skating_rounded,
-        prompt: 'Which side?',
-        options: [('left_foot', 'Left'), ('right_foot', 'Right')],
-      ),
-    ];
 
 const String _kPrefTherapyArea = 'therapy_last_area';
 
-const _pinkGradient = LinearGradient(
-  begin: Alignment.topLeft,
-  end: Alignment.bottomRight,
-  colors: [Color(0xFFFF1F5B), Color(0xFFED2CA6)],
-);
+const _therapyPink = Color(0xFFFF2B62);
+
+const _fast = Duration(milliseconds: 180);
 
 /// First step of therapy: pick where on the body the pod will sit.
 class TherapyAreaPage extends StatefulWidget {
@@ -103,15 +125,15 @@ class _TherapyAreaPageState extends State<TherapyAreaPage> {
     }
   }
 
-  void _select(String id) {
-    if (id == _selectedId) return;
-    HapticFeedback.selectionClick();
-    setState(() => _selectedId = id);
-  }
+  bool _opening = false;
 
-  Future<void> _continue() async {
+  /// One tap picks the area and goes straight to therapy. The highlight
+  /// only marks the last-used area.
+  Future<void> _open(TherapyArea area) async {
+    if (_opening) return; // ignore a fast double tap
+    _opening = true;
     HapticFeedback.mediumImpact();
-    final area = therapyAreas.firstWhere((a) => a.id == _selectedId);
+    setState(() => _selectedId = area.id);
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kPrefTherapyArea, area.id);
@@ -119,23 +141,22 @@ class _TherapyAreaPageState extends State<TherapyAreaPage> {
       // Non-critical.
     }
     if (!mounted) return;
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => TherapyPage(area: area)));
+    try {
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => TherapyPage(area: area)));
+    } finally {
+      _opening = false;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final selected = therapyAreas.firstWhere((a) => a.id == _selectedId);
-    final region = _regions.firstWhere(
-      (r) => r.options.any((o) => o.$1 == _selectedId),
-    );
     return Scaffold(
       body: SafeArea(
         child: ListView(
           physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(23, 20, 22, 22),
+          padding: const EdgeInsets.fromLTRB(23, 20, 22, 16),
           children: [
             Align(
               alignment: Alignment.centerLeft,
@@ -187,97 +208,22 @@ class _TherapyAreaPageState extends State<TherapyAreaPage> {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Pick the spot where you will place your Align Pod.',
+              "Pick the spot where you'll place your Align Pod.",
               style: TextStyle(
                 color: Color(0xFF667085),
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
               ),
             ),
-            const SizedBox(height: 24),
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.25,
-              children: [
-                for (final r in _regions)
-                  _RegionCard(
-                    label: r.label,
-                    icon: r.icon,
-                    isSelected: identical(r, region),
-                    onTap: () => _select(
-                      r.label == 'Back' ? 'upper_back' : r.options.first.$1,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Text(
-              region.prompt,
-              style: const TextStyle(
-                color: Color(0xFF374151),
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+            const SizedBox(height: 20),
+            for (var i = 0; i < therapyAreas.length; i++)
+              _AreaRow(
+                area: therapyAreas[i],
+                isSelected: therapyAreas[i].id == _selectedId,
+                isFirst: i == 0,
+                isLast: i == therapyAreas.length - 1,
+                onTap: () => _open(therapyAreas[i]),
               ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                segments: [
-                  for (final o in region.options)
-                    ButtonSegment(value: o.$1, label: Text(o.$2)),
-                ],
-                selected: {_selectedId},
-                onSelectionChanged: (s) => _select(s.first),
-                showSelectedIcon: false,
-                style: SegmentedButton.styleFrom(
-                  selectedBackgroundColor: const Color(0xFFFF2B62),
-                  selectedForegroundColor: Colors.white,
-                  foregroundColor: scheme.onSurface,
-                  minimumSize: const Size.fromHeight(46),
-                  textStyle: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 28),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _continue,
-                borderRadius: BorderRadius.circular(12),
-                child: Ink(
-                  height: 54,
-                  decoration: BoxDecoration(
-                    gradient: _pinkGradient,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFF43F5E).withValues(alpha: 0.28),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      'Continue with ${selected.label.toLowerCase()}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -285,64 +231,142 @@ class _TherapyAreaPageState extends State<TherapyAreaPage> {
   }
 }
 
-class _RegionCard extends StatelessWidget {
-  final String label;
-  final IconData icon;
+/// One body area. The thin line behind the thumbnails runs head to toe
+/// through every row, so the list reads as one body.
+class _AreaRow extends StatelessWidget {
+  final TherapyArea area;
   final bool isSelected;
+  final bool isFirst;
+  final bool isLast;
   final VoidCallback onTap;
 
-  const _RegionCard({
-    required this.label,
-    required this.icon,
+  const _AreaRow({
+    required this.area,
     required this.isSelected,
+    required this.isFirst,
+    required this.isLast,
     required this.onTap,
   });
+
+  static const double _rowHeight = 84;
+  static const double _thumb = 60;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fg = isSelected ? Colors.white : scheme.onSurface;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            gradient: isSelected ? _pinkGradient : null,
-            color: isSelected ? null : scheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: isSelected ? null : Border.all(color: scheme.outline),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFFE11D48).withValues(alpha: 0.27),
-                      blurRadius: 13,
-                      offset: const Offset(0, 7),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 32,
-                color: isSelected ? Colors.white : const Color(0xFFFF2B62),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                label,
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final spineColor = isDark ? scheme.outlineVariant : const Color(0xFFE5E7EB);
+    final tint = isDark
+        ? _therapyPink.withValues(alpha: 0.12)
+        : const Color(0xFFFFF1F5);
+
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: '${area.label}. ${area.hint}',
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: AnimatedContainer(
+            duration: _fast,
+            curve: Curves.easeOutCubic,
+            height: _rowHeight,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: isSelected ? tint : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: _thumb + 4,
+                  height: _rowHeight,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Spine: upper half joins the row above, lower half
+                      // the row below.
+                      Column(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              width: 2,
+                              color: isFirst ? Colors.transparent : spineColor,
+                            ),
+                          ),
+                          Expanded(
+                            child: Container(
+                              width: 2,
+                              color: isLast ? Colors.transparent : spineColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      AnimatedContainer(
+                        duration: _fast,
+                        curve: Curves.easeOutCubic,
+                        width: _thumb + 4,
+                        height: _thumb + 4,
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected ? _therapyPink : spineColor,
+                        ),
+                        // Clipped to a circle: the source art has
+                        // inconsistent corners (white, transparent).
+                        child: ClipOval(
+                          child: Image.asset(
+                            area.asset,
+                            fit: BoxFit.cover,
+                            // Source files are ~1250px; decode small.
+                            cacheWidth: 180,
+                            filterQuality: FilterQuality.medium,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        area.label,
+                        style: TextStyle(
+                          color: scheme.onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        area.hint,
+                        style: const TextStyle(
+                          color: Color(0xFF667085),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                AnimatedOpacity(
+                  duration: _fast,
+                  opacity: isSelected ? 1 : 0,
+                  child: const Icon(
+                    Icons.check_circle_rounded,
+                    color: _therapyPink,
+                    size: 24,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

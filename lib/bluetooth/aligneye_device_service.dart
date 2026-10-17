@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show max;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -801,6 +802,7 @@ class AlignEyeDeviceService {
   // last forget finished, and whether the pod's first frame was seen yet.
   final Stopwatch _diagWatch = Stopwatch();
   DateTime? _lastForgetDoneAt;
+  DateTime? _lastLinkDownAt;
   bool _diagFirstFrameSeen = true;
   String _lastKnownMode = 'IDLE';
   String _lastKnownSubMode = 'INSTANT';
@@ -906,11 +908,20 @@ class AlignEyeDeviceService {
   String _buffer = '';
   bool _isConnecting = false;
   Timer? _connectionTimeoutTimer;
-  int _connectionRetryCount = 0;
   DateTime? _lastTherapyPlanRequestedAt;
   int _commandSeq = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
-  static const int _maxRetries = 1;
-  static const Duration _connectionTimeout = Duration(seconds: 45);
+  // Full link-setup tries per connect() (fresh connection each time).
+  static const int _kMaxSetupTries = 4;
+  // Min wait after dropping a dead link before the next setup try. The pod
+  // keeps the old link alive until its ~5s supervision timeout (~1.9s after
+  // our disconnect on an MTU hang); retrying sooner lands on that zombie
+  // link and dies with "link down after connect". 3.6s+ worked in logs.
+  static const int _kDeadLinkCooldownMs = 4000;
+  // Experiment: request MTU before service discovery instead of after.
+  // Enable with --dart-define=BLE_MTU_FIRST=true.
+  static const bool _kMtuFirst = bool.fromEnvironment('BLE_MTU_FIRST');
+  // Covers all setup tries plus their backoff.
+  static const Duration _connectionTimeout = Duration(seconds: 60);
   static const Duration _serviceDiscoveryTimeout = Duration(seconds: 8);
   static const Duration _defaultScanTimeout = Duration(seconds: 6);
   // Android throttles apps that start >5 scans within 30s. Enforce a minimum
@@ -1687,11 +1698,6 @@ class AlignEyeDeviceService {
       return;
     }
 
-    // Reset retry count for new connection attempt
-    if (connectionStatus.value == DeviceConnectionStatus.disconnected) {
-      _connectionRetryCount = 0;
-    }
-
     _isConnecting = true;
     _diagWatch
       ..reset()
@@ -1718,7 +1724,7 @@ class AlignEyeDeviceService {
       }
 
       // Manual connect: request permissions and turn on Bluetooth.
-      final hasPermissions = await _ensurePermissions();
+      final hasPermissions = await _ensurePermissions();//start bluetooth point
       if (!hasPermissions) {
         debugPrint('Required permissions not granted, cannot proceed');
         _isConnecting = false;
@@ -1880,270 +1886,51 @@ class AlignEyeDeviceService {
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      {
+      // Link setup (GATT connect → discovery + MTU → notifications) runs as
+      // one unit with no inner retries. If the link turns out dead mid-setup
+      // (MTU status 133 / timeout / too low, a drop between steps, or the
+      // characteristic missing), that link is abandoned and the whole unit
+      // reruns on a fresh connection — retrying on the same link never
+      // recovered it, while a new connection gets the MTU instantly.
+      for (var t = 1; t <= _kMaxSetupTries; t++) {
+        if (_isStaleGeneration(myGeneration)) {
+          debugPrint('Connect attempt $myGeneration superseded — aborting before setup try $t');
+          return;
+        }
         connectingLabel.value = 'Connecting…';
-
-        // GATT cache is no longer cleared before every connect — it's an extra
-        // OEM-sensitive step on the most fragile part of the flow. It's now a
-        // recovery step only: the 133 retry below, _recoverConnection() (dead
-        // link during discovery/MTU/notify), and the "characteristic not
-        // found" retry all clear it before trying again. Forget also clears it.
-
-        // Attempt GATT connect with one retry on android-code 133.
-        // Error 133 means the previous GATT stack hasn't fully torn down yet —
-        // waiting 1.5s and trying once more almost always recovers it.
-        bool connected = false;
-        for (int attempt = 0; attempt < 3; attempt++) {
-          if (attempt > 0) {
-            // GATT 133: device is busy or held by another client.
-            // Clear cache + disconnect, then retry the SAME pod. Never fall
-            // back to some other nearby pod — that could grab someone else's.
-            debugPrint('GATT 133 — clearing cache before retry ${attempt + 1}/3...');
-            try { await _device!.clearGattCache(); } catch (_) {}
-            try { await _device!.disconnect(); } catch (_) {}
-            final waitMs = attempt == 1 ? 2000 : 3000;
-            await Future.delayed(Duration(milliseconds: waitMs));
-          }
-
-          debugPrint(
-            'Connecting to device attempt ${attempt + 1}/3 '
-            '(${_device!.remoteId}, isPaired: $isPaired)...',
-          );
-
-          try {
-            await _device!.connect(
-              license: License.nonprofit,
-              timeout: const Duration(seconds: 10),
-              autoConnect: false,
-              mtu: null, // skip auto-512 MTU; we request 247 after discovery
-            );
-            debugPrint('Connect call completed, waiting for connection state...');
-
-            await _device!.connectionState
-                .where((state) => state == BluetoothConnectionState.connected)
-                .first
-                .timeout(const Duration(seconds: 10));
-
-            debugPrint('Device connected successfully on attempt ${attempt + 1}');
-            _diag('GATT connected (attempt ${attempt + 1})');
-            connected = true;
-            break;
-          } catch (e) {
-            debugPrint('Connection attempt ${attempt + 1} failed: $e');
-            if (attempt == 2) rethrow;
-            // Only retry on android-code 133 (GATT stack busy/torn-down);
-            // anything else is a real failure, surface it immediately.
-            final isGatt133 = e is FlutterBluePlusException && e.code == 133;
-            if (!isGatt133) rethrow;
-          }
-        }
-
-        if (!connected) {
-          throw Exception('Failed to connect after 3 attempts');
-        }
-
-        // The link (re-encryption on every connect, not just first pairing)
-        // isn't always settled the instant the GATT connect callback fires.
-        // Calling discoverServices() too soon can trigger an immediate
-        // disconnect (seen on both fresh pairs and plain reconnects to an
-        // already-bonded pod) — 300ms wasn't always enough in practice.
-        await Future.delayed(const Duration(milliseconds: 800));
-      }
-
-      if (_isStaleGeneration(myGeneration)) {
-        debugPrint('Connect attempt $myGeneration superseded — aborting after GATT connect');
-        return;
-      }
-
-      // Set up connection state listener
-      await _connectionSubscription?.cancel();
-      _connectionSubscription = _device!.connectionState.listen(
-        _handleConnectionUpdate,
-        onError: (error) {
-          debugPrint('Connection state listener error: $error');
-        },
-      );
-
-      // Discover services with retry logic
-      connectingLabel.value = 'Discovering…';
-      List<BluetoothService>? services;
-      try {
-        services = await _discoverServicesWithRetry();
-      } catch (e) {
-        if (_looksLikeDeadLink(e)) {
-          debugPrint('Service discovery failed with a dead link ($e) — recovering');
-          // _recoverConnection() already re-discovers services, re-finds the
-          // notify characteristic, and re-subscribes internally — repeating
-          // discovery here would just be a redundant extra round trip.
-          await _recoverConnection(); // throws if recovery itself fails
-        } else {
-          rethrow;
-        }
-      }
-
-      if (_isStaleGeneration(myGeneration)) {
-        debugPrint('Connect attempt $myGeneration superseded — aborting after service discovery');
-        return;
-      }
-
-      if (services != null) {
-        _notifyCharacteristic = _findNotifyCharacteristic(services);
-      }
-
-      if (_notifyCharacteristic == null) {
-        debugPrint('ERROR: Could not find notify characteristic');
-        debugPrint('Looking for service: $_kServiceUuid');
-        debugPrint('Looking for characteristic: $_kCharacteristicUuid');
-
-        // Retry service discovery if characteristic not found
-        if (_connectionRetryCount < _maxRetries) {
-          _connectionRetryCount++;
-          debugPrint(
-            'Retrying service discovery (attempt $_connectionRetryCount/$_maxRetries)...',
-          );
-          // Characteristic missing usually means stale cached service handles
-          // — clear the cache so the rediscovery reads fresh ones from the pod.
-          if (Platform.isAndroid) {
-            debugPrint('Characteristic not found — clearing GATT cache before rediscovery');
-            try { await _device!.clearGattCache(); } catch (_) {}
-          }
-          await Future.delayed(Duration(seconds: _connectionRetryCount));
-          services = await _discoverServicesWithRetry();
-          _notifyCharacteristic = _findNotifyCharacteristic(services);
-        }
-
-        if (_notifyCharacteristic == null) {
-          await disconnect(bumpGeneration: false);
-          _connectionTimeoutTimer?.cancel();
-          throw Exception('Align Pod service was not found on the device.');
-        }
-      }
-
-      debugPrint(
-        'Found characteristic: ${_notifyCharacteristic!.uuid} in service: ${_notifyCharacteristic!.serviceUuid}',
-      );
-      _diag('SERVICES found');
-
-      // Request MTU 247 after service discovery per spec §5.1.
-      // iOS negotiates MTU automatically (185+), so we only call this on Android.
-      if (Platform.isAndroid) {
-        debugPrint('Requesting MTU 247 (post-discovery)...');
-        _diag('MTU request 247');
-        final mtuAskedAt = _diagWatch.elapsedMilliseconds;
-        var mtu = 23;
         try {
-          // Generous timeout: FBP abandons its OWN Dart-side wait when this
-          // fires, but the native MTU negotiation keeps running in the
-          // background regardless. A short timeout here just means we give
-          // up listening early — it does not cancel the real operation. If
-          // we then immediately issue setNotifyValue, that native call can
-          // interleave with the still-in-flight MTU negotiation and the
-          // stack drops the link (android-code 133) once the late MTU
-          // callback finally lands. Waiting longer for genuine completion
-          // is the real fix, not a short race-and-abandon.
-          mtu = await _device!.requestMtu(247, timeout: 8);
-          debugPrint('MTU negotiated: $mtu');
-          _diag('MTU result=$mtu tookMs=${_diagWatch.elapsedMilliseconds - mtuAskedAt}');
-        } catch (e) {
-          debugPrint('MTU request failed: $e');
-          _diag('MTU error tookMs=${_diagWatch.elapsedMilliseconds - mtuAskedAt}: $e');
-          mtu = 23; // fall through to the retry-then-recover logic below
-        }
-
-        if (mtu < 140) {
-          // A low MTU (status=133 on the native side) often means the
-          // peripheral rejected the request and tore down the link as a
-          // side effect, not just a slow/racy negotiation. Try a simple
-          // retry first (covers the "just needed a moment" case) — if
-          // THAT throws, decide from the actual error: a dead link means
-          // real recovery (reconnect + rediscover); anything else, treat
-          // as low MTU and let the check below fail it. We don't pre-check
-          // connectionState: FlutterBluePlus replays its last-known cached
-          // state to new listeners, which can read as "connected" for a
-          // moment even right after a real disconnect.
-          debugPrint('MTU too low ($mtu < 140) — retrying');
-          try {
-            await Future.delayed(const Duration(milliseconds: 1000));
-            mtu = await _device!.requestMtu(247, timeout: 8);
-            debugPrint('MTU negotiated (retry): $mtu');
-            _diag('MTU retry result=$mtu');
-          } catch (retryError) {
-            if (_looksLikeDeadLink(retryError)) {
-              debugPrint('MTU retry failed ($retryError) — link is actually dead, recovering');
-              _diag('MTU retry: link dead ${_diagReason()} — recovering');
-              connectingLabel.value = 'Finishing setup…';
-              await _recoverConnection(); // throws if recovery itself fails
-              try {
-                mtu = await _device!.requestMtu(247, timeout: 8);
-              } catch (e) {
-                // Let the fresh-bond retry below get a chance instead of
-                // failing the whole attempt here.
-                debugPrint('MTU after recovery failed: $e');
-                mtu = 23;
-              }
-              debugPrint('MTU negotiated (after recovery): $mtu');
-              _diag('MTU after-recovery result=$mtu');
-            } else {
-              debugPrint('MTU retry failed with a non-link error: $retryError');
-              mtu = 23;
-            }
+          await _setupLinkOnce(t, isPaired, myGeneration);
+          break;
+        } on _DeadLinkException catch (e) {
+          debugPrint('Setup try $t/$_kMaxSetupTries hit a dead link: ${e.why}');
+          if (t == _kMaxSetupTries) {
+            throw Exception(
+              e.charMissing
+                  ? 'Align Pod service was not found on the device.'
+                  : 'Could not connect to the pod. Please try again.',
+            );
           }
-        }
-
-        // Pod firmware 1.3.x can go silent on the MTU exchange (status 133
-        // after the 5s supervision timeout) — seen right after a fresh bond
-        // AND on a bonded reconnect shortly after a disconnect, sometimes on
-        // the recovery link too. Give it exactly one more calm try before
-        // failing. Kept to one retry with a pause — rapid back-to-back
-        // reconnects have crashed Android's Bluetooth process before.
-        // ponytail: fixed 3s pause; drop this block once firmware is fixed.
-        if (mtu < 140) {
-          connectingLabel.value = 'Finishing setup…';
-          _diag('CALM RETRY: pause 3s, then one bonded reconnect');
-          try {
-            await _device!.disconnect();
-          } catch (_) {}
-          await Future.delayed(const Duration(seconds: 3));
-          if (_isStaleGeneration(myGeneration)) {
-            debugPrint('Connect attempt $myGeneration superseded — aborting calm retry');
-            return;
+          // Native disconnect only — the public disconnect() would surface
+          // "disconnected" to the UI and end this connect() attempt.
+          try { await _device?.disconnect(); } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 600));
+          if (e.charMissing && Platform.isAndroid) {
+            // Characteristic missing usually means stale cached service
+            // handles — clear the cache so the next try reads fresh ones.
+            debugPrint('Characteristic not found — clearing GATT cache before next try');
+            try { await _device?.clearGattCache(); } catch (_) {}
           }
-          try {
-            await _recoverConnection();
-            mtu = await _device!.requestMtu(247, timeout: 8);
-          } catch (e) {
-            debugPrint('Calm retry failed: $e');
-            mtu = 23;
-          }
-          _diag('CALM RETRY result=$mtu');
-        }
-
-        if (mtu < 140) {
-          debugPrint('MTU still too low ($mtu < 140) after retry — disconnecting');
-          _connectionTimeoutTimer?.cancel();
-          await disconnect(bumpGeneration: false);
-          throw Exception('Bluetooth MTU too low for session sync.');
+          // Total wait since disconnect: at least the cooldown, or the plain
+          // backoff if that's longer. 600ms already elapsed above.
+          final waitMs = max(_kDeadLinkCooldownMs, 600 + 800 * t);
+          await Future.delayed(Duration(milliseconds: waitMs - 600));
         }
       }
 
-      // Subscribe before enabling notifications. Some Android BLE stacks can
-      // deliver the first cached/live value immediately after the CCCD write.
-      // If we attach the listener afterwards, the app may show "connected"
-      // while the live stream never gets its first frame.
-      await _notifySubscription?.cancel();
-      _notifySubscription = _notifyCharacteristic!.onValueReceived.listen(
-        _handleNotifyData,
-        onError: (error) {
-          debugPrint('Notification error: $error');
-          // Try to reconnect on notification error
-          if (connectionStatus.value == DeviceConnectionStatus.connected) {
-            disconnect();
-          }
-        },
-      );
-
-      // Enable notifications with retry
-      await _enableNotificationsWithRetry();
+      if (_isStaleGeneration(myGeneration)) {
+        debugPrint('Connect attempt $myGeneration superseded — aborting after link setup');
+        return;
+      }
 
       // final cachedValue = _notifyCharacteristic!.lastValue;
       // if (cachedValue.isNotEmpty) {
@@ -2195,7 +1982,6 @@ class AlignEyeDeviceService {
       _isConnecting = false;
       connectingLabel.value = 'Connecting…';
       connectionStatus.value = DeviceConnectionStatus.connected;
-      _connectionRetryCount = 0; // Reset retry count on success
 
       // Sync phone time to device immediately after every successful connection.
       sendDateTime().then((sent) {
@@ -2309,6 +2095,7 @@ class AlignEyeDeviceService {
         debugPrint('Error during disconnect: $e');
         // Continue with cleanup even if disconnect fails
       }
+      _lastLinkDownAt = DateTime.now(); // diag: sinceLastDisconnect
     }
     _dataWatchdogTimer?.cancel();
 
@@ -3422,7 +3209,6 @@ class AlignEyeDeviceService {
     );
 
     if (state == BluetoothConnectionState.connected) {
-      _connectionRetryCount = 0;
       _userInitiatedDisconnect = false;
       _saveConnectionState(lastConnectedDeviceId: _device?.remoteId.toString());
 
@@ -3442,6 +3228,7 @@ class AlignEyeDeviceService {
         }
       });
     } else if (state == BluetoothConnectionState.disconnected) {
+      _lastLinkDownAt = DateTime.now(); // diag: sinceLastDisconnect
       // Deliberately NOT touching _isConnecting here. This fires on ANY
       // native disconnect, including a transient drop a connect() attempt
       // is actively recovering from mid-flow (e.g. the discoverServices
@@ -3456,7 +3243,7 @@ class AlignEyeDeviceService {
       isWeakSignal.value = false;
 
       // If connect() is still actively running — e.g. recovering from a
-      // transient mid-flow drop via _recoverConnection() — don't surface
+      // transient mid-flow drop via a setup retry in connect() — don't surface
       // this as a public "disconnected" state. Doing so flips the UI back
       // to the scan/device-list screen for the few seconds recovery takes,
       // even though the attempt is quietly healing itself and about to
@@ -3486,57 +3273,28 @@ class AlignEyeDeviceService {
     _scanSubscription = null;
   }
 
-  /// Discover services with retry logic
-  /// Plain service-discovery retry — no reconnect logic. If the link itself
-  /// has dropped, callers should use [_recoverConnection] first (which
-  /// calls this again once reconnected), not rely on this loop alone.
-  Future<List<BluetoothService>> _discoverServicesWithRetry() async {
-    List<BluetoothService>? services;
-    Exception? lastError;
+  /// Single service discovery — no retry loop. A failure here means this
+  /// link is bad; [connect] reruns the whole setup on a fresh connection.
+  Future<List<BluetoothService>> _discoverServices() async {
+    if (_device == null) {
+      throw Exception('Device is null');
+    }
+    debugPrint('Discovering services...');
+    final services = await _device!.discoverServices(
+      subscribeToServicesChanged: false,
+    ).timeout(_serviceDiscoveryTimeout);
 
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        debugPrint('Discovering services (attempt ${attempt + 1}/3)...');
+    debugPrint('Found ${services.length} services');
 
-        if (_device == null) {
-          throw Exception('Device is null');
-        }
-
-        services = await _device!.discoverServices(
-          subscribeToServicesChanged: false,
-        ).timeout(_serviceDiscoveryTimeout);
-
-        debugPrint('Found ${services.length} services');
-
-        // Log all services and characteristics for debugging
-        for (final service in services) {
-          debugPrint('  Service: ${service.uuid}');
-          for (final char in service.characteristics) {
-            debugPrint(
-              '    Characteristic: ${char.uuid} (notify: ${char.properties.notify}, read: ${char.properties.read})',
-            );
-          }
-        }
-
-        // If we got services, break out of retry loop
-        if (services.isNotEmpty) {
-          break;
-        }
-      } catch (e) {
-        lastError = e is Exception ? e : Exception(e.toString());
-        debugPrint('Service discovery failed (attempt ${attempt + 1}/3): $e');
-
-        if (attempt < 2) {
-          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
-        }
+    // Log all services and characteristics for debugging
+    for (final service in services) {
+      debugPrint('  Service: ${service.uuid}');
+      for (final char in service.characteristics) {
+        debugPrint(
+          '    Characteristic: ${char.uuid} (notify: ${char.properties.notify}, read: ${char.properties.read})',
+        );
       }
     }
-
-    if (services == null || services.isEmpty) {
-      throw lastError ??
-          Exception('Failed to discover services after 3 attempts');
-    }
-
     return services;
   }
 
@@ -3556,124 +3314,212 @@ class AlignEyeDeviceService {
         msg.contains('gatt_error');
   }
 
-  /// Fully re-establishes a working connection after a GATT operation
-  /// (discoverServices, requestMtu, setNotifyValue) reveals the link
-  /// actually dropped. Uses the same cache-clear + 133-aware backoff
-  /// strategy as the initial connect — a bare single connect() call here
-  /// is itself prone to 133 right after a disconnect, since Android's GATT
-  /// stack hasn't always torn down yet. Re-discovers services, re-finds the
-  /// notify characteristic, and re-subscribes, since a fresh GATT
-  /// connection invalidates all the old handles. Throws if recovery itself
-  /// fails — callers should treat that as a genuine, fatal failure, not
-  /// something to silently swallow.
-  Future<void> _recoverConnection() async {
-    if (_device == null) {
-      throw Exception('Device is null — cannot recover connection');
+  /// Throws [_DeadLinkException] if FBP already knows the link dropped.
+  /// isConnected is FBP's cached state and can lag a real drop by seconds
+  /// (e.g. ~5s supervision timeout after an MTU 133) — the failing GATT op
+  /// itself stays the primary signal; this only catches drops it reported.
+  void _ensureLinkAlive(String step) {
+    if (_device?.isConnected != true) {
+      throw _DeadLinkException('link down $step');
     }
-    debugPrint('Recovering connection...');
+  }
 
-    bool connected = false;
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try { await _device!.clearGattCache(); } catch (_) {}
-      if (attempt > 0) {
-        try { await _device!.disconnect(); } catch (_) {}
+  /// One complete link setup on a fresh GATT connection: connect, service
+  /// discovery + MTU (order set by [_kMtuFirst]), notifications. No inner
+  /// retries — throws [_DeadLinkException] when this link can't be used and
+  /// [connect] decides whether to start over. Logs one `TRY n/N` diag line
+  /// per call, success or failure.
+  Future<void> _setupLinkOnce(int tryNo, bool isPaired, int myGeneration) async {
+    final tryStartMs = _diagWatch.elapsedMilliseconds;
+    final downAt = _lastLinkDownAt;
+    final sinceDown = downAt == null
+        ? 'n/a'
+        : '${DateTime.now().difference(downAt).inMilliseconds}ms';
+    const order = _kMtuFirst ? 'mtu_first' : 'discovery_first';
+    var mtuResult = 'n/a';
+    var mtuMs = -1;
+    var outcome = 'ok';
+
+    Future<void> discover() async {
+      if (tryNo == 1) connectingLabel.value = 'Discovering…';
+      final List<BluetoothService> services;
+      try {
+        services = await _discoverServices();
+      } catch (e) {
+        debugPrint('Service discovery failed: $e');
+        if (_looksLikeDeadLink(e) || e is TimeoutException) {
+          throw _DeadLinkException('discovery: $e');
+        }
+        rethrow;
       }
-      // Even the first reconnect waits: the link usually died because the
-      // pod went silent (fw 1.3.x MTU hang), and reconnecting 1s later just
-      // hits the same hang. ponytail: fixed 3s, tune with device logs.
-      await Future.delayed(Duration(milliseconds: attempt == 1 ? 2000 : 3000));
+      final char = _findNotifyCharacteristic(services);
+      if (char == null) {
+        debugPrint('ERROR: Could not find notify characteristic');
+        debugPrint('Looking for service: $_kServiceUuid');
+        debugPrint('Looking for characteristic: $_kCharacteristicUuid');
+        throw _DeadLinkException('characteristic missing', charMissing: true);
+      }
+      _notifyCharacteristic = char;
+      debugPrint(
+        'Found characteristic: ${char.uuid} in service: ${char.serviceUuid}',
+      );
+      _diag('SERVICES found');
+    }
+
+    // iOS negotiates MTU automatically (185+), so this only runs on Android.
+    Future<void> negotiateMtu() async {
+      if (!Platform.isAndroid) return;
+      debugPrint('Requesting MTU 247 ($order)...');
+      _diag('MTU request 247');
+      final askedAt = _diagWatch.elapsedMilliseconds;
+      final int mtu;
+      try {
+        // Short timeout on purpose: a pod that hasn't answered in 3s is hung
+        // on this link (status 133, then a supervision drop ~5s later). The
+        // Dart timeout doesn't cancel the native request, so the link is
+        // treated as dead and dropped — never reused for more GATT ops.
+        mtu = await _device!.requestMtu(247, timeout: 3);
+      } catch (e) {
+        mtuMs = _diagWatch.elapsedMilliseconds - askedAt;
+        mtuResult = 'err';
+        debugPrint('MTU request failed: $e');
+        _diag('MTU error tookMs=$mtuMs: $e');
+        throw _DeadLinkException('mtu error: $e');
+      }
+      mtuMs = _diagWatch.elapsedMilliseconds - askedAt;
+      mtuResult = '$mtu';
+      debugPrint('MTU negotiated: $mtu');
+      _diag('MTU result=$mtu tookMs=$mtuMs');
+      if (mtu < 140) {
+        throw _DeadLinkException('mtu too low ($mtu < 140)');
+      }
+    }
+
+    try {
+      debugPrint(
+        'Connecting to device try $tryNo/$_kMaxSetupTries '
+        '(${_device!.remoteId}, isPaired: $isPaired)...',
+      );
       try {
         await _device!.connect(
           license: License.nonprofit,
           timeout: const Duration(seconds: 10),
           autoConnect: false,
-          mtu: null,
+          mtu: null, // skip auto-512 MTU; we request 247 ourselves
         );
+        debugPrint('Connect call completed, waiting for connection state...');
+
         await _device!.connectionState
-            .where((s) => s == BluetoothConnectionState.connected)
+            .where((state) => state == BluetoothConnectionState.connected)
             .first
             .timeout(const Duration(seconds: 10));
-        connected = true;
-        break;
       } catch (e) {
-        debugPrint('Recovery reconnect attempt ${attempt + 1}/3 failed: $e');
-        if (attempt == 2) rethrow;
-        final isGatt133 = e is FlutterBluePlusException && e.code == 133;
-        if (!isGatt133) rethrow;
+        debugPrint('Connection try $tryNo failed: $e');
+        // android-code 133 = GATT stack busy / previous link not torn down
+        // yet — a fresh try after the backoff usually recovers it. Anything
+        // else is a real failure, surface it immediately.
+        if (_looksLikeDeadLink(e)) throw _DeadLinkException('connect: $e');
+        rethrow;
       }
+      debugPrint('Device connected successfully on try $tryNo');
+      _diag('GATT connected (try $tryNo)');
+
+      // The link (re-encryption on every connect, not just first pairing)
+      // isn't always settled the instant the GATT connect callback fires.
+      // Calling discoverServices() too soon can trigger an immediate
+      // disconnect (seen on both fresh pairs and plain reconnects to an
+      // already-bonded pod) — 300ms wasn't always enough in practice.
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      if (_isStaleGeneration(myGeneration)) {
+        outcome = 'superseded';
+        debugPrint('Connect attempt $myGeneration superseded — aborting after GATT connect');
+        return;
+      }
+      _ensureLinkAlive('after connect');
+
+      // Set up connection state listener
+      await _connectionSubscription?.cancel();
+      _connectionSubscription = _device!.connectionState.listen(
+        _handleConnectionUpdate,
+        onError: (error) {
+          debugPrint('Connection state listener error: $error');
+        },
+      );
+
+      if (_kMtuFirst) {
+        await negotiateMtu();
+        _ensureLinkAlive('after mtu');
+        await discover();
+        _ensureLinkAlive('after discovery');
+      } else {
+        await discover();
+        _ensureLinkAlive('after discovery');
+        await negotiateMtu();
+        _ensureLinkAlive('after mtu');
+      }
+
+      if (_isStaleGeneration(myGeneration)) {
+        outcome = 'superseded';
+        debugPrint('Connect attempt $myGeneration superseded — aborting after discovery/MTU');
+        return;
+      }
+
+      // Subscribe before enabling notifications. Some Android BLE stacks can
+      // deliver the first cached/live value immediately after the CCCD write.
+      // If we attach the listener afterwards, the app may show "connected"
+      // while the live stream never gets its first frame.
+      await _notifySubscription?.cancel();
+      _notifySubscription = _notifyCharacteristic!.onValueReceived.listen(
+        _handleNotifyData,
+        onError: (error) {
+          debugPrint('Notification error: $error');
+          // Try to reconnect on notification error
+          if (connectionStatus.value == DeviceConnectionStatus.connected) {
+            disconnect();
+          }
+        },
+      );
+
+      try {
+        await _enableNotifications();
+      } catch (e) {
+        if (_looksLikeDeadLink(e)) throw _DeadLinkException('notify: $e');
+        rethrow;
+      }
+      _ensureLinkAlive('after notify');
+    } on _DeadLinkException catch (e) {
+      outcome = 'dead(${e.why}) ${_diagReason()}';
+      rethrow;
+    } catch (e) {
+      outcome = 'error($e)';
+      rethrow;
+    } finally {
+      _diag(
+        'TRY $tryNo/$_kMaxSetupTries order=$order mtu=$mtuResult '
+        'mtuMs=$mtuMs tryMs=${_diagWatch.elapsedMilliseconds - tryStartMs} '
+        'sinceLastDisconnect=$sinceDown $outcome',
+      );
     }
-    if (!connected) {
-      throw Exception('Recovery reconnect failed after 3 attempts');
-    }
-
-    // Same settle reasoning as the initial connect — a freshly
-    // re-established link isn't instantly ready for GATT work.
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    final freshServices = await _discoverServicesWithRetry();
-    final freshChar = _findNotifyCharacteristic(freshServices);
-    if (freshChar == null) {
-      throw Exception('Notify characteristic not found after recovery');
-    }
-    _notifyCharacteristic = freshChar;
-
-    await _notifySubscription?.cancel();
-    _notifySubscription = _notifyCharacteristic!.onValueReceived.listen(
-      _handleNotifyData,
-      onError: (error) {
-        debugPrint('Notification error: $error');
-        if (connectionStatus.value == DeviceConnectionStatus.connected) {
-          disconnect();
-        }
-      },
-    );
-
-    debugPrint('Connection recovered successfully');
   }
 
-  /// Enable notifications with retry logic
-  Future<void> _enableNotificationsWithRetry() async {
+  /// Enable notifications — single attempt. A dead link here is handled by
+  /// [connect] rerunning the whole setup, not by retrying on this link.
+  Future<void> _enableNotifications() async {
     if (_notifyCharacteristic == null) {
       throw Exception('Notify characteristic is null');
     }
+    debugPrint('Enabling notifications...');
+    await _notifyCharacteristic!.setNotifyValue(true);
 
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        debugPrint('Enabling notifications (attempt ${attempt + 1}/3)...');
-        await _notifyCharacteristic!.setNotifyValue(true);
+    // Wait a bit to ensure notification is set up
+    await Future.delayed(const Duration(milliseconds: 200));
 
-        // Wait a bit to ensure notification is set up
-        await Future.delayed(const Duration(milliseconds: 200));
-
-        // Verify notification is enabled
-        if (_notifyCharacteristic!.isNotifying) {
-          debugPrint('Notifications enabled successfully');
-          return;
-        } else {
-          throw Exception('Notification enabled but isNotifying is false');
-        }
-      } catch (e) {
-        debugPrint(
-          'Failed to enable notifications (attempt ${attempt + 1}/3): $e',
-        );
-
-        if (attempt < 2) {
-          // A 133-style failure here often means the peripheral tore down
-          // the link as a side effect. Retrying setNotifyValue on a dead
-          // connection always fails instantly — use the shared, robust
-          // recovery (cache-clear + backoff, same as the initial connect)
-          // instead of a bare reconnect attempt, which is itself prone to
-          // 133 right after a disconnect.
-          if (_looksLikeDeadLink(e) && _device != null) {
-            await _recoverConnection(); // throws if recovery itself fails
-          } else {
-            await Future.delayed(Duration(milliseconds: 300 * (attempt + 1)));
-          }
-        } else {
-          rethrow;
-        }
-      }
+    // Verify notification is enabled
+    if (!_notifyCharacteristic!.isNotifying) {
+      throw Exception('Notification enabled but isNotifying is false');
     }
+    debugPrint('Notifications enabled successfully');
   }
 
   /// Verify connection is actually working
@@ -3896,7 +3742,6 @@ class AlignEyeDeviceService {
     _lastKnownProfile = '';
     _lastKnownBattery = -1;
     _lastKnownProfiles = [];
-    _connectionRetryCount = 0;
     _bondFailedAddress = null;
     _clearTherapyCache();
     currentReading.value = null;
@@ -3907,4 +3752,15 @@ class AlignEyeDeviceService {
     connectingLabel.value = 'Connecting…';
     if (!_profileListController.isClosed) _profileListController.add(const []);
   }
+}
+/// A GATT step showed this link is unusable (dead, hung on MTU, or
+/// missing the pod characteristic). [AlignEyeDeviceService.connect] drops it
+/// and reruns the full setup on a fresh connection.
+class _DeadLinkException implements Exception {
+  _DeadLinkException(this.why, {this.charMissing = false});
+  final String why;
+  final bool charMissing;
+
+  @override
+  String toString() => 'DeadLink: $why';
 }

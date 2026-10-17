@@ -46,6 +46,8 @@ class _SessionRecord {
   final int wrongDurSec;
   final bool tsSynced;
   final int? therapyPattern;
+  // Filled from the session's SEV packet(s) before persisting.
+  List<int>? therapyPatterns;
 
   String? get startTsIso => startTsEpoch > 0
       ? DateTime.fromMillisecondsSinceEpoch(
@@ -365,9 +367,10 @@ class BleSessionSync {
 
       final pk = received.pk;
       final packets = received.packets;
+      final events = received.events;
       final missing = <int>[
         for (int i = 0; i < pk; i++)
-          if (!packets.containsKey(i)) i,
+          if (!packets.containsKey(i) && !events.containsKey(i)) i,
       ];
 
       // Retry loop for NACK.
@@ -381,10 +384,9 @@ class BleSessionSync {
 
         final retx = await _collectSession(n, xfer);
         if (retx == null) return;
-        for (final entry in retx.packets.entries) {
-          packets[entry.key] = entry.value;
-        }
-        missing.removeWhere((i) => packets.containsKey(i));
+        packets.addAll(retx.packets);
+        events.addAll(retx.events);
+        missing.removeWhere((i) => packets.containsKey(i) || events.containsKey(i));
       }
 
       if (missing.isNotEmpty) {
@@ -396,6 +398,8 @@ class BleSessionSync {
         );
         return;
       }
+
+      _attachEvents(packets, events);
 
       // Persist all received sessions.
       for (final rec in packets.values) {
@@ -457,18 +461,20 @@ class BleSessionSync {
 
   // ── session packet collection ─────────────────────────────────────────────
 
-  /// Accumulates SESS_DATA packets until SESS_END.
+  /// Accumulates SESS_DATA and SEV packets until SESS_END.
   /// Returns null if the stream stalls (10 s between packets).
   Future<_CollectedSession?> _collectSession(int n, int xfer) async {
     final packets = <int, _SessionRecord>{};
+    final events = <int, Map<String, dynamic>>{};
     int pk = n; // updated when SESS_END arrives
 
     while (true) {
       final msg = await _waitFor(
             (m) {
           final t = m['t']?.toString().toUpperCase();
-          // Firmware 1.3.x sends data packets as t=SESS (docs: SESS_DATA).
-          return t == 'SESS_DATA' || t == 'SESS' || t == 'SESS_END';
+          // Firmware 1.3.x sends data packets as t=SESS (docs: SESS_DATA),
+          // and each session's event list as its own t=SEV packet.
+          return t == 'SESS_DATA' || t == 'SESS' || t == 'SEV' || t == 'SESS_END';
         },
         timeout: const Duration(seconds: 10),
       );
@@ -482,14 +488,27 @@ class BleSessionSync {
 
       if (t == 'SESS_END') {
         pk = (msg['pk'] as num?)?.toInt() ?? pk;
-        debugPrint('[SESSION] SESS_END pk=$pk received=${packets.length}');
-        return _CollectedSession(pk: pk, packets: packets);
+        debugPrint(
+          '[SESSION] SESS_END pk=$pk received=${packets.length} sev=${events.length}',
+        );
+        return _CollectedSession(pk: pk, packets: packets, events: events);
       }
 
-      // SESS_DATA
       final q = (msg['q'] as num?)?.toInt() ?? -1;
       if (q < 0) continue;
 
+      if (t == 'SEV') {
+        // {t:SEV, q, ts, ty, i, n, e:[…]} — chunk i of n of one session's
+        // events; matched to its session in _attachEvents.
+        events[q] = msg;
+        debugPrint(
+          '[SESSION] SEV q=$q ty=${msg['ty']} ts=${msg['ts']} '
+          'i=${msg['i']}/${msg['n']} e=${(msg['e'] as List?)?.length ?? 0}',
+        );
+        continue;
+      }
+
+      // SESS_DATA
       final tyRaw = msg['ty']?.toString().toLowerCase();
       final type = tyRaw == 'posture' || tyRaw == '1'
           ? 'posture'
@@ -522,6 +541,44 @@ class BleSessionSync {
         tsSynced: tsSynced,
         therapyPattern: therapyPatt,
       );
+    }
+  }
+
+  /// Attaches SEV event chunks to their session (same ts + type, else the
+  /// packet just before it). Therapy `e` = pattern indices played, in order
+  /// → therapy_patterns. Posture SEV layout isn't known yet, so it's only
+  /// logged — the session itself still saves.
+  void _attachEvents(
+    Map<int, _SessionRecord> packets,
+    Map<int, Map<String, dynamic>> events,
+  ) {
+    final sevs = events.entries.toList()
+      ..sort((a, b) {
+        final byQ = a.key.compareTo(b.key);
+        if (byQ != 0) return byQ;
+        return ((a.value['i'] as num?) ?? 0).compareTo((b.value['i'] as num?) ?? 0);
+      });
+    for (final entry in sevs) {
+      final sev = entry.value;
+      final ts = (sev['ts'] as num?)?.toInt();
+      final tyRaw = sev['ty']?.toString().toLowerCase();
+      final type = tyRaw == 'posture' || tyRaw == '1'
+          ? 'posture'
+          : (tyRaw == 'therapy' || tyRaw == '2' ? 'therapy' : null);
+      final rec = packets.values
+              .where((r) => r.startTsEpoch == ts && r.type == type)
+              .firstOrNull ??
+          packets[entry.key - 1];
+      if (rec == null) {
+        debugPrint('[SESSION] SEV q=${entry.key} has no matching session — dropped');
+        continue;
+      }
+      final e = (sev['e'] as List?) ?? const [];
+      if (rec.type == 'therapy') {
+        (rec.therapyPatterns ??= []).addAll(e.whereType<num>().map((v) => v.toInt()));
+      } else {
+        debugPrint('[SESSION] posture SEV q=${entry.key} not mapped yet: e=$e');
+      }
     }
   }
 
@@ -561,6 +618,7 @@ class BleSessionSync {
           'wrong_count': rec.type == 'posture' ? rec.wrongCount : null,
           'wrong_dur_sec': rec.type == 'posture' ? rec.wrongDurSec : null,
           'therapy_pattern': rec.type == 'therapy' ? rec.therapyPattern : null,
+          'therapy_patterns': rec.type == 'therapy' ? rec.therapyPatterns : null,
           'ts_synced': rec.tsSynced,
           'sync_status': 0,
         });
@@ -604,9 +662,14 @@ class BleSessionSync {
 }
 
 class _CollectedSession {
-  _CollectedSession({required this.pk, required this.packets});
+  _CollectedSession({
+    required this.pk,
+    required this.packets,
+    required this.events,
+  });
   final int pk;
   final Map<int, _SessionRecord> packets;
+  final Map<int, Map<String, dynamic>> events; // SEV packets by q
 }
 
 /// Derive the "good posture" % shown in Analytics from the raw BLE fields.
