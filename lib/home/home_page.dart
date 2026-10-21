@@ -120,11 +120,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final service = FlutterBackgroundService();
     if (state == AppLifecycleState.paused) {
+      _wasPaused = true;
       service.startService();
     } else if (state == AppLifecycleState.resumed) {
       service.invoke('stopService');
       SessionSyncService.instance.triggerSync();
+      // Only a real background→foreground trip; system dialogs (BT on,
+      // permissions) only go through `inactive` and must not retrigger.
+      if (_wasPaused) {
+        _wasPaused = false;
+        unawaited(_autoReconnectOnResume());
+      }
     }
+  }
+
+  bool _wasPaused = false;
+
+  /// Silent reconnect of the known pod on return to foreground — no dialogs,
+  /// so it only runs when Bluetooth is already on.
+  Future<void> _autoReconnectOnResume() async {
+    final svc = _bluetoothManager.deviceService;
+    if (svc.connectionStatus.value != DeviceConnectionStatus.disconnected ||
+        svc.isResetting.value ||
+        FlutterBluePlus.adapterStateNow != BluetoothAdapterState.on ||
+        !await svc.hasKnownBondedPod()) {
+      return;
+    }
+    try {
+      await _bluetoothManager.connect();
+    } catch (_) {}
   }
 
   void _onItemTapped(int index) {
@@ -285,6 +309,9 @@ class _HomeDashboardState extends State<HomeDashboard>
   final _liveDisplayDurationSec = ValueNotifier<int>(0);
   bool _liveDisplayHasFrame = false;
   bool _hasShownStartupConnectSheet = false;
+  // Startup BLE prompts wait on this so the two permission dialogs never
+  // overlap (Android drops the second → FBP hangs until restart).
+  Future<void> _notificationPrompt = Future.value();
 
   // Pull-to-refresh status banner state (see [PullConnectBanner]).
   PullConnectPhase _pullConnectPhase = PullConnectPhase.idle;
@@ -536,6 +563,7 @@ class _HomeDashboardState extends State<HomeDashboard>
       }
     });
 
+    _notificationPrompt = _requestNotificationPermissionOnce();
     unawaited(_handleStartupDevicePrompt());
     _lastSyncTick = _deviceManager.syncCompletedTick.value;
     _deviceManager.syncCompletedTick.addListener(_handleSessionSyncFinished);
@@ -555,7 +583,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     unawaited(_hydrateCachedStreak());
     unawaited(_hydrateXpCache());
     unawaited(_loadOfflineSessions());
-    unawaited(_requestNotificationPermissionOnce());
   }
 
   Future<void> _requestNotificationPermissionOnce() async {
@@ -1836,9 +1863,16 @@ class _HomeDashboardState extends State<HomeDashboard>
       return;
     }
 
-    final hasBondedTarget = await _deviceService.hasBondedTargetDevice();
-    if (!mounted || hasBondedTarget) {
-      return;
+    await _notificationPrompt;
+    if (!mounted || !await _ensureBleReady() || !mounted) return;
+
+    // Auto-reconnect only a pod this app connected before that the phone
+    // still has bonded. Silent on failure — the popup below covers it.
+    if (await _deviceService.hasKnownBondedPod()) {
+      try {
+        await _bluetoothManager.connect();
+      } catch (_) {}
+      if (!mounted) return;
     }
 
     if (_deviceService.connectionStatus.value !=
@@ -1846,13 +1880,16 @@ class _HomeDashboardState extends State<HomeDashboard>
       return;
     }
 
-    bool hasUnpairedNearby = false;
+    bool hasPodNearby = false;
     try {
-      hasUnpairedNearby = await _deviceService.hasUnpairedTargetDeviceNearby(
+      hasPodNearby = await _deviceService.hasTargetDeviceNearby(
         timeout: const Duration(milliseconds: 2500),
       );
     } catch (_) {}
-    if (!mounted || !hasUnpairedNearby) {
+    if (!mounted ||
+        !hasPodNearby ||
+        _deviceService.connectionStatus.value !=
+            DeviceConnectionStatus.disconnected) {
       return;
     }
 

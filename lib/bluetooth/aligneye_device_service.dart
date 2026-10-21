@@ -2304,26 +2304,55 @@ class AlignEyeDeviceService {
     }
   }
 
-  Future<bool> hasBondedTargetDevice() async {
+  Future<bool> hasBondedTargetDevice() async =>
+      (await bondedTargetDevices()).isNotEmpty;
+
+  /// Phone-bonded align pods, the saved pod first. Empty on error.
+  Future<List<BluetoothDevice>> bondedTargetDevices() async {
     try {
       final preferredId = (await _loadLastConnectedDeviceId())?.toLowerCase();
       final bondedDevices = await FlutterBluePlus.bondedDevices;
+      bool isPreferred(BluetoothDevice d) =>
+          d.remoteId.toString().toLowerCase() == preferredId;
       // A pod bonded outside the app (e.g. via Android Settings) has no
       // stored device id, so also match bonded devices by name prefix.
-      return bondedDevices.any(
-            (device) =>
-        device.remoteId.toString().toLowerCase() == preferredId ||
-            _matchesTargetDeviceName(device.platformName),
-      );
+      return bondedDevices
+          .where((d) => isPreferred(d) || _matchesTargetDeviceName(d.platformName))
+          .toList()
+        ..sort((a, b) => (isPreferred(b) ? 1 : 0) - (isPreferred(a) ? 1 : 0));
     } catch (e) {
       debugPrint('Error checking bonded target devices: $e');
+      return [];
+    }
+  }
+
+  /// True only when this app connected the pod before AND the phone still
+  /// has it bonded — the gate for auto-reconnect on app open/resume.
+  Future<bool> hasKnownBondedPod() async {
+    final id = (await _loadLastConnectedDeviceId())?.toLowerCase();
+    if (id == null) return false;
+    try {
+      final bonded = await FlutterBluePlus.bondedDevices;
+      return bonded.any((d) => d.remoteId.toString().toLowerCase() == id);
+    } catch (_) {
       return false;
     }
   }
 
+  /// Any align pod advertising nearby, paired or not.
+  Future<bool> hasTargetDeviceNearby({
+    Duration timeout = _defaultScanTimeout,
+  }) async =>
+      await _probeNearbyTargetDevice(timeout) != null;
+
   Future<bool> hasUnpairedTargetDeviceNearby({
     Duration timeout = _defaultScanTimeout,
   }) async {
+    final device = await _probeNearbyTargetDevice(timeout);
+    return device != null && !(await _isDevicePaired(device));
+  }
+
+  Future<BluetoothDevice?> _probeNearbyTargetDevice(Duration timeout) async {
     // Silent background probe: never scan without BLE permissions already
     // granted. Otherwise flutter_blue_plus fires its own permission request;
     // if that collides with another one, Android drops it ("Can request only
@@ -2333,18 +2362,14 @@ class AlignEyeDeviceService {
     if (defaultTargetPlatform == TargetPlatform.android &&
         (!await Permission.bluetoothScan.isGranted ||
             !await Permission.bluetoothConnect.isGranted)) {
-      return false;
+      return null;
     }
-    final device = await _scanForDevice(
+    return _scanForDevice(
       preferPairedDevice: false,
       prioritizePreferredDevice: false,
       requirePairedDevice: false,
       timeout: timeout,
     );
-    if (device == null) {
-      return false;
-    }
-    return !(await _isDevicePaired(device));
   }
 
   /// A stale phone-side bond entry can block re-pairing. Clears it and

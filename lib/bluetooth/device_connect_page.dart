@@ -44,6 +44,8 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
   Timer? _settleTimer;
 
   List<ScanResult> _found = [];
+  // Phone-bonded pods, shown as "MY POD" above the scan results.
+  List<BluetoothDevice> _bonded = [];
   bool _scanning = false;
   bool _scanDone = false;
   bool _connecting = false;
@@ -204,7 +206,10 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
         return;
     }
 
+    final bonded = await _btManager.deviceService.bondedTargetDevices();
+    if (!mounted || _scanning) return;
     setState(() {
+      _bonded = bonded;
       _scanning = true;
       _scanDone = false;
       _found = [];
@@ -629,60 +634,100 @@ class _DeviceConnectPageState extends State<DeviceConnectPage>
       decoration: _surfaceDecoration(radius: 24),
       child: _connecting
           ? _buildConnectingBody()
-          : _found.isEmpty
+          : _found.isEmpty && _bonded.isEmpty
           ? _buildEmptyBody()
           : _buildDeviceListBody(),
     );
   }
 
+  Widget _sectionLabel(String text) => Text(
+    text,
+    style: TextStyle(
+      color: Theme.of(
+        context,
+      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 1.4,
+    ),
+  );
+
   Widget _buildDeviceListBody() {
     final scheme = Theme.of(context).colorScheme;
+    final bondedIds = _bonded.map((d) => d.remoteId).toSet();
+    final nearby = _found
+        .where((r) => !bondedIds.contains(r.device.remoteId))
+        .toList();
+    int barsFor(DeviceIdentifier id) {
+      for (final r in _found) {
+        if (r.device.remoteId == id) return _rssiToBars(r.rssi);
+      }
+      return 0; // bonded but not heard in this scan
+    }
+
+    Widget card(BluetoothDevice d, int bars) => _DeviceCard(
+      name: d.platformName.isEmpty ? 'Align Pod' : d.platformName,
+      bars: bars,
+      onConnect: _resetting
+          ? null
+          : () => _connect(remoteId: d.remoteId.toString()),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'NEARBY PODS',
-              style: TextStyle(
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.4,
+        Expanded(
+          child: ListView(
+            children: [
+              if (_bonded.isNotEmpty) ...[
+                _sectionLabel('MY POD'),
+                const SizedBox(height: 14),
+                for (final d in _bonded) ...[
+                  card(d, barsFor(d.remoteId)),
+                  const SizedBox(height: 10),
+                ],
+                const SizedBox(height: 12),
+              ],
+              Row(
+                children: [
+                  _sectionLabel('NEARBY PODS'),
+                  const Spacer(),
+                  if (_scanning)
+                    SizedBox(
+                      width: 13,
+                      height: 13,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          AppTheme.brandPrimary.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    )
+                  else
+                    GestureDetector(
+                      onTap: _resetting ? null : _startScan,
+                      child: Icon(
+                        Icons.refresh_rounded,
+                        size: 18,
+                        color: AppTheme.brandPrimary.withValues(alpha: 0.8),
+                      ),
+                    ),
+                ],
               ),
-            ),
-            const Spacer(),
-            if (_scanning)
-              SizedBox(
-                width: 13,
-                height: 13,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    AppTheme.brandPrimary.withValues(alpha: 0.5),
+              const SizedBox(height: 14),
+              if (nearby.isEmpty)
+                Text(
+                  _scanning ? 'Looking for pods…' : 'No other pods nearby',
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 13,
                   ),
                 ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Expanded(
-          child: ListView.separated(
-            itemCount: _found.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (_, i) {
-              final r = _found[i];
-              final name = r.device.platformName.isEmpty
-                  ? 'Align Pod'
-                  : r.device.platformName;
-              return _DeviceCard(
-                name: name,
-                bars: _rssiToBars(r.rssi),
-                onConnect: _resetting
-                    ? null
-                    : () => _connect(remoteId: r.device.remoteId.toString()),
-              );
-            },
+              for (final r in nearby) ...[
+                card(r.device, _rssiToBars(r.rssi)),
+                const SizedBox(height: 10),
+              ],
+            ],
           ),
         ),
         const SizedBox(height: 12),
